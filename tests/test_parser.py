@@ -28,6 +28,7 @@ class TestPreprocessing:
             "000300 PROGRAM-ID. TEST.\n"
         )
         lines = preprocess_lines(raw)
+        assert len(lines) >= 1, "Should have at least 1 non-comment line"
         assert not any("COMMENT" in l for l in lines)
 
     def test_handles_continuation_lines(self):
@@ -48,6 +49,23 @@ class TestPreprocessing:
         raw = "AB\nCD\n"
         lines = preprocess_lines(raw)
         assert lines == []
+
+
+class TestLevel77:
+    def test_level_77_is_root(self):
+        """Level 77 items should always be root-level, not nested under 01 groups."""
+        from cobol_safe_translator.parser import parse_data_division
+        lines = [
+            "WORKING-STORAGE SECTION.",
+            "01 WS-GROUP.",
+            "   05 WS-FIELD-A PIC X(10).",
+            "77 WS-STANDALONE PIC 9(5).",
+        ]
+        _, ws = parse_data_division(lines)
+        root_names = [item.name for item in ws]
+        assert "WS-GROUP" in root_names
+        assert "WS-STANDALONE" in root_names
+        assert len(ws) == 2
 
 
 class TestPicExpansion:

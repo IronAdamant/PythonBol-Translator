@@ -35,7 +35,7 @@ def _to_python_name(cobol_name: str) -> str:
     if name and name[0].isdigit():
         name = f"f_{name}"
     # Suffix with underscore if name collides with a Python keyword
-    if keyword.iskeyword(name) or name in ("None", "True", "False"):
+    if keyword.iskeyword(name):
         name = f"{name}_"
     # Remove any remaining invalid characters
     name = re.sub(r"[^\w]", "_", name)
@@ -313,6 +313,9 @@ class PythonMapper:
         return ["print()"]
 
     def _translate_move(self, ops: list[str]) -> list[str]:
+        # MOVE CORRESPONDING requires field-by-field matching
+        if ops and ops[0].upper() == "CORRESPONDING":
+            return [f"# TODO(high): MOVE CORRESPONDING — manual field matching required"]
         if "TO" not in [o.upper() for o in ops]:
             return [f"# MOVE: could not parse operands: {' '.join(ops)}"]
         to_idx = next(i for i, o in enumerate(ops) if o.upper() == "TO")
@@ -354,14 +357,32 @@ class PythonMapper:
         return f"self.data.{_to_python_name(op)}.value"
 
     def _translate_add(self, ops: list[str]) -> list[str]:
-        # ADD x [y ...] TO z
-        if "TO" in [o.upper() for o in ops]:
-            to_idx = next(i for i, o in enumerate(ops) if o.upper() == "TO")
+        # ADD x [y ...] TO z [GIVING r]
+        upper_ops = [o.upper() for o in ops]
+        # Handle GIVING clause: result stored in GIVING target, not TO target
+        if "GIVING" in upper_ops:
+            giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
+            giving_targets = ops[giving_idx + 1:]
+            pre_giving = ops[:giving_idx]
+            # Collect all source values (before TO, or all of pre_giving if no TO)
+            if "TO" in [o.upper() for o in pre_giving]:
+                to_idx = next(i for i, o in enumerate(pre_giving) if o.upper() == "TO")
+                all_sources = pre_giving[:to_idx] + pre_giving[to_idx + 1:]
+            else:
+                all_sources = pre_giving
+            exprs = [self._resolve_operand(s) for s in all_sources]
+            sum_expr = " + ".join(exprs) if exprs else "0"
+            results: list[str] = []
+            for t in giving_targets:
+                results.append(f"self.data.{_to_python_name(t)}.set({sum_expr})")
+            return results
+        if "TO" in upper_ops:
+            to_idx = next(i for i, o in enumerate(upper_ops) if o == "TO")
             sources = ops[:to_idx]
             targets = ops[to_idx + 1:]
             if not targets:
                 return [f"# ADD: missing target operand: {' '.join(ops)}"]
-            results: list[str] = []
+            results = []
             for src in sources:
                 src_expr = self._resolve_operand(src)
                 for t in targets:
@@ -370,14 +391,32 @@ class PythonMapper:
         return [f"# ADD: could not parse operands: {' '.join(ops)}"]
 
     def _translate_subtract(self, ops: list[str]) -> list[str]:
-        # SUBTRACT x [y ...] FROM z
-        if "FROM" in [o.upper() for o in ops]:
-            from_idx = next(i for i, o in enumerate(ops) if o.upper() == "FROM")
+        # SUBTRACT x [y ...] FROM z [GIVING r]
+        upper_ops = [o.upper() for o in ops]
+        if "GIVING" in upper_ops:
+            giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
+            giving_targets = ops[giving_idx + 1:]
+            pre_giving = ops[:giving_idx]
+            if "FROM" in [o.upper() for o in pre_giving]:
+                from_idx = next(i for i, o in enumerate(pre_giving) if o.upper() == "FROM")
+                sources = pre_giving[:from_idx]
+                base = pre_giving[from_idx + 1] if from_idx + 1 < len(pre_giving) else "0"
+                base_expr = self._resolve_operand(base)
+                sub_exprs = [self._resolve_operand(s) for s in sources]
+                expr = base_expr + "".join(f" - {e}" for e in sub_exprs)
+            else:
+                expr = " - ".join(self._resolve_operand(s) for s in pre_giving) or "0"
+            results: list[str] = []
+            for t in giving_targets:
+                results.append(f"self.data.{_to_python_name(t)}.set({expr})")
+            return results
+        if "FROM" in upper_ops:
+            from_idx = next(i for i, o in enumerate(upper_ops) if o == "FROM")
             sources = ops[:from_idx]
             targets = ops[from_idx + 1:]
             if not targets:
                 return [f"# SUBTRACT: missing target operand: {' '.join(ops)}"]
-            results: list[str] = []
+            results = []
             for src in sources:
                 src_expr = self._resolve_operand(src)
                 for t in targets:
@@ -386,10 +425,19 @@ class PythonMapper:
         return [f"# SUBTRACT: could not parse operands: {' '.join(ops)}"]
 
     def _translate_multiply(self, ops: list[str]) -> list[str]:
-        # MULTIPLY x BY y
-        if "BY" in [o.upper() for o in ops]:
-            by_idx = next(i for i, o in enumerate(ops) if o.upper() == "BY")
+        # MULTIPLY x BY y [GIVING z]
+        upper_ops = [o.upper() for o in ops]
+        if "BY" in upper_ops:
+            by_idx = next(i for i, o in enumerate(upper_ops) if o == "BY")
             source = self._resolve_operand(ops[0])
+            if "GIVING" in upper_ops:
+                giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
+                multiplicand = self._resolve_operand(ops[by_idx + 1]) if by_idx + 1 < giving_idx else "1"
+                giving_targets = ops[giving_idx + 1:]
+                results: list[str] = []
+                for t in giving_targets:
+                    results.append(f"self.data.{_to_python_name(t)}.set({source} * {multiplicand})")
+                return results
             if by_idx + 1 >= len(ops):
                 return [f"# MULTIPLY: missing target operand: {' '.join(ops)}"]
             target = _to_python_name(ops[by_idx + 1])
@@ -397,10 +445,27 @@ class PythonMapper:
         return [f"# MULTIPLY: could not parse operands: {' '.join(ops)}"]
 
     def _translate_divide(self, ops: list[str]) -> list[str]:
-        # DIVIDE x INTO y
-        if "INTO" in [o.upper() for o in ops]:
-            into_idx = next(i for i, o in enumerate(ops) if o.upper() == "INTO")
+        # DIVIDE x INTO y [GIVING z] [REMAINDER r]
+        upper_ops = [o.upper() for o in ops]
+        if "INTO" in upper_ops:
+            into_idx = next(i for i, o in enumerate(upper_ops) if o == "INTO")
             divisor = self._resolve_operand(ops[0])
+            if "GIVING" in upper_ops:
+                giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
+                dividend = self._resolve_operand(ops[into_idx + 1]) if into_idx + 1 < giving_idx else "0"
+                # Filter out REMAINDER keyword and its target
+                giving_targets = []
+                i = giving_idx + 1
+                while i < len(ops):
+                    if ops[i].upper() == "REMAINDER":
+                        i += 2  # skip REMAINDER and its target
+                        continue
+                    giving_targets.append(ops[i])
+                    i += 1
+                results: list[str] = []
+                for t in giving_targets:
+                    results.append(f"self.data.{_to_python_name(t)}.set({dividend} / {divisor})")
+                return results
             if into_idx + 1 >= len(ops):
                 return [f"# DIVIDE: missing target operand: {' '.join(ops)}"]
             target = _to_python_name(ops[into_idx + 1])

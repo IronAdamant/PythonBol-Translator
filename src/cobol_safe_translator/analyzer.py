@@ -78,7 +78,7 @@ def load_config(config_path: str | Path | None) -> tuple[list[dict[str, str]], l
             print(f"Warning: pattern #{i} has invalid level '{pat['level']}' — skipping", file=sys.stderr)
             continue
         validated.append(pat)
-    return validated if validated else DEFAULT_PATTERNS, excludes
+    return validated, excludes
 
 
 def _collect_all_data_names(items: list[DataItem]) -> list[str]:

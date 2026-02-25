@@ -77,7 +77,7 @@ If the config file is malformed or unreadable, the tool warns to stderr and fall
 
 See [SUPPORTED_SUBSET.md](SUPPORTED_SUBSET.md) for the full reference.
 
-**Supported:** MOVE, ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE, DISPLAY, PERFORM (with UNTIL), IF/ELSE, EVALUATE/WHEN, OPEN, CLOSE, READ, CALL, STOP RUN, PIC clauses (9, X, A, S, V, edited), level numbers (01-49), SELECT/ASSIGN.
+**Supported:** MOVE, ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE, DISPLAY, PERFORM (with UNTIL/TIMES), IF/ELSE (emits TODO for manual translation), EVALUATE/WHEN (emits TODO), OPEN, CLOSE, READ, CALL, STOP RUN, PIC clauses (9, X, A, S, V, edited), level numbers (01-49, 77), SELECT/ASSIGN, GIVING clause on arithmetic verbs.
 
 **Not supported (MVP):** COPY/REPLACE, GO TO (emits `NotImplementedError`), WRITE (safety restriction), STRING/UNSTRING/INSPECT (emits TODO), nested programs, 66/88 level semantics (77 is parsed as 01-level), REDEFINES logic, OCCURS DEPENDING ON.
 
@@ -104,9 +104,6 @@ src/cobol_safe_translator/
 ## Documentation
 
 - [SUPPORTED_SUBSET.md](SUPPORTED_SUBSET.md) — Every supported COBOL construct with examples
-- [COMPLETE_PROJECT_DOCUMENTATION.md](COMPLETE_PROJECT_DOCUMENTATION.md) — Full file table
-- [LLM_Development.md](LLM_Development.md) — Chronological development log
-- [wiki-local/](wiki-local/index.md) — Detailed wiki (spec, glossary)
 
 ## License
 

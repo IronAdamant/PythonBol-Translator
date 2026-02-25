@@ -8,7 +8,7 @@ and fixed-point arithmetic.
 from __future__ import annotations
 
 import warnings
-from decimal import ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, Decimal, InvalidOperation
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation
 
 
 class CobolDecimal:
@@ -45,13 +45,13 @@ class CobolDecimal:
             d = abs(d)
 
         # Truncate to max integer digits
-        max_val = Decimal(10 ** self.integer_digits) - Decimal(
-            10 ** -self.decimal_digits if self.decimal_digits else 1
+        max_val = Decimal(10) ** self.integer_digits - (
+            Decimal(10) ** -self.decimal_digits if self.decimal_digits else Decimal(1)
         )
         if abs(d) > max_val:
             # COBOL truncates high-order digits
             sign = -1 if d < 0 else 1
-            modulus = Decimal(10 ** self.integer_digits)
+            modulus = Decimal(10) ** self.integer_digits
             d = sign * (abs(d) % modulus)
 
         # Quantize to decimal_digits — truncate toward zero (COBOL TRUNCATE)

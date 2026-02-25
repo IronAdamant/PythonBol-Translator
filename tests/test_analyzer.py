@@ -47,9 +47,8 @@ class TestDependencyExtraction:
     def test_finds_call_statements(self, customer_report_source):
         program = parse_cobol(customer_report_source)
         deps = extract_dependencies(program)
-        assert len(deps) >= 1
-        targets = [d.call_target for d in deps]
-        assert "AUDIT-LOG" in targets
+        assert len(deps) == 1
+        assert deps[0].call_target == "AUDIT-LOG"
 
     def test_no_deps_in_hello(self, hello_source):
         program = parse_cobol(hello_source)

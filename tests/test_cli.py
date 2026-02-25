@@ -79,6 +79,10 @@ class TestConfigOption:
         out_dir = tmp_path / "translated"
         result = main(["translate", str(hello_cob), "--output", str(out_dir), "--config", str(config)])
         assert result == 0
+        # Verify config was applied: empty patterns means no WARNING comments in output
+        py_file = out_dir / "hello_world.py"
+        source = py_file.read_text()
+        assert "# WARNING [" not in source
 
     def test_translate_with_missing_config(self, hello_cob, tmp_path, capsys):
         out_dir = tmp_path / "translated"

@@ -72,7 +72,9 @@ def preprocess_lines(raw_text: str) -> list[str]:
                     or (stripped_prev.endswith("'") and stripped_cont.startswith("'"))
                 )
                 if in_literal:
-                    merged = stripped_prev + stripped_cont
+                    # Strip the trailing quote from prev and leading quote from cont
+                    # to avoid duplicate quote characters at the join point
+                    merged = stripped_prev[:-1] + stripped_cont[1:]
                 else:
                     merged = stripped_prev + " " + stripped_cont
                 i += 1
@@ -261,7 +263,7 @@ def parse_environment(lines: list[str]) -> list[FileControl]:
 
 # --- DATA DIVISION ---
 
-_LEVEL_RE = re.compile(r"^(\d{2})\s+([\w-]+)")
+_LEVEL_RE = re.compile(r"^(\d{1,2})\s+([\w-]+)")
 _PIC_RE = re.compile(r"PIC(?:TURE)?\s+(S?[0-9XAVZBS().,+\-$CRDB]+)", re.IGNORECASE)
 _VALUE_RE = re.compile(r'VALUE\s+("[^"]*"|\'[^\']*\'|[^\s.]+)(?:\.|$|\s)', re.IGNORECASE)
 _OCCURS_RE = re.compile(r"OCCURS\s+(\d+)", re.IGNORECASE)
@@ -354,7 +356,8 @@ def _parse_data_item(line: str) -> DataItem | None:
 def _build_hierarchy(flat_items: list[DataItem]) -> list[DataItem]:
     """Build parent-child hierarchy from flat level-numbered items.
 
-    Returns only the top-level (01) items with children nested.
+    Returns only the top-level (01/77) items with children nested.
+    Level 77 items are independent (no children) and always root-level.
     """
     if not flat_items:
         return []
@@ -363,6 +366,12 @@ def _build_hierarchy(flat_items: list[DataItem]) -> list[DataItem]:
     stack: list[DataItem] = []
 
     for item in flat_items:
+        # Level 77 is always independent — never nested under another item
+        if item.level == 77:
+            stack.clear()
+            roots.append(item)
+            continue
+
         # Pop stack until we find a parent with a lower level
         while stack and stack[-1].level >= item.level:
             stack.pop()
