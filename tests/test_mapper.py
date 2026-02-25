@@ -573,3 +573,49 @@ class TestDivideGivingZeroCheck:
         source = generate_python(smap)
         ast.parse(source)
         assert "zero" in source.lower()  # TODO comment about zero division
+
+
+class TestConditionOrdering:
+    def test_not_greater_than_or_equal_to(self):
+        """NOT GREATER THAN OR EQUAL TO should translate to < (longest match first)."""
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A NOT GREATER THAN OR EQUAL TO 10."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # Find the while line — should contain < and no residual COBOL keywords
+        while_line = [l for l in source.split("\n") if "while not" in l][0]
+        assert "<" in while_line
+        assert "OR" not in while_line
+        assert "EQUAL" not in while_line
+
+    def test_not_less_than_or_equal_to(self):
+        """NOT LESS THAN OR EQUAL TO should translate to >."""
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A NOT LESS THAN OR EQUAL TO 5."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        while_line = [l for l in source.split("\n") if "while not" in l][0]
+        assert ">" in while_line
+        assert "OR" not in while_line
+
+
+class TestEmptyProgramId:
+    def test_missing_program_id_generates_valid_python(self):
+        """A COBOL file with no PROGRAM-ID should still generate valid Python."""
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       DATA DIVISION.",
+            "       WORKING-STORAGE SECTION.",
+            "       01 WS-A PIC 9(5).",
+            "       PROCEDURE DIVISION.",
+            "       MAIN-PARA.",
+            "           DISPLAY WS-A.",
+        ]
+        src = "\n".join(lines) + "\n"
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "class UnnamedProgram" in source or "class Unnamed" in source

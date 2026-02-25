@@ -94,6 +94,8 @@ class PythonMapper:
 
     def generate(self) -> str:
         """Generate the complete Python module source."""
+        if not self.program.program_id:
+            self.program.program_id = "UNNAMED"
         parts: list[str] = []
         parts.append(self._header())
         parts.append(self._imports())
@@ -677,12 +679,14 @@ class PythonMapper:
         c = cond.strip()
         # Strip COBOL IS keyword before comparisons (e.g., IS EQUAL TO -> EQUAL TO)
         c = re.sub(r'\bIS\s+', '', c)
-        # Replace compound COBOL comparisons FIRST (before simple forms)
+        # Replace compound COBOL comparisons FIRST — longest patterns first to avoid partial matches
+        c = c.replace(" NOT GREATER THAN OR EQUAL TO ", " < ")
+        c = c.replace(" NOT LESS THAN OR EQUAL TO ", " > ")
+        c = c.replace(" GREATER THAN OR EQUAL TO ", " >= ")
+        c = c.replace(" LESS THAN OR EQUAL TO ", " <= ")
         c = c.replace(" NOT GREATER THAN ", " <= ")
         c = c.replace(" NOT LESS THAN ", " >= ")
         c = c.replace(" NOT EQUAL TO ", " != ")
-        c = c.replace(" GREATER THAN OR EQUAL TO ", " >= ")
-        c = c.replace(" LESS THAN OR EQUAL TO ", " <= ")
         # Simple comparisons
         c = c.replace(" GREATER THAN ", " > ")
         c = c.replace(" LESS THAN ", " < ")
