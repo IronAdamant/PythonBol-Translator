@@ -374,14 +374,15 @@ class TestPerformThru:
 
 class TestCloseWithKeywords:
     def test_close_with_lock_filters_keywords(self):
-        src = _make_cobol(["CLOSE WS-A."])
+        src = _make_cobol(["CLOSE WS-A WITH LOCK."])
         program = parse_cobol(src)
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
         assert ".close()" in source
-        # Should not have with_ or lock references
+        # WITH and LOCK should be filtered out, not treated as file names
         assert "with_" not in source
+        assert "lock" not in source.split(".close()")[0].split("\n")[-1]
 
 
 class TestDisplayUpon:
@@ -414,10 +415,10 @@ class TestComputeParentheses:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "(" in source
-        assert ")" in source
         assert "self.data.ws_a.value" in source
         assert "self.data.ws_b.value" in source
+        # Verify parentheses are preserved in the expression itself
+        assert "( self.data.ws_b.value + 1 )" in source
 
 
 class TestCobolDecimalDivideInterop:
@@ -443,3 +444,64 @@ class TestPositiveSignLiteral:
         assert _is_numeric_literal("+3.14")
         assert _is_numeric_literal("-5")
         assert not _is_numeric_literal("WS-A")
+
+
+class TestRoundedFiltering:
+    def test_add_giving_rounded_filtered(self):
+        src = _make_cobol(["ADD WS-A TO WS-B GIVING WS-C ROUNDED."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ws_c" in source
+        assert "rounded" not in source.lower().split("# ")[0]  # not in active code
+
+
+class TestOnSizeErrorFiltering:
+    def test_add_on_size_error_filtered(self):
+        src = _make_cobol(["ADD WS-A TO WS-B ON SIZE ERROR."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # ON, SIZE, ERROR should not appear as data references
+        assert "self.data.on" not in source
+        assert "self.data.size" not in source
+        assert "self.data.error" not in source
+
+
+class TestInfinityNaN:
+    def test_infinity_coerces_to_zero(self):
+        from cobol_safe_translator.adapters import CobolDecimal
+        d = CobolDecimal(5, 2, False, 0)
+        d.set(float('inf'))
+        assert d.value == __import__("decimal").Decimal("0.00")
+
+    def test_nan_coerces_to_zero(self):
+        from cobol_safe_translator.adapters import CobolDecimal
+        d = CobolDecimal(5, 2, False, 0)
+        d.set(float('nan'))
+        assert d.value == __import__("decimal").Decimal("0.00")
+
+
+class TestReservedMethodName:
+    def test_paragraph_named_run(self):
+        """Paragraph named RUN should not overwrite the entry-point run() method."""
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. TEST-PROG.",
+            "       DATA DIVISION.",
+            "       WORKING-STORAGE SECTION.",
+            "       01 WS-A PIC 9(5).",
+            "       PROCEDURE DIVISION.",
+            "       RUN.",
+            "           DISPLAY WS-A.",
+        ]
+        src = "\n".join(lines) + "\n"
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # Should have para_run for the paragraph and run for the entry point
+        assert "def para_run(self)" in source
+        assert "def run(self)" in source

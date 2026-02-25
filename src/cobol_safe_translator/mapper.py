@@ -57,14 +57,26 @@ def _to_python_name(cobol_name: str) -> str:
     return name or "_unnamed"
 
 
+_RESERVED_METHOD_NAMES = frozenset({"run", "__init__", "data"})
+
+
 def _to_method_name(para_name: str) -> str:
     """Convert COBOL paragraph name to Python method name."""
-    return _to_python_name(para_name)
+    name = _to_python_name(para_name)
+    if name in _RESERVED_METHOD_NAMES:
+        name = f"para_{name}"
+    return name
 
 
 def _indent(text: str, level: int = 1) -> str:
     """Indent text by the given number of 4-space levels."""
     return textwrap.indent(text, "    " * level)
+
+
+# Keywords that should be filtered from arithmetic operand/target lists
+_ARITHMETIC_KEYWORDS = frozenset({
+    "ROUNDED", "ON", "SIZE", "ERROR", "NOT",
+})
 
 
 class PythonMapper:
@@ -416,12 +428,15 @@ class PythonMapper:
             sum_expr = " + ".join(exprs) if exprs else "0"
             results: list[str] = []
             for t in giving_targets:
-                results.append(f"self.data.{_to_python_name(t)}.set({sum_expr})")
+                if t.upper() in _ARITHMETIC_KEYWORDS:
+                    break
+                if t.upper() != "ROUNDED":
+                    results.append(f"self.data.{_to_python_name(t)}.set({sum_expr})")
             return results
         if "TO" in upper_ops:
             to_idx = next(i for i, o in enumerate(upper_ops) if o == "TO")
             sources = ops[:to_idx]
-            targets = ops[to_idx + 1:]
+            targets = [t for t in ops[to_idx + 1:] if t.upper() not in _ARITHMETIC_KEYWORDS]
             if not sources or not targets:
                 return [f"# ADD: missing operand(s): {' '.join(ops)}"]
             results = []
@@ -452,12 +467,15 @@ class PythonMapper:
                 expr = " - ".join(self._resolve_operand(s) for s in pre_giving) or "0"
             results: list[str] = []
             for t in giving_targets:
-                results.append(f"self.data.{_to_python_name(t)}.set({expr})")
+                if t.upper() in _ARITHMETIC_KEYWORDS:
+                    break
+                if t.upper() != "ROUNDED":
+                    results.append(f"self.data.{_to_python_name(t)}.set({expr})")
             return results
         if "FROM" in upper_ops:
             from_idx = next(i for i, o in enumerate(upper_ops) if o == "FROM")
             sources = ops[:from_idx]
-            targets = ops[from_idx + 1:]
+            targets = [t for t in ops[from_idx + 1:] if t.upper() not in _ARITHMETIC_KEYWORDS]
             if not sources or not targets:
                 return [f"# SUBTRACT: missing operand(s): {' '.join(ops)}"]
             results = []
@@ -477,10 +495,12 @@ class PythonMapper:
             if "GIVING" in upper_ops:
                 giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
                 multiplicand = self._resolve_operand(ops[by_idx + 1]) if (by_idx + 1 < len(ops) and by_idx + 1 < giving_idx) else "1"
-                giving_targets = ops[giving_idx + 1:]
                 results: list[str] = []
-                for t in giving_targets:
-                    results.append(f"self.data.{_to_python_name(t)}.set({source} * {multiplicand})")
+                for t in ops[giving_idx + 1:]:
+                    if t.upper() in _ARITHMETIC_KEYWORDS:
+                        break
+                    if t.upper() != "ROUNDED":
+                        results.append(f"self.data.{_to_python_name(t)}.set({source} * {multiplicand})")
                 return results
             if by_idx + 1 >= len(ops):
                 return [f"# MULTIPLY: missing target operand: {' '.join(ops)}"]
@@ -497,13 +517,14 @@ class PythonMapper:
             if "GIVING" in upper_ops:
                 giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
                 dividend = self._resolve_operand(ops[into_idx + 1]) if into_idx + 1 < len(ops) and into_idx + 1 < giving_idx else "0"
-                # Filter out REMAINDER keyword and its target, emit TODO
+                # Filter out REMAINDER, ROUNDED, ON SIZE ERROR keywords
                 giving_targets = []
                 has_remainder = False
                 remainder_target = None
                 i = giving_idx + 1
                 while i < len(ops):
-                    if ops[i].upper() == "REMAINDER":
+                    upper_op = ops[i].upper()
+                    if upper_op == "REMAINDER":
                         has_remainder = True
                         if i + 1 < len(ops):
                             remainder_target = ops[i + 1]
@@ -511,7 +532,10 @@ class PythonMapper:
                         else:
                             i += 1
                         continue
-                    giving_targets.append(ops[i])
+                    if upper_op in _ARITHMETIC_KEYWORDS:
+                        break
+                    if upper_op != "ROUNDED":
+                        giving_targets.append(ops[i])
                     i += 1
                 results: list[str] = []
                 for t in giving_targets:
@@ -524,17 +548,39 @@ class PythonMapper:
                 return [f"# DIVIDE: missing target operand: {' '.join(ops)}"]
             target = _to_python_name(ops[into_idx + 1])
             return [f"self.data.{target}.divide({divisor})"]
-        # DIVIDE x BY y GIVING z (dividend is x, divisor is y)
+        # DIVIDE x BY y GIVING z [REMAINDER r] (dividend is x, divisor is y)
         if "BY" in upper_ops:
             by_idx = next(i for i, o in enumerate(upper_ops) if o == "BY")
             dividend = self._resolve_operand(ops[0])
             if "GIVING" in upper_ops:
                 giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
                 divisor = self._resolve_operand(ops[by_idx + 1]) if by_idx + 1 < len(ops) and by_idx + 1 < giving_idx else "1"
-                giving_targets = ops[giving_idx + 1:]
+                # Filter REMAINDER and ROUNDED from giving targets
+                giving_targets = []
+                has_remainder = False
+                remainder_target = None
+                i = giving_idx + 1
+                while i < len(ops):
+                    upper_op = ops[i].upper()
+                    if upper_op == "REMAINDER":
+                        has_remainder = True
+                        if i + 1 < len(ops):
+                            remainder_target = ops[i + 1]
+                            i += 2
+                        else:
+                            i += 1
+                        continue
+                    if upper_op in _ARITHMETIC_KEYWORDS:
+                        break
+                    if upper_op != "ROUNDED":
+                        giving_targets.append(ops[i])
+                    i += 1
                 results = []
                 for t in giving_targets:
                     results.append(f"self.data.{_to_python_name(t)}.set({dividend} / {divisor})")
+                if has_remainder and remainder_target:
+                    results.append(f"# TODO(high): REMAINDER {remainder_target} — compute modulo manually")
+                    results.append(f"# self.data.{_to_python_name(remainder_target)}.set({dividend} % {divisor})")
                 return results
             if by_idx + 1 >= len(ops):
                 return [f"# DIVIDE BY: missing divisor: {' '.join(ops)}"]
@@ -689,13 +735,8 @@ class PythonMapper:
     def _translate_close(self, ops: list[str]) -> list[str]:
         _CLOSE_KEYWORDS = {"WITH", "LOCK", "NO", "REWIND"}
         results: list[str] = []
-        skip_next = False
         for op in ops:
-            if skip_next:
-                skip_next = False
-                continue
             if op.upper() in _CLOSE_KEYWORDS:
-                # WITH may be followed by LOCK or NO REWIND — skip the keyword chain
                 continue
             py_name = _to_python_name(op)
             results.append(f"self.{py_name}.close()")

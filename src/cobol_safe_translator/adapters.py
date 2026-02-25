@@ -38,6 +38,8 @@ class CobolDecimal:
         """Convert and truncate a value to fit the PIC specification."""
         try:
             d = Decimal(str(value))
+            if not d.is_finite():
+                d = Decimal(0)
         except InvalidOperation:
             d = Decimal(0)
 
@@ -84,19 +86,19 @@ class CobolDecimal:
             warnings.warn(f"Invalid operand {other!r}, value unchanged", stacklevel=3)
             return None
 
-    def add(self, other: int | float | str | Decimal) -> None:
+    def add(self, other: int | float | str | Decimal | CobolDecimal) -> None:
         """ADD equivalent."""
         d = self._to_decimal(other)
         if d is not None:
             self._value = self._coerce(self._value + d)
 
-    def subtract(self, other: int | float | str | Decimal) -> None:
+    def subtract(self, other: int | float | str | Decimal | CobolDecimal) -> None:
         """SUBTRACT equivalent."""
         d = self._to_decimal(other)
         if d is not None:
             self._value = self._coerce(self._value - d)
 
-    def multiply(self, other: int | float | str | Decimal) -> None:
+    def multiply(self, other: int | float | str | Decimal | CobolDecimal) -> None:
         """MULTIPLY equivalent."""
         d = self._to_decimal(other)
         if d is not None:
