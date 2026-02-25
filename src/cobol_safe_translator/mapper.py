@@ -537,8 +537,13 @@ class PythonMapper:
                 times_op = ops[times_idx - 1]
                 target = _to_method_name(ops[0])
             elif times_idx == 1:
-                # PERFORM count TIMES (inline, no paragraph)
+                # PERFORM count TIMES (inline block, no paragraph name)
                 times_op = ops[0]
+                times_val = times_op if times_op.isdigit() else f"int(self.data.{_to_python_name(times_op)}.value)"
+                return [
+                    f"for _ in range({times_val}):",
+                    f"    pass  # TODO(high): inline PERFORM TIMES — statements should be moved here",
+                ]
             else:
                 return [f"# PERFORM TIMES: invalid syntax — {' '.join(ops)}"]
             times_val = times_op if times_op.isdigit() else f"int(self.data.{_to_python_name(times_op)}.value)"
