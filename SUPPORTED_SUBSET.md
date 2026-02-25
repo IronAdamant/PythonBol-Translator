@@ -19,7 +19,7 @@ This document lists every COBOL construct handled by cobol-safe-translator, with
 |-------|---------|-------|
 | 01-49 | Supported | Full hierarchy building |
 | 66 | Not supported | RENAMES ignored |
-| 77 | Parsed | Treated as 01-level |
+| 77 | Parsed | Root-level standalone item (never nested under groups) |
 | 88 | Skipped | Condition names not translated |
 
 ### PIC Clauses
@@ -40,7 +40,7 @@ This document lists every COBOL construct handled by cobol-safe-translator, with
 | Clause | Support | Notes |
 |--------|---------|-------|
 | VALUE | Supported | Initial value extracted |
-| OCCURS | Supported | Count extracted; DEPENDING ON not supported |
+| OCCURS | Partial | Fixed count extracted; DEPENDING ON clauses ignored |
 | REDEFINES | Parsed | Name stored but no logic applied |
 
 ## Procedure Division
@@ -50,10 +50,10 @@ This document lists every COBOL construct handled by cobol-safe-translator, with
 | COBOL Verb | Python Translation | Notes |
 |------------|-------------------|-------|
 | `MOVE x TO y` | `self.data.y.set(x)` | Literal and field-to-field |
-| `ADD x TO y` | `self.data.y.add(x)` | |
-| `SUBTRACT x FROM y` | `self.data.y.subtract(x)` | |
-| `MULTIPLY x BY y` | `self.data.y.multiply(x)` | |
-| `DIVIDE x INTO y` | `self.data.y.divide(x)` | |
+| `ADD x TO y` | `self.data.y.add(x)` | Supports GIVING clause |
+| `SUBTRACT x FROM y` | `self.data.y.subtract(x)` | Supports GIVING clause |
+| `MULTIPLY x BY y` | `self.data.y.multiply(x)` | Supports GIVING clause |
+| `DIVIDE x INTO y` | `self.data.y.divide(x)` | Supports GIVING clause |
 | `COMPUTE y = expr` | `self.data.y.set(expr)` | Expression needs manual review |
 | `DISPLAY items` | `print(items)` | |
 | `PERFORM para` | `self.para()` | Simple perform |

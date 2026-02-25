@@ -71,10 +71,12 @@ def preprocess_lines(raw_text: str) -> list[str]:
                     (stripped_prev.endswith('"') and stripped_cont.startswith('"'))
                     or (stripped_prev.endswith("'") and stripped_cont.startswith("'"))
                 )
-                if in_literal:
+                if in_literal and len(stripped_prev) > 1 and len(stripped_cont) > 1:
                     # Strip the trailing quote from prev and leading quote from cont
                     # to avoid duplicate quote characters at the join point
                     merged = stripped_prev[:-1] + stripped_cont[1:]
+                elif in_literal:
+                    merged = stripped_prev + stripped_cont
                 else:
                     merged = stripped_prev + " " + stripped_cont
                 i += 1
@@ -236,8 +238,10 @@ def parse_identification(lines: list[str]) -> tuple[str, str]:
 def _extract_value(line: str, keyword: str) -> str:
     """Extract the value after 'KEYWORD. value.' or 'KEYWORD. value'."""
     # Remove keyword, then strip dots and whitespace
-    idx = line.upper().index(keyword.upper()) + len(keyword)
-    rest = line[idx:].strip().lstrip(".").strip().rstrip(".")
+    idx = line.upper().find(keyword.upper())
+    if idx == -1:
+        return ""
+    rest = line[idx + len(keyword):].strip().lstrip(".").strip().rstrip(".")
     return rest.strip()
 
 

@@ -303,7 +303,7 @@ class PythonMapper:
             if (op.startswith('"') and op.endswith('"')) or (op.startswith("'") and op.endswith("'")):
                 # Quoted string literal — keep as-is
                 parts.append(op)
-            elif op.isdigit() or (op.startswith("-") and op[1:].isdigit()):
+            elif op.isdigit() or (op.startswith("-") and len(op) > 1 and op[1:].isdigit()):
                 parts.append(op)
             else:
                 # Data name reference
@@ -452,13 +452,13 @@ class PythonMapper:
             divisor = self._resolve_operand(ops[0])
             if "GIVING" in upper_ops:
                 giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
-                dividend = self._resolve_operand(ops[into_idx + 1]) if into_idx + 1 < giving_idx else "0"
+                dividend = self._resolve_operand(ops[into_idx + 1]) if into_idx + 1 < len(ops) and into_idx + 1 < giving_idx else "0"
                 # Filter out REMAINDER keyword and its target
                 giving_targets = []
                 i = giving_idx + 1
                 while i < len(ops):
                     if ops[i].upper() == "REMAINDER":
-                        i += 2  # skip REMAINDER and its target
+                        i += 2 if i + 1 < len(ops) else 1  # skip REMAINDER and its target safely
                         continue
                     giving_targets.append(ops[i])
                     i += 1
@@ -505,8 +505,15 @@ class PythonMapper:
         # PERFORM ... TIMES
         if "TIMES" in [o.upper() for o in ops]:
             times_idx = next(i for i, o in enumerate(ops) if o.upper() == "TIMES")
-            times_op = ops[times_idx - 1] if times_idx >= 2 else ops[0]
-            target = _to_method_name(ops[0]) if times_idx >= 2 else target
+            if times_idx >= 2:
+                # PERFORM para-name count TIMES
+                times_op = ops[times_idx - 1]
+                target = _to_method_name(ops[0])
+            elif times_idx == 1:
+                # PERFORM count TIMES (inline, no paragraph)
+                times_op = ops[0]
+            else:
+                return [f"# PERFORM TIMES: invalid syntax — {' '.join(ops)}"]
             times_val = times_op if times_op.isdigit() else f"int(self.data.{_to_python_name(times_op)}.value)"
             return [
                 f"for _ in range({times_val}):",
@@ -532,7 +539,7 @@ class PythonMapper:
         for t in tokens:
             if t in (">", "<", "==", "!=", ">=", "<=", "AND", "OR", "NOT"):
                 result.append(t.lower() if t in ("AND", "OR", "NOT") else t)
-            elif t.isdigit() or (t.startswith("-") and t[1:].isdigit()):
+            elif t.isdigit() or (t.startswith("-") and len(t) > 1 and t[1:].isdigit()):
                 result.append(t)
             elif t.startswith('"') or t.startswith("'"):
                 result.append(t)

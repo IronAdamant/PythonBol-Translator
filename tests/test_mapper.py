@@ -38,7 +38,7 @@ class TestPythonGeneration:
         program = parse_cobol(hello_source)
         smap = analyze(program)
         source = generate_python(smap)
-        assert '__name__' in source
+        assert 'if __name__ == "__main__":' in source
 
     def test_sensitivity_warnings_in_output(self, customer_report_source):
         program = parse_cobol(customer_report_source)
