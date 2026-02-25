@@ -77,6 +77,11 @@ def load_config(config_path: str | Path | None) -> tuple[list[dict[str, str]], l
         if pat["level"] not in valid_levels:
             print(f"Warning: pattern #{i} has invalid level '{pat['level']}' — skipping", file=sys.stderr)
             continue
+        try:
+            re.compile(pat["pattern"], re.IGNORECASE)
+        except re.error as e:
+            print(f"Warning: pattern #{i} has invalid regex '{pat['pattern']}': {e} — skipping", file=sys.stderr)
+            continue
         validated.append(pat)
     return validated, excludes
 

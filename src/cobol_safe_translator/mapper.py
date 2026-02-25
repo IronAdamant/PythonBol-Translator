@@ -300,7 +300,7 @@ class PythonMapper:
     def _translate_display(self, stmt: CobolStatement) -> list[str]:
         parts: list[str] = []
         for op in stmt.operands:
-            if (op.startswith('"') and op.endswith('"')) or (op.startswith("'") and op.endswith("'")):
+            if (len(op) >= 2 and ((op.startswith('"') and op.endswith('"')) or (op.startswith("'") and op.endswith("'")))):
                 # Quoted string literal — keep as-is
                 parts.append(op)
             elif op.isdigit() or (op.startswith("-") and len(op) > 1 and op[1:].isdigit()):
@@ -380,8 +380,8 @@ class PythonMapper:
             to_idx = next(i for i, o in enumerate(upper_ops) if o == "TO")
             sources = ops[:to_idx]
             targets = ops[to_idx + 1:]
-            if not targets:
-                return [f"# ADD: missing target operand: {' '.join(ops)}"]
+            if not sources or not targets:
+                return [f"# ADD: missing operand(s): {' '.join(ops)}"]
             results = []
             for src in sources:
                 src_expr = self._resolve_operand(src)
@@ -414,8 +414,8 @@ class PythonMapper:
             from_idx = next(i for i, o in enumerate(upper_ops) if o == "FROM")
             sources = ops[:from_idx]
             targets = ops[from_idx + 1:]
-            if not targets:
-                return [f"# SUBTRACT: missing target operand: {' '.join(ops)}"]
+            if not sources or not targets:
+                return [f"# SUBTRACT: missing operand(s): {' '.join(ops)}"]
             results = []
             for src in sources:
                 src_expr = self._resolve_operand(src)
@@ -453,18 +453,28 @@ class PythonMapper:
             if "GIVING" in upper_ops:
                 giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
                 dividend = self._resolve_operand(ops[into_idx + 1]) if into_idx + 1 < len(ops) and into_idx + 1 < giving_idx else "0"
-                # Filter out REMAINDER keyword and its target
+                # Filter out REMAINDER keyword and its target, emit TODO
                 giving_targets = []
+                has_remainder = False
+                remainder_target = None
                 i = giving_idx + 1
                 while i < len(ops):
                     if ops[i].upper() == "REMAINDER":
-                        i += 2 if i + 1 < len(ops) else 1  # skip REMAINDER and its target safely
+                        has_remainder = True
+                        if i + 1 < len(ops):
+                            remainder_target = ops[i + 1]
+                            i += 2
+                        else:
+                            i += 1
                         continue
                     giving_targets.append(ops[i])
                     i += 1
                 results: list[str] = []
                 for t in giving_targets:
                     results.append(f"self.data.{_to_python_name(t)}.set({dividend} / {divisor})")
+                if has_remainder and remainder_target:
+                    results.append(f"# TODO(high): REMAINDER {remainder_target} — compute modulo manually")
+                    results.append(f"# self.data.{_to_python_name(remainder_target)}.set({dividend} % {divisor})")
                 return results
             if into_idx + 1 >= len(ops):
                 return [f"# DIVIDE: missing target operand: {' '.join(ops)}"]
@@ -531,8 +541,6 @@ class PythonMapper:
         c = c.replace(" EQUAL TO ", " == ")
         c = c.replace(" NOT = ", " != ")
         c = c.replace(" = ", " == ")
-        c = c.replace(" > ", " > ")
-        c = c.replace(" < ", " < ")
         # Convert data names
         tokens = c.split()
         result: list[str] = []

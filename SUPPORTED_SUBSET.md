@@ -53,7 +53,7 @@ This document lists every COBOL construct handled by cobol-safe-translator, with
 | `ADD x TO y` | `self.data.y.add(x)` | Supports GIVING clause |
 | `SUBTRACT x FROM y` | `self.data.y.subtract(x)` | Supports GIVING clause |
 | `MULTIPLY x BY y` | `self.data.y.multiply(x)` | Supports GIVING clause |
-| `DIVIDE x INTO y` | `self.data.y.divide(x)` | Supports GIVING clause |
+| `DIVIDE x INTO y` | `self.data.y.divide(x)` | Supports GIVING; REMAINDER emits TODO |
 | `COMPUTE y = expr` | `self.data.y.set(expr)` | Expression needs manual review |
 | `DISPLAY items` | `print(items)` | |
 | `PERFORM para` | `self.para()` | Simple perform |
