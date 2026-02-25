@@ -79,7 +79,7 @@ See [SUPPORTED_SUBSET.md](SUPPORTED_SUBSET.md) for the full reference.
 
 **Supported:** MOVE, ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE, DISPLAY, PERFORM (with UNTIL), IF/ELSE, EVALUATE/WHEN, OPEN, CLOSE, READ, CALL, STOP RUN, PIC clauses (9, X, A, S, V, edited), level numbers (01-49), SELECT/ASSIGN.
 
-**Not supported (MVP):** COPY/REPLACE, GO TO (emits `NotImplementedError`), WRITE (safety restriction), STRING/UNSTRING/INSPECT (emits TODO), nested programs, 66/77/88 level semantics, REDEFINES logic, OCCURS DEPENDING ON.
+**Not supported (MVP):** COPY/REPLACE, GO TO (emits `NotImplementedError`), WRITE (safety restriction), STRING/UNSTRING/INSPECT (emits TODO), nested programs, 66/88 level semantics (77 is parsed as 01-level), REDEFINES logic, OCCURS DEPENDING ON.
 
 ## Running tests
 

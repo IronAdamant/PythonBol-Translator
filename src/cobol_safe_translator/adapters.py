@@ -7,6 +7,7 @@ and fixed-point arithmetic.
 
 from __future__ import annotations
 
+import warnings
 from decimal import ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, Decimal, InvalidOperation
 
 
@@ -73,23 +74,42 @@ class CobolDecimal:
         """MOVE equivalent — set the value with COBOL truncation rules."""
         self._value = self._coerce(value)
 
+    def _to_decimal(self, other: int | float | str | Decimal) -> Decimal | None:
+        """Convert operand to Decimal, returning None on invalid input."""
+        try:
+            return Decimal(str(other))
+        except InvalidOperation:
+            warnings.warn(f"Invalid operand {other!r}, value unchanged", stacklevel=3)
+            return None
+
     def add(self, other: int | float | str | Decimal) -> None:
         """ADD equivalent."""
-        self._value = self._coerce(self._value + Decimal(str(other)))
+        d = self._to_decimal(other)
+        if d is not None:
+            self._value = self._coerce(self._value + d)
 
     def subtract(self, other: int | float | str | Decimal) -> None:
         """SUBTRACT equivalent."""
-        self._value = self._coerce(self._value - Decimal(str(other)))
+        d = self._to_decimal(other)
+        if d is not None:
+            self._value = self._coerce(self._value - d)
 
     def multiply(self, other: int | float | str | Decimal) -> None:
         """MULTIPLY equivalent."""
-        self._value = self._coerce(self._value * Decimal(str(other)))
+        d = self._to_decimal(other)
+        if d is not None:
+            self._value = self._coerce(self._value * d)
 
     def divide(self, other: int | float | str | Decimal) -> None:
         """DIVIDE equivalent."""
-        divisor = Decimal(str(other))
+        try:
+            divisor = Decimal(str(other))
+        except InvalidOperation:
+            warnings.warn("DIVIDE: invalid operand, value unchanged", stacklevel=2)
+            return
         if divisor == 0:
-            return  # COBOL typically doesn't crash on divide by zero
+            warnings.warn("DIVIDE BY ZERO: value unchanged (COBOL EC-SIZE-ZERO-DIVIDE)", stacklevel=2)
+            return
         self._value = self._coerce(self._value / divisor)
 
     def __repr__(self) -> str:
@@ -115,6 +135,20 @@ class CobolDecimal:
             return self._value > other._value
         if isinstance(other, (int, float, Decimal)):
             return self._value > Decimal(str(other))
+        return NotImplemented
+
+    def __le__(self, other: object) -> bool:
+        if isinstance(other, CobolDecimal):
+            return self._value <= other._value
+        if isinstance(other, (int, float, Decimal)):
+            return self._value <= Decimal(str(other))
+        return NotImplemented
+
+    def __ge__(self, other: object) -> bool:
+        if isinstance(other, CobolDecimal):
+            return self._value >= other._value
+        if isinstance(other, (int, float, Decimal)):
+            return self._value >= Decimal(str(other))
         return NotImplemented
 
     def __float__(self) -> float:
@@ -182,7 +216,9 @@ class FileAdapter:
 
     def open_input(self) -> None:
         """OPEN INPUT equivalent."""
-        self._file = open(self.path, "r")
+        if self._file is not None:
+            self.close()
+        self._file = open(self.path, "r", encoding="utf-8")
         self._eof = False
 
     def read(self) -> str | None:

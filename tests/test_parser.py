@@ -69,7 +69,7 @@ class TestPicExpansion:
 
     def test_edited(self):
         result = expand_pic("-ZZZ,ZZZ,ZZ9.99")
-        assert "Z" in result
+        assert result == "-ZZZ,ZZZ,ZZ9.99"
 
 
 class TestPicClassification:
@@ -122,17 +122,18 @@ class TestParsePic:
 
 
 class TestDivisionSplitting:
-    def test_all_divisions(self, hello_source):
-        lines = preprocess_lines(hello_source)
-        divs = split_divisions(lines)
-        assert "IDENTIFICATION" in divs
-        assert "DATA" in divs
-        assert "PROCEDURE" in divs
-
-    def test_identification_has_content(self, hello_source):
+    def test_all_divisions_have_content(self, hello_source):
         lines = preprocess_lines(hello_source)
         divs = split_divisions(lines)
         assert len(divs["IDENTIFICATION"]) > 0
+        assert len(divs["DATA"]) > 0
+        assert len(divs["PROCEDURE"]) > 0
+
+    def test_identification_contains_program_id(self, hello_source):
+        lines = preprocess_lines(hello_source)
+        divs = split_divisions(lines)
+        combined = " ".join(divs["IDENTIFICATION"])
+        assert "HELLO-WORLD" in combined
 
 
 class TestFullParse:
@@ -148,7 +149,7 @@ class TestFullParse:
         assert len(program.file_controls) == 2
         assert len(program.file_section) > 0
         assert len(program.working_storage) > 0
-        assert len(program.paragraphs) >= 5
+        assert len(program.paragraphs) == 9
 
     def test_parse_file(self, hello_cob):
         program = parse_cobol_file(hello_cob)

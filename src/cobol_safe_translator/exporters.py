@@ -10,6 +10,7 @@ import re
 from datetime import datetime
 
 from .models import (
+    DataItem,
     Dependency,
     ProgramStats,
     SensitivityFlag,
@@ -24,6 +25,11 @@ class MarkdownExporter:
     def __init__(self, software_map: SoftwareMap) -> None:
         self.smap = software_map
         self.program = software_map.program
+
+    @staticmethod
+    def _esc(text: str) -> str:
+        """Escape pipe characters for Markdown table cells."""
+        return text.replace("|", "\\|")
 
     def export(self) -> str:
         """Generate the full Markdown report."""
@@ -97,7 +103,7 @@ class MarkdownExporter:
 
         return "\n".join(lines)
 
-    def _format_data_tree(self, item, depth: int) -> list[str]:
+    def _format_data_tree(self, item: DataItem, depth: int) -> list[str]:
         """Format a data item tree as indented list."""
         indent = "  " * depth
         pic_str = f" `{item.pic.raw}`" if item.pic else ""
@@ -137,12 +143,12 @@ class MarkdownExporter:
             if not flags:
                 continue
 
-            emoji = {"high": "!!!", "medium": "!!", "low": "!"}[level.value]
-            lines.append(f"### {level.value.upper()} Sensitivity ({emoji})\n")
+            badge = {"high": "!!!", "medium": "!!", "low": "!"}[level.value]
+            lines.append(f"### {level.value.upper()} Sensitivity ({badge})\n")
             lines.append("| Data Name | Pattern | Reason |")
             lines.append("|-----------|---------|--------|")
             for f in flags:
-                lines.append(f"| `{f.data_name}` | `{f.pattern_matched}` | {f.reason} |")
+                lines.append(f"| `{self._esc(f.data_name)}` | `{self._esc(f.pattern_matched)}` | {self._esc(f.reason)} |")
             lines.append("")
 
         return "\n".join(lines)
@@ -179,7 +185,7 @@ class MarkdownExporter:
         lines.append("| Source Paragraph | Target Program |")
         lines.append("|-----------------|----------------|")
         for dep in self.smap.dependencies:
-            lines.append(f"| `{dep.source_paragraph}` | `{dep.call_target}` |")
+            lines.append(f"| `{self._esc(dep.source_paragraph)}` | `{self._esc(dep.call_target)}` |")
         lines.append("")
 
         return "\n".join(lines)
@@ -256,7 +262,7 @@ class JsonExporter:
                 {
                     "name": p.name,
                     "statement_count": len(p.statements),
-                    "verbs": list({s.verb for s in p.statements}),
+                    "verbs": sorted({s.verb for s in p.statements}),
                 }
                 for p in self.smap.program.paragraphs
             ],

@@ -1,8 +1,9 @@
 """Tests for the runtime adapter classes."""
 
-import tempfile
 from decimal import Decimal
 from pathlib import Path
+
+import pytest
 
 from cobol_safe_translator.adapters import CobolDecimal, CobolString, FileAdapter
 
@@ -55,7 +56,7 @@ class TestCobolDecimal:
 
     def test_unsigned_rejects_negative(self):
         d = CobolDecimal(5, 2, signed=False, initial=-10)
-        assert d.value >= 0
+        assert d.value == Decimal("10.00")
 
     def test_signed_allows_negative(self):
         d = CobolDecimal(5, 2, signed=True, initial=-10)
@@ -74,6 +75,12 @@ class TestCobolDecimal:
         assert b > a
         assert a < 15
         assert b > 15
+        assert a <= 10
+        assert a <= 15
+        assert b >= 20
+        assert b >= 15
+        assert a <= b
+        assert b >= a
 
     def test_repr(self):
         d = CobolDecimal(5, 2, signed=True, initial=10)
@@ -154,8 +161,5 @@ class TestFileAdapter:
 
     def test_read_before_open_raises(self):
         fa = FileAdapter("dummy.dat")
-        try:
+        with pytest.raises(RuntimeError, match="File not opened"):
             fa.read()
-            assert False, "Should have raised RuntimeError"
-        except RuntimeError:
-            pass

@@ -24,24 +24,24 @@ from .parser import count_raw_lines
 # Default sensitive patterns (used when no config file is provided)
 # Ordered by severity: HIGH first, then MEDIUM, then LOW.
 DEFAULT_PATTERNS: list[dict[str, str]] = [
-    {"pattern": "SSN", "level": "high", "reason": "Social Security Number"},
-    {"pattern": "SOCIAL-SEC", "level": "high", "reason": "Social Security Number"},
-    {"pattern": "TAX-ID", "level": "high", "reason": "Tax Identifier"},
-    {"pattern": "DOB", "level": "high", "reason": "Date of Birth"},
-    {"pattern": "BIRTH", "level": "high", "reason": "Date of Birth"},
-    {"pattern": "PASSWORD", "level": "high", "reason": "Password/credential"},
-    {"pattern": "PIN", "level": "high", "reason": "PIN code"},
-    {"pattern": "ACCOUNT", "level": "medium", "reason": "Account number"},
-    {"pattern": "BALANCE", "level": "medium", "reason": "Financial balance"},
-    {"pattern": "SALARY", "level": "medium", "reason": "Salary data"},
-    {"pattern": "WAGE", "level": "medium", "reason": "Wage data"},
-    {"pattern": "CREDIT", "level": "medium", "reason": "Credit information"},
-    {"pattern": "PAYMENT", "level": "medium", "reason": "Payment data"},
-    {"pattern": "CUST-", "level": "low", "reason": "Customer-prefixed field"},
-    {"pattern": "EMP-", "level": "low", "reason": "Employee-prefixed field"},
-    {"pattern": "ADDR", "level": "low", "reason": "Address data"},
-    {"pattern": "PHONE", "level": "low", "reason": "Phone number"},
-    {"pattern": "EMAIL", "level": "low", "reason": "Email address"},
+    {"pattern": r"(^|-)SSN(-|$)", "level": "high", "reason": "Social Security Number"},
+    {"pattern": r"(^|-)SOCIAL-SEC", "level": "high", "reason": "Social Security Number"},
+    {"pattern": r"(^|-)TAX-ID(-|$)", "level": "high", "reason": "Tax Identifier"},
+    {"pattern": r"(^|-)DOB(-|$)", "level": "high", "reason": "Date of Birth"},
+    {"pattern": r"(^|-)BIRTH(-|$)", "level": "high", "reason": "Date of Birth"},
+    {"pattern": r"PASSWORD", "level": "high", "reason": "Password/credential"},
+    {"pattern": r"(^|-)PIN(-|$)", "level": "high", "reason": "PIN code"},
+    {"pattern": r"ACCOUNT", "level": "medium", "reason": "Account number"},
+    {"pattern": r"BALANCE", "level": "medium", "reason": "Financial balance"},
+    {"pattern": r"SALARY", "level": "medium", "reason": "Salary data"},
+    {"pattern": r"(^|-)WAGE(-|$)", "level": "medium", "reason": "Wage data"},
+    {"pattern": r"CREDIT", "level": "medium", "reason": "Credit information"},
+    {"pattern": r"PAYMENT", "level": "medium", "reason": "Payment data"},
+    {"pattern": r"^CUST-", "level": "low", "reason": "Customer-prefixed field"},
+    {"pattern": r"^EMP-", "level": "low", "reason": "Employee-prefixed field"},
+    {"pattern": r"ADDR", "level": "low", "reason": "Address data"},
+    {"pattern": r"PHONE", "level": "low", "reason": "Phone number"},
+    {"pattern": r"EMAIL", "level": "low", "reason": "Email address"},
 ]
 
 DEFAULT_EXCLUDES: list[str] = ["WS-EOF", "WS-ERROR", "FILLER"]
@@ -54,6 +54,7 @@ def load_config(config_path: str | Path | None) -> tuple[list[dict[str, str]], l
 
     p = Path(config_path)
     if not p.exists():
+        print(f"Warning: config file not found: {p} — using defaults", file=sys.stderr)
         return DEFAULT_PATTERNS, DEFAULT_EXCLUDES
 
     try:
@@ -64,7 +65,20 @@ def load_config(config_path: str | Path | None) -> tuple[list[dict[str, str]], l
 
     patterns = data.get("sensitive_patterns", DEFAULT_PATTERNS)
     excludes = data.get("exclude_names", DEFAULT_EXCLUDES)
-    return patterns, excludes
+    # Validate pattern entries have required keys
+    required_keys = {"pattern", "level", "reason"}
+    valid_levels = {"high", "medium", "low"}
+    validated: list[dict[str, str]] = []
+    for i, pat in enumerate(patterns):
+        missing = required_keys - set(pat.keys())
+        if missing:
+            print(f"Warning: pattern #{i} missing keys {missing} — skipping", file=sys.stderr)
+            continue
+        if pat["level"] not in valid_levels:
+            print(f"Warning: pattern #{i} has invalid level '{pat['level']}' — skipping", file=sys.stderr)
+            continue
+        validated.append(pat)
+    return validated if validated else DEFAULT_PATTERNS, excludes
 
 
 def _collect_all_data_names(items: list[DataItem]) -> list[str]:

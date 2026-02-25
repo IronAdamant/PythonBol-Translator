@@ -23,7 +23,7 @@ class TestSensitivityDetection:
         program = parse_cobol(customer_report_source)
         flags = detect_sensitivities(program, DEFAULT_PATTERNS, DEFAULT_EXCLUDES)
         bal_flags = [f for f in flags if "BALANCE" in f.data_name]
-        assert len(bal_flags) >= 1
+        assert len(bal_flags) == 2  # CUST-BALANCE and WS-TOTAL-BALANCE
 
     def test_excludes_configured_names(self, customer_report_source):
         program = parse_cobol(customer_report_source)
@@ -40,7 +40,7 @@ class TestSensitivityDetection:
         program = parse_cobol(customer_report_source)
         flags = detect_sensitivities(program, DEFAULT_PATTERNS, DEFAULT_EXCLUDES)
         credit_flags = [f for f in flags if "CREDIT" in f.data_name]
-        assert len(credit_flags) >= 1
+        assert len(credit_flags) == 2  # CUST-CREDIT-LIMIT and WS-TOTAL-CREDIT
 
 
 class TestDependencyExtraction:

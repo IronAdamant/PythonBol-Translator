@@ -124,6 +124,20 @@ class PythonMapper:
         lines.append("")
         return "\n".join(lines)
 
+    @staticmethod
+    def _translate_figurative(value: str, numeric: bool = True) -> str:
+        """Translate COBOL figurative constants to Python values."""
+        upper = value.upper().strip()
+        if upper in ("ZEROS", "ZEROES", "ZERO"):
+            return "0"
+        if upper in ("SPACES", "SPACE"):
+            return "" if numeric else " "
+        if upper in ("HIGH-VALUES", "HIGH-VALUE"):
+            return "0" if numeric else "\\xff"
+        if upper in ("LOW-VALUES", "LOW-VALUE"):
+            return "0" if numeric else "\\x00"
+        return value
+
     def _data_item_fields(self, item: DataItem, indent: int = 1) -> list[str]:
         """Generate dataclass fields for a data item and its children."""
         lines: list[str] = []
@@ -148,13 +162,13 @@ class PythonMapper:
                 dec = item.pic.decimals
                 int_digits = item.pic.size - dec
                 signed = "True" if item.pic.signed else "False"
-                init = item.value if item.value else "0"
+                init = self._translate_figurative(item.value, numeric=True) if item.value else "0"
                 lines.append(
                     f"{prefix}{py_name}: CobolDecimal = field("
                     f"default_factory=lambda: CobolDecimal({int_digits}, {dec}, {signed}, {init!r}))"
                 )
             else:
-                init = item.value if item.value else ""
+                init = self._translate_figurative(item.value, numeric=False) if item.value else ""
                 lines.append(
                     f"{prefix}{py_name}: CobolString = field("
                     f"default_factory=lambda: CobolString({item.pic.size}, {init!r}))"
@@ -193,6 +207,11 @@ class PythonMapper:
             lines.append(f"    def run(self) -> None:")
             lines.append(f'        """Entry point — calls the first paragraph."""')
             lines.append(f"        self.{first}()")
+            lines.append("")
+        else:
+            lines.append(f"    def run(self) -> None:")
+            lines.append(f'        """Entry point — no paragraphs found."""')
+            lines.append(f"        pass")
             lines.append("")
 
         lines.append("")
@@ -264,7 +283,7 @@ class PythonMapper:
         elif verb == "SET":
             return [f"# SET: {stmt.raw_text}", f"# TODO(high): manual translation required"]
         elif verb == "GO":
-            safe_text = stmt.raw_text.replace("\\", "\\\\").replace("'", "\\'")
+            safe_text = stmt.raw_text.replace("\\", "\\\\").replace("'", "\\'").replace("{", "{{").replace("}", "}}")
             return [
                 f"raise NotImplementedError('GO TO not supported: {safe_text}')",
                 f"# TODO(high): GO TO requires manual restructuring",
@@ -294,56 +313,83 @@ class PythonMapper:
         return ["print()"]
 
     def _translate_move(self, ops: list[str]) -> list[str]:
-        if len(ops) >= 3 and ops[-2].upper() == "TO":
-            source = ops[0]
-            target = _to_python_name(ops[-1])
-            # Check if source is a literal
-            if source.startswith('"') or source.startswith("'"):
-                return [f"self.data.{target}.set({source})"]
-            elif source.isdigit() or (source.startswith("-") and source[1:].isdigit()):
-                return [f"self.data.{target}.set({source})"]
-            elif source.upper().startswith("FUNCTION"):
-                return [f"# TODO(high): MOVE FUNCTION — manual translation required"]
-            else:
-                src_py = _to_python_name(source)
-                return [f"self.data.{target}.set(self.data.{src_py}.value)"]
-        return [f"# MOVE: could not parse operands: {' '.join(ops)}"]
+        if "TO" not in [o.upper() for o in ops]:
+            return [f"# MOVE: could not parse operands: {' '.join(ops)}"]
+        to_idx = next(i for i, o in enumerate(ops) if o.upper() == "TO")
+        source = ops[0]
+        targets = ops[to_idx + 1:]
+        if not targets:
+            return [f"# MOVE: missing target operand: {' '.join(ops)}"]
+
+        # Resolve source value
+        if source.startswith('"') or source.startswith("'"):
+            src_expr = source
+        elif source.isdigit() or (source.startswith("-") and len(source) > 1 and source[1:].isdigit()):
+            src_expr = source
+        elif source.upper().startswith("FUNCTION"):
+            return [f"# TODO(high): MOVE FUNCTION — manual translation required"]
+        elif source.upper() in ("ZEROS", "ZEROES", "ZERO"):
+            src_expr = "0"
+        elif source.upper() in ("SPACES", "SPACE"):
+            src_expr = "''"
+        elif source.upper() in ("HIGH-VALUES", "HIGH-VALUE"):
+            src_expr = "'\\xff'"
+        elif source.upper() in ("LOW-VALUES", "LOW-VALUE"):
+            src_expr = "'\\x00'"
+        else:
+            src_expr = f"self.data.{_to_python_name(source)}.value"
+
+        results: list[str] = []
+        for t in targets:
+            target = _to_python_name(t)
+            results.append(f"self.data.{target}.set({src_expr})")
+        return results
+
+    def _resolve_operand(self, op: str) -> str:
+        """Resolve a COBOL operand to a Python expression."""
+        if op.startswith('"') or op.startswith("'"):
+            return op
+        if op.isdigit() or (op.startswith("-") and len(op) > 1 and op[1:].isdigit()):
+            return op
+        return f"self.data.{_to_python_name(op)}.value"
 
     def _translate_add(self, ops: list[str]) -> list[str]:
-        # ADD x TO y
+        # ADD x [y ...] TO z
         if "TO" in [o.upper() for o in ops]:
             to_idx = next(i for i, o in enumerate(ops) if o.upper() == "TO")
-            source = ops[0]
-            if to_idx + 1 >= len(ops):
+            sources = ops[:to_idx]
+            targets = ops[to_idx + 1:]
+            if not targets:
                 return [f"# ADD: missing target operand: {' '.join(ops)}"]
-            target = _to_python_name(ops[to_idx + 1])
-            if source.isdigit():
-                return [f"self.data.{target}.add({source})"]
-            else:
-                src_py = _to_python_name(source)
-                return [f"self.data.{target}.add(self.data.{src_py}.value)"]
+            results: list[str] = []
+            for src in sources:
+                src_expr = self._resolve_operand(src)
+                for t in targets:
+                    results.append(f"self.data.{_to_python_name(t)}.add({src_expr})")
+            return results
         return [f"# ADD: could not parse operands: {' '.join(ops)}"]
 
     def _translate_subtract(self, ops: list[str]) -> list[str]:
-        # SUBTRACT x FROM y
+        # SUBTRACT x [y ...] FROM z
         if "FROM" in [o.upper() for o in ops]:
             from_idx = next(i for i, o in enumerate(ops) if o.upper() == "FROM")
-            source = ops[0]
-            if from_idx + 1 >= len(ops):
+            sources = ops[:from_idx]
+            targets = ops[from_idx + 1:]
+            if not targets:
                 return [f"# SUBTRACT: missing target operand: {' '.join(ops)}"]
-            target = _to_python_name(ops[from_idx + 1])
-            if source.isdigit():
-                return [f"self.data.{target}.subtract({source})"]
-            else:
-                src_py = _to_python_name(source)
-                return [f"self.data.{target}.subtract(self.data.{src_py}.value)"]
+            results: list[str] = []
+            for src in sources:
+                src_expr = self._resolve_operand(src)
+                for t in targets:
+                    results.append(f"self.data.{_to_python_name(t)}.subtract({src_expr})")
+            return results
         return [f"# SUBTRACT: could not parse operands: {' '.join(ops)}"]
 
     def _translate_multiply(self, ops: list[str]) -> list[str]:
         # MULTIPLY x BY y
         if "BY" in [o.upper() for o in ops]:
             by_idx = next(i for i, o in enumerate(ops) if o.upper() == "BY")
-            source = ops[0]
+            source = self._resolve_operand(ops[0])
             if by_idx + 1 >= len(ops):
                 return [f"# MULTIPLY: missing target operand: {' '.join(ops)}"]
             target = _to_python_name(ops[by_idx + 1])
@@ -354,7 +400,7 @@ class PythonMapper:
         # DIVIDE x INTO y
         if "INTO" in [o.upper() for o in ops]:
             into_idx = next(i for i, o in enumerate(ops) if o.upper() == "INTO")
-            divisor = ops[0]
+            divisor = self._resolve_operand(ops[0])
             if into_idx + 1 >= len(ops):
                 return [f"# DIVIDE: missing target operand: {' '.join(ops)}"]
             target = _to_python_name(ops[into_idx + 1])
@@ -393,8 +439,14 @@ class PythonMapper:
 
         # PERFORM ... TIMES
         if "TIMES" in [o.upper() for o in ops]:
-            times_val = ops[0] if ops[0].isdigit() else f"self.data.{_to_python_name(ops[0])}.value"
-            return [f"for _ in range(int({times_val})): self.{target}()"]
+            times_idx = next(i for i, o in enumerate(ops) if o.upper() == "TIMES")
+            times_op = ops[times_idx - 1] if times_idx >= 2 else ops[0]
+            target = _to_method_name(ops[0]) if times_idx >= 2 else target
+            times_val = times_op if times_op.isdigit() else f"int(self.data.{_to_python_name(times_op)}.value)"
+            return [
+                f"for _ in range({times_val}):",
+                f"    self.{target}()",
+            ]
 
         return [f"self.{target}()"]
 

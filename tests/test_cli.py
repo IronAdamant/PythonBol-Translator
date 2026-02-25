@@ -72,15 +72,31 @@ class TestMapCommand:
         assert result == 1
 
 
+class TestConfigOption:
+    def test_translate_with_config(self, hello_cob, tmp_path):
+        config = tmp_path / "custom.json"
+        config.write_text('{"sensitive_patterns": [], "exclude_names": []}')
+        out_dir = tmp_path / "translated"
+        result = main(["translate", str(hello_cob), "--output", str(out_dir), "--config", str(config)])
+        assert result == 0
+
+    def test_translate_with_missing_config(self, hello_cob, tmp_path, capsys):
+        out_dir = tmp_path / "translated"
+        result = main(["translate", str(hello_cob), "--output", str(out_dir), "--config", "/nonexistent/config.json"])
+        assert result == 0  # Falls back to defaults with warning
+        captured = capsys.readouterr()
+        assert "Warning" in captured.err
+
+
 class TestCLIMisc:
     def test_no_command(self):
         result = main([])
         assert result == 0  # prints help
 
     def test_version(self, capsys):
-        try:
+        import pytest
+        with pytest.raises(SystemExit) as exc_info:
             main(["--version"])
-        except SystemExit:
-            pass
+        assert exc_info.value.code == 0
         captured = capsys.readouterr()
         assert "cobol2py" in captured.out

@@ -43,7 +43,7 @@ def preprocess_lines(raw_text: str) -> list[str]:
             i += 1
             continue
 
-        indicator = line[6] if len(line) > 6 else " "
+        indicator = line[6]
 
         # Comment or debug lines — skip
         if indicator in ("*", "/", "D", "d"):
@@ -67,10 +67,14 @@ def preprocess_lines(raw_text: str) -> list[str]:
                 # Merge continuation — preserve a space to avoid fusing tokens
                 stripped_prev = merged.rstrip()
                 stripped_cont = cont_content.lstrip()
-                if stripped_prev and stripped_cont and not stripped_prev.endswith('"') and not stripped_cont.startswith('"'):
-                    merged = stripped_prev + " " + stripped_cont
-                else:
+                in_literal = (
+                    (stripped_prev.endswith('"') and stripped_cont.startswith('"'))
+                    or (stripped_prev.endswith("'") and stripped_cont.startswith("'"))
+                )
+                if in_literal:
                     merged = stripped_prev + stripped_cont
+                else:
+                    merged = stripped_prev + " " + stripped_cont
                 i += 1
             else:
                 break
@@ -89,7 +93,7 @@ def count_raw_lines(raw_text: str) -> tuple[int, int, int, int]:
         stripped = line.strip()
         if not stripped:
             blanks += 1
-        elif len(line) > 6 and line[6] in ("*", "/"):
+        elif len(line) > 6 and line[6] in ("*", "/", "D", "d"):
             comments += 1
         else:
             code += 1
@@ -98,7 +102,7 @@ def count_raw_lines(raw_text: str) -> tuple[int, int, int, int]:
 
 # --- PIC parsing ---
 
-_PIC_REPEAT = re.compile(r"([A9XZVBS,.\-+CR DB])\((\d+)\)", re.IGNORECASE)
+_PIC_REPEAT = re.compile(r"(CR|DB|[A9XZVBS,.\-+$])\((\d+)\)", re.IGNORECASE)
 
 
 def expand_pic(raw: str) -> str:
@@ -153,9 +157,13 @@ def compute_pic_size(expanded: str) -> tuple[int, int, bool]:
         _, after_v = clean.split("V", 1)
         decimals = sum(1 for c in after_v if c in ("9",))
 
-    # Total display size: count all significant characters
-    size = 0
-    for c in clean:
+    # Handle CR/DB as 2-position editing symbols before char loop
+    cr_db_extra = clean.upper().count("CR") + clean.upper().count("DB")
+    # Remove CR and DB for per-character counting to avoid double-counting
+    count_clean = clean.upper().replace("CR", "").replace("DB", "")
+
+    size = cr_db_extra * 2  # Each CR/DB occupies 2 display positions
+    for c in count_clean:
         if c in ("9", "X", "A", "Z"):
             size += 1
         elif c in (".", ",", "B", "+", "-", "$"):
@@ -254,7 +262,7 @@ def parse_environment(lines: list[str]) -> list[FileControl]:
 # --- DATA DIVISION ---
 
 _LEVEL_RE = re.compile(r"^(\d{2})\s+([\w-]+)")
-_PIC_RE = re.compile(r"PIC(?:TURE)?\s+(S?[\w9XV().,+\-$ZCRDB ]+)", re.IGNORECASE)
+_PIC_RE = re.compile(r"PIC(?:TURE)?\s+(S?[0-9XAVZBS().,+\-$CRDB]+)", re.IGNORECASE)
 _VALUE_RE = re.compile(r'VALUE\s+("[^"]*"|\'[^\']*\'|[^\s.]+)(?:\.|$|\s)', re.IGNORECASE)
 _OCCURS_RE = re.compile(r"OCCURS\s+(\d+)", re.IGNORECASE)
 _REDEFINES_RE = re.compile(r"REDEFINES\s+([\w-]+)", re.IGNORECASE)

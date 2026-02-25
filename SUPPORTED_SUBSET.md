@@ -94,7 +94,7 @@ Default patterns (configurable via `protected.json`):
 
 | Pattern | Level | Reason |
 |---------|-------|--------|
-| SSN | HIGH | Social Security Number |
+| SSN, SOCIAL-SEC | HIGH | Social Security Number |
 | TAX-ID | HIGH | Tax Identifier |
 | DOB, BIRTH | HIGH | Date of Birth |
 | PASSWORD, PIN | HIGH | Credentials |

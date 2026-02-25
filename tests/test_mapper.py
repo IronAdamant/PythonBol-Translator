@@ -26,7 +26,7 @@ class TestPythonGeneration:
         smap = analyze(program)
         source = generate_python(smap)
         assert "class" in source
-        assert "HelloWorldProgram" in source or "HelloWorld" in source
+        assert "class HelloWorldProgram" in source
 
     def test_contains_dataclass(self, hello_source):
         program = parse_cobol(hello_source)
@@ -44,13 +44,14 @@ class TestPythonGeneration:
         program = parse_cobol(customer_report_source)
         smap = analyze(program)
         source = generate_python(smap)
-        assert "WARNING" in source
+        assert "# WARNING [HIGH]:" in source
+        assert "CUST-SSN" in source
 
     def test_adapters_imported(self, hello_source):
         program = parse_cobol(hello_source)
         smap = analyze(program)
         source = generate_python(smap)
-        assert "CobolDecimal" in source or "CobolString" in source
+        assert "CobolDecimal" in source and "CobolString" in source
 
     def test_paragraph_methods_generated(self, customer_report_source):
         program = parse_cobol(customer_report_source)
@@ -64,6 +65,20 @@ class TestPythonGeneration:
         smap = analyze(program)
         source = generate_python(smap)
         assert "self.initialize_program()" in source
+
+    def test_empty_program_generates_valid_python(self):
+        minimal = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. EMPTY-TEST.\n"
+            "       DATA DIVISION.\n"
+            "       PROCEDURE DIVISION.\n"
+        )
+        program = parse_cobol(minimal)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "def run(self)" in source
+        assert "@dataclass" in source
 
     def test_write_has_todo(self, customer_report_source):
         program = parse_cobol(customer_report_source)

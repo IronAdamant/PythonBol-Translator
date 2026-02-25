@@ -74,7 +74,7 @@ def cmd_translate(args: argparse.Namespace) -> int:
     print(green(f"  Parsed: {program.program_id} ({len(program.paragraphs)} paragraphs)"))
 
     # Analyze
-    config_path = args.config if hasattr(args, "config") and args.config else None
+    config_path = args.config if args.config else None
     smap = analyze(program, config_path=config_path)
 
     if smap.sensitivities:
@@ -93,7 +93,7 @@ def cmd_translate(args: argparse.Namespace) -> int:
         output_dir.mkdir(parents=True, exist_ok=True)
         out_name = _to_python_filename(program.program_id)
         out_path = output_dir / out_name
-        out_path.write_text(python_source)
+        out_path.write_text(python_source, encoding="utf-8")
     except OSError as e:
         print(red(f"Error: could not write output: {e}"))
         return 1
@@ -119,7 +119,7 @@ def cmd_map(args: argparse.Namespace) -> int:
     print(green(f"  Parsed: {program.program_id} ({len(program.paragraphs)} paragraphs)"))
 
     # Analyze
-    config_path = args.config if hasattr(args, "config") and args.config else None
+    config_path = args.config if args.config else None
     smap = analyze(program, config_path=config_path)
 
     if smap.sensitivities:
@@ -134,12 +134,12 @@ def cmd_map(args: argparse.Namespace) -> int:
 
         md_report = export_markdown(smap)
         md_path = output_dir / "software-map.md"
-        md_path.write_text(md_report)
+        md_path.write_text(md_report, encoding="utf-8")
         print(green(f"  Markdown: {md_path}"))
 
         json_report = export_json(smap)
         json_path = output_dir / "software-map.json"
-        json_path.write_text(json_report)
+        json_path.write_text(json_report, encoding="utf-8")
         print(green(f"  JSON: {json_path}"))
     except OSError as e:
         print(red(f"Error: could not write output: {e}"))
