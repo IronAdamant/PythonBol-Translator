@@ -111,8 +111,9 @@ class TestGivingClause:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "self.data.ws_c.set(" in source
-        assert "+" in source.split(".set(")[1]  # verify addition operator in expression
+        set_lines = [l for l in source.split("\n") if "ws_c.set(" in l and "field(" not in l]
+        assert len(set_lines) >= 1, "Expected ws_c.set() in generated code"
+        assert "+" in set_lines[0]  # verify addition operator
 
     def test_subtract_giving(self):
         src = _make_cobol(["SUBTRACT WS-A FROM WS-B GIVING WS-C."])
@@ -120,8 +121,9 @@ class TestGivingClause:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "self.data.ws_c.set(" in source
-        assert "-" in source.split("ws_c.set(")[1].split(")")[0]  # verify subtraction
+        set_lines = [l for l in source.split("\n") if "ws_c.set(" in l and "field(" not in l]
+        assert len(set_lines) >= 1, "Expected ws_c.set() in generated code"
+        assert "-" in set_lines[0]  # verify subtraction
 
     def test_multiply_giving(self):
         src = _make_cobol(["MULTIPLY WS-A BY WS-B GIVING WS-C."])
@@ -129,8 +131,9 @@ class TestGivingClause:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "self.data.ws_c.set(" in source
-        assert "*" in source.split("ws_c.set(")[1].split(")")[0]  # verify multiplication
+        set_lines = [l for l in source.split("\n") if "ws_c.set(" in l and "field(" not in l]
+        assert len(set_lines) >= 1, "Expected ws_c.set() in generated code"
+        assert "*" in set_lines[0]  # verify multiplication
 
     def test_divide_giving(self):
         src = _make_cobol(["DIVIDE WS-A INTO WS-B GIVING WS-C."])
@@ -138,8 +141,9 @@ class TestGivingClause:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "self.data.ws_c.set(" in source
-        assert "/" in source.split("ws_c.set(")[1].split(")")[0]  # verify division
+        set_lines = [l for l in source.split("\n") if "ws_c.set(" in l and "field(" not in l]
+        assert len(set_lines) >= 1, "Expected ws_c.set() in generated code"
+        assert "/" in set_lines[0]  # verify division
 
     def test_divide_giving_remainder(self):
         src = _make_cobol(["DIVIDE WS-A INTO WS-B GIVING WS-C REMAINDER WS-A."])
@@ -394,9 +398,10 @@ class TestDisplayUpon:
         assert "print(" in source
         assert '"ERROR"' in source
         # UPON and target should not appear as print args
-        print_line = [l for l in source.split("\n") if "print(" in l][0]
-        assert "upon" not in print_line.lower()
-        assert "ws_a" not in print_line
+        print_lines = [l for l in source.split("\n") if "print(" in l]
+        assert print_lines, "Expected print() call in generated code"
+        assert "upon" not in print_lines[0].lower()
+        assert "ws_a" not in print_lines[0]
 
 
 class TestDivideBy:
@@ -406,9 +411,9 @@ class TestDivideBy:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "self.data.ws_c.set(" in source
-        set_expr = source.split("ws_c.set(")[1].split(")")[0]
-        assert "/" in set_expr  # verify division operator
+        set_lines = [l for l in source.split("\n") if "ws_c.set(" in l and "field(" not in l]
+        assert len(set_lines) >= 1, "Expected ws_c.set() in generated code"
+        assert "/" in set_lines[0]  # verify division operator
 
 
 class TestComputeParentheses:
