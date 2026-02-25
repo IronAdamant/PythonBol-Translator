@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.venv/
+.pytest_cache/
+*.egg
+
+# Private documentation
+wiki-local/
+LLM_Development.md
+COMPLETE_PROJECT_DOCUMENTATION.md

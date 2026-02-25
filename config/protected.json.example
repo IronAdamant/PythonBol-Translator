@@ -1,0 +1,27 @@
+{
+    "sensitive_patterns": [
+        {"pattern": "SSN", "level": "high", "reason": "Social Security Number"},
+        {"pattern": "SOCIAL-SEC", "level": "high", "reason": "Social Security Number"},
+        {"pattern": "TAX-ID", "level": "high", "reason": "Tax Identifier"},
+        {"pattern": "DOB", "level": "high", "reason": "Date of Birth"},
+        {"pattern": "BIRTH", "level": "high", "reason": "Date of Birth"},
+        {"pattern": "PASSWORD", "level": "high", "reason": "Password/credential"},
+        {"pattern": "PIN", "level": "high", "reason": "PIN code"},
+        {"pattern": "ACCOUNT", "level": "medium", "reason": "Account number"},
+        {"pattern": "BALANCE", "level": "medium", "reason": "Financial balance"},
+        {"pattern": "SALARY", "level": "medium", "reason": "Salary data"},
+        {"pattern": "WAGE", "level": "medium", "reason": "Wage data"},
+        {"pattern": "CREDIT", "level": "medium", "reason": "Credit information"},
+        {"pattern": "PAYMENT", "level": "medium", "reason": "Payment data"},
+        {"pattern": "CUST-", "level": "low", "reason": "Customer-prefixed field"},
+        {"pattern": "EMP-", "level": "low", "reason": "Employee-prefixed field"},
+        {"pattern": "ADDR", "level": "low", "reason": "Address data"},
+        {"pattern": "PHONE", "level": "low", "reason": "Phone number"},
+        {"pattern": "EMAIL", "level": "low", "reason": "Email address"}
+    ],
+    "exclude_names": [
+        "WS-EOF",
+        "WS-ERROR",
+        "FILLER"
+    ]
+}
