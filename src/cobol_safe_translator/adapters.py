@@ -74,8 +74,10 @@ class CobolDecimal:
         """MOVE equivalent — set the value with COBOL truncation rules."""
         self._value = self._coerce(value)
 
-    def _to_decimal(self, other: int | float | str | Decimal) -> Decimal | None:
+    def _to_decimal(self, other: int | float | str | Decimal | CobolDecimal) -> Decimal | None:
         """Convert operand to Decimal, returning None on invalid input."""
+        if isinstance(other, CobolDecimal):
+            return other._value
         try:
             return Decimal(str(other))
         except InvalidOperation:

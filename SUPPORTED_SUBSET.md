@@ -57,7 +57,10 @@ This document lists every COBOL construct handled by cobol-safe-translator, with
 | `COMPUTE y = expr` | `self.data.y.set(expr)` | Expression needs manual review |
 | `DISPLAY items` | `print(items)` | |
 | `PERFORM para` | `self.para()` | Simple perform |
+| `PERFORM para N TIMES` | `for _ in range(N): self.para()` | Literal or variable count |
 | `PERFORM para UNTIL cond` | `while not (cond): self.para()` | Best-effort condition translation |
+| `PERFORM para VARYING` | TODO comment | FROM/BY/UNTIL requires manual translation |
+| `INITIALIZE x` | Commented-out `.set(0)` | Numeric/alphanumeric reset |
 | `IF condition` | TODO comment | Manual translation required |
 | `EVALUATE` | TODO comment | if/elif chain recommended |
 | `OPEN INPUT file` | `self.file.open_input()` | |
@@ -76,7 +79,7 @@ These emit `# TODO(high)` comments in generated code:
 - `STRING` / `UNSTRING` — string manipulation
 - `INSPECT` — character inspection/replacement
 - `SET` — condition/index setting
-- `COPY` / `REPLACE` — copybook expansion (parser error message)
+- `COPY` / `REPLACE` — copybook expansion (analyzer warning + TODO comment)
 - `SORT` / `MERGE` — file sorting
 - `SEARCH` — table searching
 

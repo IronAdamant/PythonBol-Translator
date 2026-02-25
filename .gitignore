@@ -12,3 +12,10 @@ wiki-local/
 LLM_Development.md
 COMPLETE_PROJECT_DOCUMENTATION.md
 Text_Files/
+
+# User config (may contain org-specific patterns)
+protected.json
+
+# Default output directories
+translated/
+report/

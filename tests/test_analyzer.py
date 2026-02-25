@@ -28,9 +28,14 @@ class TestSensitivityDetection:
 
     def test_excludes_configured_names(self, customer_report_source):
         program = parse_cobol(customer_report_source)
-        flags = detect_sensitivities(program, DEFAULT_PATTERNS, DEFAULT_EXCLUDES)
-        excluded = [f for f in flags if f.data_name in DEFAULT_EXCLUDES]
-        assert len(excluded) == 0
+        # Without exclusions, CUST-SSN is detected
+        flags_no_exclude = detect_sensitivities(program, DEFAULT_PATTERNS, [])
+        ssn_flags = [f for f in flags_no_exclude if f.data_name == "CUST-SSN"]
+        assert len(ssn_flags) == 1, "CUST-SSN should be flagged without exclusion"
+        # With CUST-SSN excluded, it should not appear
+        flags_with_exclude = detect_sensitivities(program, DEFAULT_PATTERNS, ["CUST-SSN"])
+        ssn_excluded = [f for f in flags_with_exclude if f.data_name == "CUST-SSN"]
+        assert len(ssn_excluded) == 0, "CUST-SSN should be excluded when in exclude list"
 
     def test_no_sensitivities_in_hello(self, hello_source):
         program = parse_cobol(hello_source)

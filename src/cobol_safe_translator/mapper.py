@@ -25,6 +25,21 @@ from .models import (
 )
 
 
+def _is_numeric_literal(s: str) -> bool:
+    """Check if a string is a numeric literal (integer or decimal)."""
+    if not s:
+        return False
+    # Handle negative sign
+    check = s[1:] if s.startswith("-") and len(s) > 1 else s
+    # Must have at least one digit and only digits/one decimal point
+    parts = check.split(".")
+    if len(parts) == 1:
+        return parts[0].isdigit()
+    if len(parts) == 2:
+        return (parts[0].isdigit() or parts[0] == "") and parts[1].isdigit()
+    return False
+
+
 def _to_python_name(cobol_name: str) -> str:
     """Convert COBOL data name to a valid Python identifier.
 
@@ -117,6 +132,7 @@ class PythonMapper:
         lines.append('    """Working-storage and file section data items."""')
         lines.append("")
 
+        self._field_name_counts: dict[str, int] = {}
         for item in all_items:
             lines.extend(self._data_item_fields(item, indent=1))
 
@@ -143,6 +159,13 @@ class PythonMapper:
         lines: list[str] = []
         prefix = "    " * indent
         py_name = _to_python_name(item.name)
+
+        # Deduplicate field names (e.g., multiple FILLER items)
+        if py_name in self._field_name_counts:
+            self._field_name_counts[py_name] += 1
+            py_name = f"{py_name}_{self._field_name_counts[py_name]}"
+        else:
+            self._field_name_counts[py_name] = 1
 
         # Sensitivity warning
         if item.name.upper() in self._sensitive_names:
@@ -303,13 +326,13 @@ class PythonMapper:
             if (len(op) >= 2 and ((op.startswith('"') and op.endswith('"')) or (op.startswith("'") and op.endswith("'")))):
                 # Quoted string literal — keep as-is
                 parts.append(op)
-            elif op.isdigit() or (op.startswith("-") and len(op) > 1 and op[1:].isdigit()):
+            elif _is_numeric_literal(op):
                 parts.append(op)
             else:
                 # Data name reference
                 parts.append(f"self.data.{_to_python_name(op)}.value")
         if parts:
-            return [f"print({', '.join(parts)})"]
+            return [f"print({', '.join(parts)}, sep='')"]
         return ["print()"]
 
     def _translate_move(self, ops: list[str]) -> list[str]:
@@ -327,14 +350,14 @@ class PythonMapper:
         # Resolve source value
         if source.startswith('"') or source.startswith("'"):
             src_expr = source
-        elif source.isdigit() or (source.startswith("-") and len(source) > 1 and source[1:].isdigit()):
+        elif _is_numeric_literal(source):
             src_expr = source
         elif source.upper().startswith("FUNCTION"):
             return [f"# TODO(high): MOVE FUNCTION — manual translation required"]
         elif source.upper() in ("ZEROS", "ZEROES", "ZERO"):
             src_expr = "0"
         elif source.upper() in ("SPACES", "SPACE"):
-            src_expr = "''"
+            src_expr = "' '"
         elif source.upper() in ("HIGH-VALUES", "HIGH-VALUE"):
             src_expr = "'\\xff'"
         elif source.upper() in ("LOW-VALUES", "LOW-VALUE"):
@@ -352,7 +375,7 @@ class PythonMapper:
         """Resolve a COBOL operand to a Python expression."""
         if op.startswith('"') or op.startswith("'"):
             return op
-        if op.isdigit() or (op.startswith("-") and len(op) > 1 and op[1:].isdigit()):
+        if _is_numeric_literal(op):
             return op
         upper = op.upper()
         if upper in ("ZEROS", "ZEROES", "ZERO"):
@@ -499,11 +522,18 @@ class PythonMapper:
 
     def _translate_compute(self, ops: list[str]) -> list[str]:
         # COMPUTE target = expression
+        _COMPUTE_OPERATORS = {"+", "-", "*", "/", "(", ")", "**"}
         if "=" in ops:
             eq_idx = ops.index("=")
             target = _to_python_name(ops[0])
             expr_parts = ops[eq_idx + 1:]
-            expr = " ".join(expr_parts)
+            resolved: list[str] = []
+            for part in expr_parts:
+                if part in _COMPUTE_OPERATORS:
+                    resolved.append(part)
+                else:
+                    resolved.append(self._resolve_operand(part))
+            expr = " ".join(resolved)
             return [
                 f"# COMPUTE: {' '.join(ops)}",
                 f"self.data.{target}.set({expr})  # TODO(high): verify expression translation",
@@ -515,9 +545,18 @@ class PythonMapper:
             return [f"# PERFORM with no target"]
 
         target = _to_method_name(ops[0])
+        upper_ops = [o.upper() for o in ops]
+
+        # PERFORM ... VARYING — needs FROM/BY/UNTIL which we can't fully translate
+        if "VARYING" in upper_ops:
+            varying_idx = next(i for i, o in enumerate(upper_ops) if o == "VARYING")
+            return [
+                f"# PERFORM VARYING: {raw}",
+                f"# TODO(high): PERFORM VARYING requires manual translation (FROM/BY/UNTIL clauses)",
+            ]
 
         # PERFORM ... UNTIL
-        if "UNTIL" in [o.upper() for o in ops]:
+        if "UNTIL" in upper_ops:
             until_idx = next(i for i, o in enumerate(ops) if o.upper() == "UNTIL")
             cond_parts = ops[until_idx + 1:]
             if not cond_parts:
@@ -557,7 +596,13 @@ class PythonMapper:
     def _translate_condition(self, cond: str) -> str:
         """Best-effort translation of a COBOL condition to Python."""
         c = cond.strip()
-        # Replace common COBOL comparisons
+        # Replace compound COBOL comparisons FIRST (before simple forms)
+        c = c.replace(" NOT GREATER THAN ", " <= ")
+        c = c.replace(" NOT LESS THAN ", " >= ")
+        c = c.replace(" NOT EQUAL TO ", " != ")
+        c = c.replace(" GREATER THAN OR EQUAL TO ", " >= ")
+        c = c.replace(" LESS THAN OR EQUAL TO ", " <= ")
+        # Simple comparisons
         c = c.replace(" GREATER THAN ", " > ")
         c = c.replace(" LESS THAN ", " < ")
         c = c.replace(" EQUAL TO ", " == ")
@@ -569,7 +614,7 @@ class PythonMapper:
         for t in tokens:
             if t in (">", "<", "==", "!=", ">=", "<=", "AND", "OR", "NOT"):
                 result.append(t.lower() if t in ("AND", "OR", "NOT") else t)
-            elif t.isdigit() or (t.startswith("-") and len(t) > 1 and t[1:].isdigit()):
+            elif _is_numeric_literal(t):
                 result.append(t)
             elif t.startswith('"') or t.startswith("'"):
                 result.append(t)

@@ -216,3 +216,125 @@ class TestFileAdapterContextManager:
             assert fa.read() == "line1"
         # After exit, file should be closed
         assert fa._file is None
+
+
+class TestComputeResolution:
+    def test_compute_resolves_data_names(self):
+        src = _make_cobol(["COMPUTE WS-C = WS-A + WS-B."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # Data names should be resolved, not raw COBOL names
+        assert "self.data.ws_a.value" in source
+        assert "self.data.ws_b.value" in source
+        assert "self.data.ws_c.set(" in source
+
+    def test_compute_with_literals(self):
+        src = _make_cobol(["COMPUTE WS-A = 10 + 5."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "10" in source
+        assert "5" in source
+
+
+class TestPerformVarying:
+    def test_perform_varying_emits_todo(self):
+        src = _make_cobol(["PERFORM MAIN-PARA VARYING WS-A FROM 1 BY 1 UNTIL WS-A = 10."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "TODO(high)" in source
+        assert "PERFORM VARYING" in source
+
+
+class TestConditionTranslation:
+    def test_not_greater_than(self):
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A NOT GREATER THAN 0."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "<=" in source
+        # Should NOT contain invalid "not >"
+        assert "not >" not in source
+
+    def test_greater_than_or_equal_to(self):
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A GREATER THAN OR EQUAL TO 10."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert ">=" in source
+
+
+class TestDecimalLiterals:
+    def test_move_decimal_literal(self):
+        src = _make_cobol(["MOVE 100.50 TO WS-A."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "100.50" in source
+        assert ".set(100.50)" in source
+
+    def test_resolve_decimal_in_add(self):
+        src = _make_cobol(["ADD 3.14 TO WS-A."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert ".add(3.14)" in source
+
+
+class TestDisplaySeparator:
+    def test_display_no_space_separator(self):
+        src = _make_cobol(['DISPLAY "HELLO" "WORLD".'])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "sep=''" in source
+
+
+class TestCobolDecimalInterop:
+    def test_add_cobol_decimal_to_cobol_decimal(self):
+        from cobol_safe_translator.adapters import CobolDecimal
+        a = CobolDecimal(5, 2, False, "10.00")
+        b = CobolDecimal(5, 2, False, "3.50")
+        a.add(b)
+        assert a.value == __import__("decimal").Decimal("13.50")
+
+    def test_subtract_cobol_decimal(self):
+        from cobol_safe_translator.adapters import CobolDecimal
+        a = CobolDecimal(5, 2, False, "10.00")
+        b = CobolDecimal(5, 2, False, "3.50")
+        a.subtract(b)
+        assert a.value == __import__("decimal").Decimal("6.50")
+
+
+class TestValueIsSyntax:
+    def test_value_is_keyword_skipped(self):
+        """VALUE IS syntax should extract the actual value, not 'IS'."""
+        from cobol_safe_translator.parser import parse_data_division
+        lines = [
+            "WORKING-STORAGE SECTION.",
+            '01 WS-X PIC X(5) VALUE IS "HELLO".',
+        ]
+        _, ws = parse_data_division(lines)
+        assert len(ws) == 1
+        assert ws[0].value == "HELLO"
+
+    def test_value_without_is(self):
+        """VALUE without IS should still work."""
+        from cobol_safe_translator.parser import parse_data_division
+        lines = [
+            "WORKING-STORAGE SECTION.",
+            '01 WS-Y PIC X(5) VALUE "WORLD".',
+        ]
+        _, ws = parse_data_division(lines)
+        assert len(ws) == 1
+        assert ws[0].value == "WORLD"

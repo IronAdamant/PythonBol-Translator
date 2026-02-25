@@ -121,6 +121,7 @@ class TestPicSize:
 
     def test_signed(self):
         size, dec, signed = compute_pic_size("S9999999V99")
+        assert size == 9
         assert signed is True
         assert dec == 2
 
