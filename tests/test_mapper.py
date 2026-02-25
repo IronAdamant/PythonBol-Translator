@@ -173,3 +173,46 @@ class TestFigurativeConstantsInArithmetic:
         # ZEROS should resolve to 0, not self.data.zeros.value
         assert "zeros.value" not in source
         assert ".add(0)" in source
+
+
+class TestPerformVariants:
+    def test_perform_until(self):
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A = 0."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "while not" in source
+
+    def test_perform_times(self):
+        src = _make_cobol(["PERFORM MAIN-PARA 5 TIMES."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "for _ in range(5)" in source
+
+
+class TestMoveMultipleTargets:
+    def test_move_to_multiple_targets(self):
+        src = _make_cobol(["MOVE 0 TO WS-A WS-B WS-C."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ws_a" in source
+        assert "ws_b" in source
+        assert "ws_c" in source
+        assert source.count(".set(") >= 3
+
+
+class TestFileAdapterContextManager:
+    def test_context_manager(self, tmp_path):
+        from cobol_safe_translator.adapters import FileAdapter
+        f = tmp_path / "test.txt"
+        f.write_text("line1\nline2\n")
+        with FileAdapter(str(f)) as fa:
+            fa.open_input()
+            assert fa.read() == "line1"
+        # After exit, file should be closed
+        assert fa._file is None

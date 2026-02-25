@@ -374,6 +374,8 @@ class PythonMapper:
         if "GIVING" in upper_ops:
             giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
             giving_targets = ops[giving_idx + 1:]
+            if not giving_targets:
+                return [f"# ADD GIVING: missing target operand: {' '.join(ops)}"]
             pre_giving = ops[:giving_idx]
             # Collect all source values (before TO, or all of pre_giving if no TO)
             if "TO" in [o.upper() for o in pre_giving]:
@@ -445,7 +447,7 @@ class PythonMapper:
             source = self._resolve_operand(ops[0])
             if "GIVING" in upper_ops:
                 giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
-                multiplicand = self._resolve_operand(ops[by_idx + 1]) if by_idx + 1 < giving_idx else "1"
+                multiplicand = self._resolve_operand(ops[by_idx + 1]) if (by_idx + 1 < len(ops) and by_idx + 1 < giving_idx) else "1"
                 giving_targets = ops[giving_idx + 1:]
                 results: list[str] = []
                 for t in giving_targets:
@@ -518,6 +520,8 @@ class PythonMapper:
         if "UNTIL" in [o.upper() for o in ops]:
             until_idx = next(i for i, o in enumerate(ops) if o.upper() == "UNTIL")
             cond_parts = ops[until_idx + 1:]
+            if not cond_parts:
+                return [f"# PERFORM UNTIL: missing condition — {' '.join(ops)}"]
             cond = " ".join(cond_parts)
             return [
                 f"# PERFORM {ops[0]} UNTIL {cond}",
