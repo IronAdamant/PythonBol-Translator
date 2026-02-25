@@ -359,6 +359,9 @@ class PythonMapper:
         # MOVE CORRESPONDING requires field-by-field matching
         if ops and ops[0].upper() == "CORRESPONDING":
             return [f"# TODO(high): MOVE CORRESPONDING — manual field matching required"]
+        # MOVE ALL repeats a character to fill the target
+        if ops and ops[0].upper() == "ALL":
+            return [f"# TODO(high): MOVE ALL — repeats value to fill target field: {' '.join(ops)}"]
         if "TO" not in [o.upper() for o in ops]:
             return [f"# MOVE: could not parse operands: {' '.join(ops)}"]
         to_idx = next(i for i, o in enumerate(ops) if o.upper() == "TO")
@@ -693,11 +696,15 @@ class PythonMapper:
         c = c.replace(" EQUAL TO ", " == ")
         c = c.replace(" NOT = ", " != ")
         c = c.replace(" = ", " == ")
+        # Separate parentheses from adjacent tokens before splitting
+        c = re.sub(r'([()])', r' \1 ', c)
         # Convert data names and figurative constants
         tokens = c.split()
         result: list[str] = []
         for t in tokens:
-            if t in (">", "<", "==", "!=", ">=", "<=", "AND", "OR", "NOT"):
+            if t in ("(", ")"):
+                result.append(t)
+            elif t in (">", "<", "==", "!=", ">=", "<=", "AND", "OR", "NOT"):
                 result.append(t.lower() if t in ("AND", "OR", "NOT") else t)
             elif _is_numeric_literal(t):
                 result.append(t)

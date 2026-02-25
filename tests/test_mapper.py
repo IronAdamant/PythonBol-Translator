@@ -572,7 +572,7 @@ class TestDivideGivingZeroCheck:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "zero" in source.lower()  # TODO comment about zero division
+        assert "verify divisor is non-zero" in source
 
 
 class TestConditionOrdering:
@@ -708,6 +708,66 @@ class TestDivideByWithoutGiving:
     def test_divide_by_without_giving_emits_todo(self):
         """DIVIDE x BY y without GIVING should emit TODO."""
         src = _make_cobol(["DIVIDE WS-A BY WS-B."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "TODO(high)" in source
+
+
+class TestDivideIntoWithoutGiving:
+    def test_divide_into_uses_divide_method(self):
+        """DIVIDE x INTO y should use y.divide(x)."""
+        src = _make_cobol(["DIVIDE WS-A INTO WS-B."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "self.data.ws_b.divide(" in source
+
+
+class TestMoveAll:
+    def test_move_all_emits_todo(self):
+        """MOVE ALL should emit TODO for character fill."""
+        src = _make_cobol(['MOVE ALL "X" TO WS-A.'])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "TODO(high)" in source
+        assert "MOVE ALL" in source
+
+
+class TestConditionParentheses:
+    def test_parenthesized_condition(self):
+        """Parentheses in conditions should be preserved, not mangled into field names."""
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL (WS-A > 0)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        while_line = [l for l in source.split("\n") if "while not" in l][0]
+        assert "(" in while_line
+        assert ")" in while_line
+        assert "self.data.ws_a.value" in while_line
+
+
+class TestIfStatement:
+    def test_if_emits_todo(self):
+        """IF statement should emit TODO for manual translation."""
+        src = _make_cobol(["IF WS-A > 0 DISPLAY WS-A END-IF."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "TODO(high)" in source
+        assert "IF" in source
+
+
+class TestEvaluateStatement:
+    def test_evaluate_emits_todo(self):
+        """EVALUATE statement should emit TODO for if/elif translation."""
+        src = _make_cobol(["EVALUATE TRUE WHEN OTHER DISPLAY WS-A END-EVALUATE."])
         program = parse_cobol(src)
         smap = analyze(program)
         source = generate_python(smap)
