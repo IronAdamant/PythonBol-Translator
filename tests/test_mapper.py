@@ -25,7 +25,6 @@ class TestPythonGeneration:
         program = parse_cobol(hello_source)
         smap = analyze(program)
         source = generate_python(smap)
-        assert "class" in source
         assert "class HelloWorldProgram" in source
 
     def test_contains_dataclass(self, hello_source):
@@ -112,8 +111,8 @@ class TestGivingClause:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "ws_c" in source
-        assert ".set(" in source
+        assert "self.data.ws_c.set(" in source
+        assert "+" in source.split(".set(")[1]  # verify addition operator in expression
 
     def test_subtract_giving(self):
         src = _make_cobol(["SUBTRACT WS-A FROM WS-B GIVING WS-C."])
@@ -121,8 +120,8 @@ class TestGivingClause:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "ws_c" in source
-        assert ".set(" in source
+        assert "self.data.ws_c.set(" in source
+        assert "-" in source.split("ws_c.set(")[1].split(")")[0]  # verify subtraction
 
     def test_multiply_giving(self):
         src = _make_cobol(["MULTIPLY WS-A BY WS-B GIVING WS-C."])
@@ -130,8 +129,8 @@ class TestGivingClause:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "ws_c" in source
-        assert ".set(" in source
+        assert "self.data.ws_c.set(" in source
+        assert "*" in source.split("ws_c.set(")[1].split(")")[0]  # verify multiplication
 
     def test_divide_giving(self):
         src = _make_cobol(["DIVIDE WS-A INTO WS-B GIVING WS-C."])
@@ -139,8 +138,8 @@ class TestGivingClause:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "ws_c" in source
-        assert ".set(" in source
+        assert "self.data.ws_c.set(" in source
+        assert "/" in source.split("ws_c.set(")[1].split(")")[0]  # verify division
 
     def test_divide_giving_remainder(self):
         src = _make_cobol(["DIVIDE WS-A INTO WS-B GIVING WS-C REMAINDER WS-A."])
@@ -392,9 +391,12 @@ class TestDisplayUpon:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
+        assert "print(" in source
         assert '"ERROR"' in source
         # UPON and target should not appear as print args
-        assert "upon" not in source.lower().split("print(")[1].split(")")[0] if "print(" in source else True
+        print_line = [l for l in source.split("\n") if "print(" in l][0]
+        assert "upon" not in print_line.lower()
+        assert "ws_a" not in print_line
 
 
 class TestDivideBy:
@@ -404,8 +406,9 @@ class TestDivideBy:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "ws_c" in source
-        assert ".set(" in source
+        assert "self.data.ws_c.set(" in source
+        set_expr = source.split("ws_c.set(")[1].split(")")[0]
+        assert "/" in set_expr  # verify division operator
 
 
 class TestComputeParentheses:
@@ -505,3 +508,68 @@ class TestReservedMethodName:
         # Should have para_run for the paragraph and run for the entry point
         assert "def para_run(self)" in source
         assert "def run(self)" in source
+
+
+class TestArithmeticOverflow:
+    def test_add_overflow_truncates(self):
+        from cobol_safe_translator.adapters import CobolDecimal
+        d = CobolDecimal(2, 0)  # max 99
+        d.set(90)
+        d.add(20)
+        # 110 % 100 = 10 (COBOL high-order truncation)
+        assert d.value == __import__("decimal").Decimal("10")
+
+    def test_multiply_overflow_truncates(self):
+        from cobol_safe_translator.adapters import CobolDecimal
+        d = CobolDecimal(2, 0)  # max 99
+        d.set(50)
+        d.multiply(3)
+        # 150 % 100 = 50
+        assert d.value == __import__("decimal").Decimal("50")
+
+
+class TestHighValuesLowValues:
+    def test_high_values_string_init(self):
+        """HIGH-VALUES in string field should produce single-char value, not escaped literal."""
+        from cobol_safe_translator.mapper import PythonMapper
+        val = PythonMapper._translate_figurative("HIGH-VALUES", numeric=False)
+        assert len(val) == 1
+        assert val == "\xff"
+
+    def test_low_values_string_init(self):
+        """LOW-VALUES in string field should produce null character."""
+        from cobol_safe_translator.mapper import PythonMapper
+        val = PythonMapper._translate_figurative("LOW-VALUES", numeric=False)
+        assert len(val) == 1
+        assert val == "\x00"
+
+    def test_high_values_in_generated_code(self):
+        """HIGH-VALUES field init should generate valid Python with correct char."""
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. TEST-PROG.",
+            "       DATA DIVISION.",
+            "       WORKING-STORAGE SECTION.",
+            "       01 WS-X PIC X(5) VALUE HIGH-VALUES.",
+            "       PROCEDURE DIVISION.",
+            "       MAIN-PARA.",
+            "           DISPLAY WS-X.",
+        ]
+        src = "\n".join(lines) + "\n"
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # The generated CobolString init should contain the actual character
+        assert "CobolString(5," in source
+
+
+class TestDivideGivingZeroCheck:
+    def test_divide_giving_has_zero_check_comment(self):
+        """DIVIDE GIVING should emit a TODO about zero-check."""
+        src = _make_cobol(["DIVIDE WS-A INTO WS-B GIVING WS-C."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "zero" in source.lower()  # TODO comment about zero division

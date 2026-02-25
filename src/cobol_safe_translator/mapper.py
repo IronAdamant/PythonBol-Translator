@@ -161,9 +161,9 @@ class PythonMapper:
         if upper in ("SPACES", "SPACE"):
             return "" if numeric else " "
         if upper in ("HIGH-VALUES", "HIGH-VALUE"):
-            return "0" if numeric else "\\xff"
+            return "0" if numeric else "\xff"
         if upper in ("LOW-VALUES", "LOW-VALUE"):
-            return "0" if numeric else "\\x00"
+            return "0" if numeric else "\x00"
         return value
 
     def _data_item_fields(self, item: DataItem, indent: int = 1) -> list[str]:
@@ -538,6 +538,7 @@ class PythonMapper:
                         giving_targets.append(ops[i])
                     i += 1
                 results: list[str] = []
+                results.append(f"# TODO: verify divisor is non-zero before division (COBOL EC-SIZE-ZERO-DIVIDE)")
                 for t in giving_targets:
                     results.append(f"self.data.{_to_python_name(t)}.set({dividend} / {divisor})")
                 if has_remainder and remainder_target:
@@ -576,6 +577,7 @@ class PythonMapper:
                         giving_targets.append(ops[i])
                     i += 1
                 results = []
+                results.append(f"# TODO: verify divisor is non-zero before division (COBOL EC-SIZE-ZERO-DIVIDE)")
                 for t in giving_targets:
                     results.append(f"self.data.{_to_python_name(t)}.set({dividend} / {divisor})")
                 if has_remainder and remainder_target:
