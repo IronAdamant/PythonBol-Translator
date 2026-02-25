@@ -49,7 +49,9 @@ This document lists every COBOL construct handled by cobol-safe-translator, with
 
 | COBOL Verb | Python Translation | Notes |
 |------------|-------------------|-------|
-| `MOVE x TO y` | `self.data.y.set(x)` | Literal and field-to-field |
+| `MOVE x TO y` | `self.data.y.set(x)` | Literal, field-to-field, figurative constants |
+| `MOVE ALL "X" TO y` | TODO comment | Character fill not translated |
+| `MOVE CORRESPONDING` | TODO comment | Field matching requires manual review |
 | `ADD x TO y` | `self.data.y.add(x)` | Supports GIVING clause |
 | `SUBTRACT x FROM y` | `self.data.y.subtract(x)` | Supports GIVING clause |
 | `MULTIPLY x BY y` | `self.data.y.multiply(x)` | Supports GIVING clause |
