@@ -117,3 +117,16 @@ class TestConfigValidation:
         )
         patterns, excludes = load_config(config)
         assert len(patterns) == 0
+
+    def test_valid_custom_pattern_accepted(self, tmp_path):
+        config = tmp_path / "valid.json"
+        config.write_text(
+            '{"sensitive_patterns": ['
+            '{"pattern": "CUSTOM-FIELD", "level": "high", "reason": "custom test"}'
+            '], "exclude_names": ["FILLER"]}'
+        )
+        patterns, excludes = load_config(config)
+        assert len(patterns) == 1
+        assert patterns[0]["pattern"] == "CUSTOM-FIELD"
+        assert patterns[0]["level"] == "high"
+        assert excludes == ["FILLER"]

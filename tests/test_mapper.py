@@ -680,3 +680,36 @@ class TestPerformThruMethodCall:
         assert "TODO(high)" in source
         assert "self.main_para()" in source
         assert "only first paragraph" in source
+
+
+class TestConditionFigurativeConstants:
+    def test_zero_in_condition(self):
+        """ZERO in condition should resolve to 0, not self.data.zero.value."""
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A EQUAL TO ZERO."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "zero.value" not in source
+        while_line = [l for l in source.split("\n") if "while not" in l][0]
+        assert "== 0" in while_line
+
+    def test_spaces_in_condition(self):
+        """SPACES in condition should resolve to ' ', not self.data.spaces.value."""
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A EQUAL TO SPACES."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "spaces.value" not in source
+
+
+class TestDivideByWithoutGiving:
+    def test_divide_by_without_giving_emits_todo(self):
+        """DIVIDE x BY y without GIVING should emit TODO."""
+        src = _make_cobol(["DIVIDE WS-A BY WS-B."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "TODO(high)" in source

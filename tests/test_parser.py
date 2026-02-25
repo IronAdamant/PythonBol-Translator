@@ -10,6 +10,7 @@ from cobol_safe_translator.parser import (
     preprocess_lines,
     split_divisions,
 )
+from cobol_safe_translator.parser import parse_data_division
 from cobol_safe_translator.models import PicCategory
 
 
@@ -204,3 +205,24 @@ class TestFullParse:
         assert "CUST-ID" in child_names
         assert "CUST-SSN" in child_names
         assert "CUST-BALANCE" in child_names
+
+
+class TestOccursRedefines:
+    def test_occurs_count_extracted(self):
+        lines = [
+            "WORKING-STORAGE SECTION.",
+            "01 WS-ARRAY PIC 9(3) OCCURS 5 TIMES.",
+        ]
+        _, ws = parse_data_division(lines)
+        assert len(ws) == 1
+        assert ws[0].occurs == 5
+
+    def test_redefines_name_extracted(self):
+        lines = [
+            "WORKING-STORAGE SECTION.",
+            "01 WS-A PIC 9(3).",
+            "01 WS-B REDEFINES WS-A PIC X(3).",
+        ]
+        _, ws = parse_data_division(lines)
+        assert len(ws) == 2
+        assert ws[1].redefines == "WS-A"

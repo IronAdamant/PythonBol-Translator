@@ -693,7 +693,7 @@ class PythonMapper:
         c = c.replace(" EQUAL TO ", " == ")
         c = c.replace(" NOT = ", " != ")
         c = c.replace(" = ", " == ")
-        # Convert data names
+        # Convert data names and figurative constants
         tokens = c.split()
         result: list[str] = []
         for t in tokens:
@@ -703,6 +703,14 @@ class PythonMapper:
                 result.append(t)
             elif t.startswith('"') or t.startswith("'"):
                 result.append(t)
+            elif t.upper() in ("ZERO", "ZEROS", "ZEROES"):
+                result.append("0")
+            elif t.upper() in ("SPACE", "SPACES"):
+                result.append("' '")
+            elif t.upper() in ("HIGH-VALUE", "HIGH-VALUES"):
+                result.append("'\\xff'")
+            elif t.upper() in ("LOW-VALUE", "LOW-VALUES"):
+                result.append("'\\x00'")
             else:
                 result.append(f"self.data.{_to_python_name(t)}.value")
         return " ".join(result)
