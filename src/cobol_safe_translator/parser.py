@@ -269,7 +269,7 @@ def parse_environment(lines: list[str]) -> list[FileControl]:
 
 _LEVEL_RE = re.compile(r"^(\d{1,2})\s+([\w-]+)")
 _PIC_RE = re.compile(r"PIC(?:TURE)?\s+(S?[0-9XAVZBS().,+\-$CRDB]+)", re.IGNORECASE)
-_VALUE_RE = re.compile(r'VALUE\s+(?:IS\s+)?("[^"]*"|\'[^\']*\'|[^\s.]+)(?:\.|$|\s)', re.IGNORECASE)
+_VALUE_RE = re.compile(r'VALUE\s+(?:IS\s+)?("[^"]*"|\'[^\']*\'|-?\d+\.\d+|[^\s.]+)(?:\.|$|\s)', re.IGNORECASE)
 _OCCURS_RE = re.compile(r"OCCURS\s+(\d+)", re.IGNORECASE)
 _REDEFINES_RE = re.compile(r"REDEFINES\s+([\w-]+)", re.IGNORECASE)
 

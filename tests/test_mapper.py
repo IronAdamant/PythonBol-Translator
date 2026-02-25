@@ -619,3 +619,64 @@ class TestEmptyProgramId:
         source = generate_python(smap)
         ast.parse(source)
         assert "class UnnamedProgram" in source or "class Unnamed" in source
+
+
+class TestValueDecimalLiteral:
+    def test_value_with_decimal_point(self):
+        """VALUE 12.34 should parse the full decimal, not truncate at the period."""
+        from cobol_safe_translator.parser import parse_data_division
+        lines = [
+            "WORKING-STORAGE SECTION.",
+            "01 WS-C PIC 9(3)V99 VALUE 12.34.",
+        ]
+        _, ws = parse_data_division(lines)
+        assert len(ws) == 1
+        assert ws[0].value == "12.34"
+
+    def test_value_negative_decimal(self):
+        """VALUE -3.50 should be captured fully."""
+        from cobol_safe_translator.parser import parse_data_division
+        lines = [
+            "WORKING-STORAGE SECTION.",
+            "01 WS-D PIC S9(5)V99 VALUE -3.50.",
+        ]
+        _, ws = parse_data_division(lines)
+        assert len(ws) == 1
+        assert ws[0].value == "-3.50"
+
+
+class TestInitializeStatement:
+    def test_initialize_generates_commented_set(self):
+        """INITIALIZE should emit commented-out .set(0) code."""
+        src = _make_cobol(["INITIALIZE WS-A."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "# INITIALIZE WS-A" in source
+        assert "# self.data.ws_a.set(0)" in source
+
+
+class TestPerformTimesVariable:
+    def test_perform_variable_times(self):
+        """PERFORM para WS-COUNT TIMES should use variable for range."""
+        src = _make_cobol(["PERFORM MAIN-PARA WS-A TIMES."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "for _ in range(" in source
+        assert "ws_a" in source
+
+
+class TestPerformThruMethodCall:
+    def test_perform_thru_calls_first_paragraph(self):
+        """PERFORM THRU should call the first paragraph in addition to TODO."""
+        src = _make_cobol(["PERFORM MAIN-PARA THRU MAIN-PARA."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "TODO(high)" in source
+        assert "self.main_para()" in source
+        assert "only first paragraph" in source
