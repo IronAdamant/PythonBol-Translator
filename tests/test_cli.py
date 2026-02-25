@@ -35,6 +35,10 @@ class TestTranslateCommand:
         result = main(["translate", "/nonexistent/file.cob", "--output", str(tmp_path)])
         assert result == 1
 
+    def test_translate_directory_rejected(self, tmp_path):
+        result = main(["translate", str(tmp_path), "--output", str(tmp_path / "out")])
+        assert result == 1
+
 
 class TestMapCommand:
     def test_map_customer_report(self, customer_report_cob, tmp_path):

@@ -102,12 +102,10 @@ class CobolDecimal:
         if d is not None:
             self._value = self._coerce(self._value * d)
 
-    def divide(self, other: int | float | str | Decimal) -> None:
+    def divide(self, other: int | float | str | Decimal | CobolDecimal) -> None:
         """DIVIDE equivalent."""
-        try:
-            divisor = Decimal(str(other))
-        except InvalidOperation:
-            warnings.warn("DIVIDE: invalid operand, value unchanged", stacklevel=2)
+        divisor = self._to_decimal(other)
+        if divisor is None:
             return
         if divisor == 0:
             warnings.warn("DIVIDE BY ZERO: value unchanged (COBOL EC-SIZE-ZERO-DIVIDE)", stacklevel=2)

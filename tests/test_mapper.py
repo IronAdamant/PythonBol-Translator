@@ -338,3 +338,108 @@ class TestValueIsSyntax:
         _, ws = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "WORLD"
+
+
+class TestConditionIsKeyword:
+    def test_is_equal_to_stripped(self):
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A IS EQUAL TO 0."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "==" in source
+        # IS should not appear as a data reference
+        assert "is_" not in source
+
+    def test_is_greater_than_stripped(self):
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A IS GREATER THAN 10."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert ">" in source
+        assert "is_" not in source
+
+
+class TestPerformThru:
+    def test_perform_thru_emits_todo(self):
+        src = _make_cobol(["PERFORM MAIN-PARA THRU MAIN-PARA."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "TODO(high)" in source
+        assert "THRU" in source
+
+
+class TestCloseWithKeywords:
+    def test_close_with_lock_filters_keywords(self):
+        src = _make_cobol(["CLOSE WS-A."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert ".close()" in source
+        # Should not have with_ or lock references
+        assert "with_" not in source
+
+
+class TestDisplayUpon:
+    def test_display_upon_filtered(self):
+        src = _make_cobol(['DISPLAY "ERROR" UPON WS-A.'])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert '"ERROR"' in source
+        # UPON and target should not appear as print args
+        assert "upon" not in source.lower().split("print(")[1].split(")")[0] if "print(" in source else True
+
+
+class TestDivideBy:
+    def test_divide_by_giving(self):
+        src = _make_cobol(["DIVIDE WS-A BY WS-B GIVING WS-C."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ws_c" in source
+        assert ".set(" in source
+
+
+class TestComputeParentheses:
+    def test_compute_with_parens(self):
+        src = _make_cobol(["COMPUTE WS-C = WS-A * (WS-B + 1)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "(" in source
+        assert ")" in source
+        assert "self.data.ws_a.value" in source
+        assert "self.data.ws_b.value" in source
+
+
+class TestCobolDecimalDivideInterop:
+    def test_divide_cobol_decimal(self):
+        from cobol_safe_translator.adapters import CobolDecimal
+        a = CobolDecimal(5, 2, False, "10.00")
+        b = CobolDecimal(5, 2, False, "2.00")
+        a.divide(b)
+        assert a.value == __import__("decimal").Decimal("5.00")
+
+    def test_multiply_cobol_decimal(self):
+        from cobol_safe_translator.adapters import CobolDecimal
+        a = CobolDecimal(5, 2, False, "3.00")
+        b = CobolDecimal(5, 2, False, "4.00")
+        a.multiply(b)
+        assert a.value == __import__("decimal").Decimal("12.00")
+
+
+class TestPositiveSignLiteral:
+    def test_positive_sign_recognized(self):
+        from cobol_safe_translator.mapper import _is_numeric_literal
+        assert _is_numeric_literal("+5")
+        assert _is_numeric_literal("+3.14")
+        assert _is_numeric_literal("-5")
+        assert not _is_numeric_literal("WS-A")

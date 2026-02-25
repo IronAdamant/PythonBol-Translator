@@ -439,7 +439,11 @@ def parse_procedure(lines: list[str]) -> list[Paragraph]:
 
 
 def _split_operands(text: str) -> list[str]:
-    """Split operand text into tokens, preserving quoted strings as single tokens."""
+    """Split operand text into tokens, preserving quoted strings as single tokens.
+
+    Parentheses are split into separate tokens so COMPUTE expressions
+    like ``WS-A * (WS-B + 1)`` produce ``['WS-A', '*', '(', 'WS-B', '+', '1', ')']``.
+    """
     tokens: list[str] = []
     current = ""
     in_quote: str | None = None
@@ -456,6 +460,11 @@ def _split_operands(text: str) -> list[str]:
             if current:
                 tokens.append(current)
                 current = ""
+        elif ch in ("(", ")"):
+            if current:
+                tokens.append(current)
+                current = ""
+            tokens.append(ch)
         else:
             current += ch
 

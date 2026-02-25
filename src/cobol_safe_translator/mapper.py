@@ -29,8 +29,8 @@ def _is_numeric_literal(s: str) -> bool:
     """Check if a string is a numeric literal (integer or decimal)."""
     if not s:
         return False
-    # Handle negative sign
-    check = s[1:] if s.startswith("-") and len(s) > 1 else s
+    # Handle sign prefix
+    check = s[1:] if s[0] in ("-", "+") and len(s) > 1 else s
     # Must have at least one digit and only digits/one decimal point
     parts = check.split(".")
     if len(parts) == 1:
@@ -322,7 +322,13 @@ class PythonMapper:
 
     def _translate_display(self, stmt: CobolStatement) -> list[str]:
         parts: list[str] = []
-        for op in stmt.operands:
+        # Filter out UPON clause (DISPLAY x UPON CONSOLE)
+        operands = list(stmt.operands)
+        for i, op in enumerate(operands):
+            if op.upper() == "UPON":
+                operands = operands[:i]
+                break
+        for op in operands:
             if (len(op) >= 2 and ((op.startswith('"') and op.endswith('"')) or (op.startswith("'") and op.endswith("'")))):
                 # Quoted string literal — keep as-is
                 parts.append(op)
@@ -518,6 +524,23 @@ class PythonMapper:
                 return [f"# DIVIDE: missing target operand: {' '.join(ops)}"]
             target = _to_python_name(ops[into_idx + 1])
             return [f"self.data.{target}.divide({divisor})"]
+        # DIVIDE x BY y GIVING z (dividend is x, divisor is y)
+        if "BY" in upper_ops:
+            by_idx = next(i for i, o in enumerate(upper_ops) if o == "BY")
+            dividend = self._resolve_operand(ops[0])
+            if "GIVING" in upper_ops:
+                giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
+                divisor = self._resolve_operand(ops[by_idx + 1]) if by_idx + 1 < len(ops) and by_idx + 1 < giving_idx else "1"
+                giving_targets = ops[giving_idx + 1:]
+                results = []
+                for t in giving_targets:
+                    results.append(f"self.data.{_to_python_name(t)}.set({dividend} / {divisor})")
+                return results
+            if by_idx + 1 >= len(ops):
+                return [f"# DIVIDE BY: missing divisor: {' '.join(ops)}"]
+            divisor = self._resolve_operand(ops[by_idx + 1])
+            return [f"# TODO(high): DIVIDE BY without GIVING — manual translation required",
+                    f"# {dividend} / {divisor}"]
         return [f"# DIVIDE: could not parse operands: {' '.join(ops)}"]
 
     def _translate_compute(self, ops: list[str]) -> list[str]:
@@ -546,6 +569,14 @@ class PythonMapper:
 
         target = _to_method_name(ops[0])
         upper_ops = [o.upper() for o in ops]
+
+        # PERFORM ... THRU/THROUGH — paragraph range, can't fully translate
+        if "THRU" in upper_ops or "THROUGH" in upper_ops:
+            return [
+                f"# PERFORM THRU: {raw}",
+                f"# TODO(high): PERFORM THRU/THROUGH requires manual translation (paragraph range)",
+                f"self.{target}()  # only first paragraph — range endpoint missing",
+            ]
 
         # PERFORM ... VARYING — needs FROM/BY/UNTIL which we can't fully translate
         if "VARYING" in upper_ops:
@@ -596,6 +627,8 @@ class PythonMapper:
     def _translate_condition(self, cond: str) -> str:
         """Best-effort translation of a COBOL condition to Python."""
         c = cond.strip()
+        # Strip COBOL IS keyword before comparisons (e.g., IS EQUAL TO -> EQUAL TO)
+        c = re.sub(r'\bIS\s+', '', c)
         # Replace compound COBOL comparisons FIRST (before simple forms)
         c = c.replace(" NOT GREATER THAN ", " <= ")
         c = c.replace(" NOT LESS THAN ", " >= ")
@@ -641,19 +674,29 @@ class PythonMapper:
     def _translate_open(self, ops: list[str]) -> list[str]:
         if len(ops) >= 2:
             mode = ops[0].upper()
-            file_name = _to_python_name(ops[1])
-            if mode == "INPUT":
-                return [f"self.{file_name}.open_input()"]
-            elif mode == "OUTPUT":
-                return [
-                    f"# OPEN OUTPUT {ops[1]} — write not supported (safety)",
-                    f"# TODO(high): file output requires manual implementation",
-                ]
+            file_names = ops[1:]
+            results: list[str] = []
+            for fn in file_names:
+                py_name = _to_python_name(fn)
+                if mode == "INPUT":
+                    results.append(f"self.{py_name}.open_input()")
+                elif mode == "OUTPUT":
+                    results.append(f"# OPEN OUTPUT {fn} — write not supported (safety)")
+                    results.append(f"# TODO(high): file output requires manual implementation")
+            return results if results else [f"# OPEN: could not parse: {' '.join(ops)}"]
         return [f"# OPEN: could not parse: {' '.join(ops)}"]
 
     def _translate_close(self, ops: list[str]) -> list[str]:
+        _CLOSE_KEYWORDS = {"WITH", "LOCK", "NO", "REWIND"}
         results: list[str] = []
+        skip_next = False
         for op in ops:
+            if skip_next:
+                skip_next = False
+                continue
+            if op.upper() in _CLOSE_KEYWORDS:
+                # WITH may be followed by LOCK or NO REWIND — skip the keyword chain
+                continue
             py_name = _to_python_name(op)
             results.append(f"self.{py_name}.close()")
         return results

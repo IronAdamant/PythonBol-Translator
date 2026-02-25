@@ -63,7 +63,7 @@ def cmd_translate(args: argparse.Namespace) -> int:
     source_path = Path(args.path)
     output_dir = Path(args.output)
 
-    if not source_path.exists():
+    if not source_path.exists() or not source_path.is_file():
         print(red(f"Error: file not found: {source_path}"))
         return 1
 
@@ -108,7 +108,7 @@ def cmd_map(args: argparse.Namespace) -> int:
     source_path = Path(args.path)
     output_dir = Path(args.output)
 
-    if not source_path.exists():
+    if not source_path.exists() or not source_path.is_file():
         print(red(f"Error: file not found: {source_path}"))
         return 1
 

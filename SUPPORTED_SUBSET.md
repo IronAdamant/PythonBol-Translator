@@ -54,11 +54,13 @@ This document lists every COBOL construct handled by cobol-safe-translator, with
 | `SUBTRACT x FROM y` | `self.data.y.subtract(x)` | Supports GIVING clause |
 | `MULTIPLY x BY y` | `self.data.y.multiply(x)` | Supports GIVING clause |
 | `DIVIDE x INTO y` | `self.data.y.divide(x)` | Supports GIVING; REMAINDER emits TODO |
+| `DIVIDE x BY y GIVING z` | `self.data.z.set(x / y)` | BY form (x is dividend) |
 | `COMPUTE y = expr` | `self.data.y.set(expr)` | Expression needs manual review |
 | `DISPLAY items` | `print(items)` | |
 | `PERFORM para` | `self.para()` | Simple perform |
 | `PERFORM para N TIMES` | `for _ in range(N): self.para()` | Literal or variable count |
 | `PERFORM para UNTIL cond` | `while not (cond): self.para()` | Best-effort condition translation |
+| `PERFORM para THRU end` | TODO comment + partial call | Paragraph range not fully supported |
 | `PERFORM para VARYING` | TODO comment | FROM/BY/UNTIL requires manual translation |
 | `INITIALIZE x` | Commented-out `.set(0)` | Numeric/alphanumeric reset |
 | `IF condition` | TODO comment | Manual translation required |
