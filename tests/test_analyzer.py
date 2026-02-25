@@ -4,6 +4,7 @@ from cobol_safe_translator.analyzer import (
     analyze,
     detect_sensitivities,
     extract_dependencies,
+    load_config,
     DEFAULT_PATTERNS,
     DEFAULT_EXCLUDES,
 )
@@ -77,3 +78,37 @@ class TestFullAnalysis:
         smap = analyze(program)
         assert smap.stats.code_lines > 0
         assert smap.stats.total_lines == smap.stats.code_lines + smap.stats.comment_lines + smap.stats.blank_lines
+
+
+class TestConfigValidation:
+    def test_invalid_regex_skipped(self, tmp_path):
+        config = tmp_path / "bad_regex.json"
+        config.write_text(
+            '{"sensitive_patterns": ['
+            '{"pattern": "[invalid(regex", "level": "high", "reason": "test"}'
+            '], "exclude_names": []}'
+        )
+        patterns, excludes = load_config(config)
+        # Invalid regex should be skipped, resulting in empty list
+        assert len(patterns) == 0
+
+    def test_missing_keys_skipped(self, tmp_path):
+        config = tmp_path / "missing_keys.json"
+        config.write_text(
+            '{"sensitive_patterns": ['
+            '{"pattern": "SSN", "level": "high"}'
+            '], "exclude_names": []}'
+        )
+        patterns, excludes = load_config(config)
+        # Missing "reason" key — pattern should be skipped
+        assert len(patterns) == 0
+
+    def test_invalid_level_skipped(self, tmp_path):
+        config = tmp_path / "bad_level.json"
+        config.write_text(
+            '{"sensitive_patterns": ['
+            '{"pattern": "SSN", "level": "extreme", "reason": "test"}'
+            '], "exclude_names": []}'
+        )
+        patterns, excludes = load_config(config)
+        assert len(patterns) == 0

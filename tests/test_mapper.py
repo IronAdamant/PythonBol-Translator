@@ -3,7 +3,7 @@
 import ast
 
 from cobol_safe_translator.analyzer import analyze
-from cobol_safe_translator.mapper import generate_python
+from cobol_safe_translator.mapper import generate_python, PythonMapper
 from cobol_safe_translator.parser import parse_cobol
 
 
@@ -85,3 +85,91 @@ class TestPythonGeneration:
         smap = analyze(program)
         source = generate_python(smap)
         assert "TODO(high)" in source
+
+
+def _make_cobol(procedure_lines: list[str]) -> str:
+    """Helper: build minimal COBOL source with given PROCEDURE DIVISION lines."""
+    lines = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. TEST-PROG.",
+        "       DATA DIVISION.",
+        "       WORKING-STORAGE SECTION.",
+        "       01 WS-A PIC 9(5).",
+        "       01 WS-B PIC 9(5).",
+        "       01 WS-C PIC 9(5).",
+        "       PROCEDURE DIVISION.",
+        "       MAIN-PARA.",
+    ]
+    for pl in procedure_lines:
+        lines.append(f"           {pl}")
+    return "\n".join(lines) + "\n"
+
+
+class TestGivingClause:
+    def test_add_giving(self):
+        src = _make_cobol(["ADD WS-A TO WS-B GIVING WS-C."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ws_c" in source
+        assert ".set(" in source
+
+    def test_subtract_giving(self):
+        src = _make_cobol(["SUBTRACT WS-A FROM WS-B GIVING WS-C."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ws_c" in source
+        assert ".set(" in source
+
+    def test_multiply_giving(self):
+        src = _make_cobol(["MULTIPLY WS-A BY WS-B GIVING WS-C."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ws_c" in source
+        assert ".set(" in source
+
+    def test_divide_giving(self):
+        src = _make_cobol(["DIVIDE WS-A INTO WS-B GIVING WS-C."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ws_c" in source
+        assert ".set(" in source
+
+    def test_divide_giving_remainder(self):
+        src = _make_cobol(["DIVIDE WS-A INTO WS-B GIVING WS-C REMAINDER WS-A."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "TODO(high)" in source
+        assert "REMAINDER" in source
+
+
+class TestMoveCorresponding:
+    def test_move_corresponding_emits_todo(self):
+        src = _make_cobol(["MOVE CORRESPONDING WS-A TO WS-B."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "TODO(high)" in source
+        assert "MOVE CORRESPONDING" in source
+
+
+class TestFigurativeConstantsInArithmetic:
+    def test_add_zeros(self):
+        src = _make_cobol(["ADD ZEROS TO WS-A."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # ZEROS should resolve to 0, not self.data.zeros.value
+        assert "zeros.value" not in source
+        assert ".add(0)" in source

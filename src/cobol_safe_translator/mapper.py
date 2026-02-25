@@ -354,9 +354,20 @@ class PythonMapper:
             return op
         if op.isdigit() or (op.startswith("-") and len(op) > 1 and op[1:].isdigit()):
             return op
+        upper = op.upper()
+        if upper in ("ZEROS", "ZEROES", "ZERO"):
+            return "0"
+        if upper in ("SPACES", "SPACE"):
+            return "' '"
+        if upper in ("HIGH-VALUES", "HIGH-VALUE"):
+            return "'\\xff'"
+        if upper in ("LOW-VALUES", "LOW-VALUE"):
+            return "'\\x00'"
         return f"self.data.{_to_python_name(op)}.value"
 
     def _translate_add(self, ops: list[str]) -> list[str]:
+        if not ops:
+            return ["# ADD: no operands"]
         # ADD x [y ...] TO z [GIVING r]
         upper_ops = [o.upper() for o in ops]
         # Handle GIVING clause: result stored in GIVING target, not TO target
@@ -391,6 +402,8 @@ class PythonMapper:
         return [f"# ADD: could not parse operands: {' '.join(ops)}"]
 
     def _translate_subtract(self, ops: list[str]) -> list[str]:
+        if not ops:
+            return ["# SUBTRACT: no operands"]
         # SUBTRACT x [y ...] FROM z [GIVING r]
         upper_ops = [o.upper() for o in ops]
         if "GIVING" in upper_ops:
