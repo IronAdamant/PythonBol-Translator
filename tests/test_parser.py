@@ -43,6 +43,16 @@ class TestPreprocessing:
         assert "HELLO" in lines[0]
         assert "WORLD" in lines[0]
 
+    def test_continuation_unclosed_literal(self):
+        """Continuation line should merge unclosed string literals correctly."""
+        raw = (
+            '000100       DISPLAY "HELLO WOR                                          \n'
+            '000200-        "LD".                                                      \n'
+        )
+        lines = preprocess_lines(raw)
+        assert len(lines) == 1
+        assert '"HELLO WORLD"' in lines[0]
+
     def test_empty_input(self):
         assert preprocess_lines("") == []
 

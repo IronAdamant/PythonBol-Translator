@@ -101,3 +101,17 @@ class TestJsonExporter:
         assert len(data["dependencies"]) > 0
         targets = [d["call_target"] for d in data["dependencies"]]
         assert "AUDIT-LOG" in targets
+
+    def test_paragraphs_and_file_controls(self, customer_report_source):
+        """Verify JSON export includes paragraph and file_control structures."""
+        program = parse_cobol(customer_report_source)
+        smap = analyze(program)
+        data = json.loads(export_json(smap))
+        assert len(data["paragraphs"]) > 0
+        for p in data["paragraphs"]:
+            assert "name" in p
+            assert "statement_count" in p
+            assert "verbs" in p
+        assert len(data["file_controls"]) > 0
+        fc_names = [fc["name"] for fc in data["file_controls"]]
+        assert "CUSTOMER-FILE" in fc_names

@@ -67,14 +67,28 @@ def preprocess_lines(raw_text: str) -> list[str]:
                 # Merge continuation — preserve a space to avoid fusing tokens
                 stripped_prev = merged.rstrip()
                 stripped_cont = cont_content.lstrip()
-                in_literal = (
-                    (stripped_prev.endswith('"') and stripped_cont.startswith('"'))
-                    or (stripped_prev.endswith("'") and stripped_cont.startswith("'"))
-                )
-                if in_literal and len(stripped_prev) > 1 and len(stripped_cont) > 1:
-                    # Strip the trailing quote from prev and leading quote from cont
-                    # to avoid duplicate quote characters at the join point
-                    merged = stripped_prev[:-1] + stripped_cont[1:]
+                # Detect if prev line has an unclosed string literal
+                in_literal = False
+                if stripped_cont and stripped_cont[0] in ('"', "'"):
+                    quote = stripped_cont[0]
+                    # Count unescaped quotes in prev — odd means unclosed literal
+                    if stripped_prev.count(quote) % 2 == 1:
+                        in_literal = True
+                # Also handle the old case: prev ends with quote AND cont starts with quote
+                # (e.g., both closed — strip both to merge)
+                if not in_literal:
+                    in_literal = (
+                        (stripped_prev.endswith('"') and stripped_cont.startswith('"'))
+                        or (stripped_prev.endswith("'") and stripped_cont.startswith("'"))
+                    )
+                if in_literal and stripped_cont and stripped_cont[0] in ('"', "'"):
+                    # Strip the continuation quote delimiter and join without space
+                    if stripped_prev.endswith(stripped_cont[0]):
+                        # Prev ends with quote: strip trailing quote from prev and leading from cont
+                        merged = stripped_prev[:-1] + stripped_cont[1:]
+                    else:
+                        # Unclosed literal: strip only leading quote from continuation
+                        merged = stripped_prev + stripped_cont[1:]
                 elif in_literal:
                     merged = stripped_prev + stripped_cont
                 else:
