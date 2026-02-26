@@ -24,6 +24,8 @@ def discover_cobol_files(directory: Path, recursive: bool = False) -> list[Path]
     Returns:
         Sorted list of Path objects with COBOL extensions.
     """
+    if not directory.is_dir():
+        return []
     if recursive:
         candidates = directory.rglob("*")
     else:

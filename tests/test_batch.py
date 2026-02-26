@@ -156,6 +156,20 @@ class TestBatchCLI:
             ast.parse(source)  # must be valid Python
 
 
+class TestDiscoverCobolFilesNonDirectory:
+    def test_file_path_returns_empty_list(self, tmp_path):
+        """discover_cobol_files with a file path (not a dir) must return [] not crash."""
+        cob_file = tmp_path / "prog.cob"
+        cob_file.write_text("IDENTIFICATION DIVISION.")
+        result = discover_cobol_files(cob_file)
+        assert result == []
+
+    def test_nonexistent_path_returns_empty_list(self, tmp_path):
+        """discover_cobol_files with nonexistent path must return []."""
+        result = discover_cobol_files(tmp_path / "does_not_exist")
+        assert result == []
+
+
 class TestRunBatchExceptionHandling:
     def test_exception_in_process_fn_continues_batch(self, tmp_path):
         """run_batch must continue processing even if process_fn raises."""
