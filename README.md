@@ -85,7 +85,7 @@ See [SUPPORTED_SUBSET.md](SUPPORTED_SUBSET.md) for the full reference.
 
 ```bash
 pytest tests/ -v
-# 275 tests covering parser, analyzer, mapper, block_translator, exporters, adapters, CLI
+# 292 tests covering parser, analyzer, mapper, block_translator, exporters, adapters, CLI
 ```
 
 ## Project structure

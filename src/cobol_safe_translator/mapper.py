@@ -142,8 +142,8 @@ class PythonMapper:
         return "\n".join(lines)
 
     def _data_class(self) -> str:
-        """Generate @dataclass for WORKING-STORAGE data items."""
-        all_items = self.program.working_storage + self.program.file_section
+        """Generate @dataclass for WORKING-STORAGE, FILE SECTION, and LINKAGE data items."""
+        all_items = self.program.working_storage + self.program.file_section + self.program.linkage_section
         class_name = _to_python_name(self._program_id).title().replace('_', '') + "Data"
 
         if not all_items:
@@ -732,40 +732,67 @@ class PythonMapper:
     def _translate_condition(self, cond: str) -> str:
         """Best-effort translation of a COBOL condition to Python."""
         c = cond.strip()
+
+        # Extract quoted strings, replacing with placeholders to protect them
+        # from uppercasing and splitting
+        literals: list[str] = []
+
+        def _save_literal(m: re.Match) -> str:
+            literals.append(m.group(0))
+            return f"__LIT{len(literals) - 1}__"
+
+        c = re.sub(r'"[^"]*"|\'[^\']*\'', _save_literal, c)
+
         # Uppercase for case-insensitive comparison operator matching
-        # (data names are resolved later via token-level lookup)
-        c_upper = c.upper()
-        # Strip COBOL IS keyword before comparisons (e.g., IS EQUAL TO -> EQUAL TO)
+        c = c.upper()
+        # Strip COBOL IS keyword (but not class conditions — handled below)
         # Use (?:^|\s) instead of \b to avoid corrupting data names ending in -IS
-        c_upper = re.sub(r'(?:^|\s)IS\s+', ' ', c_upper).strip()
+        c = re.sub(r'(?:^|\s)IS\s+(?!NUMERIC|ALPHABETIC)', ' ', c).strip()
+        # COBOL class conditions: IS NUMERIC / IS ALPHABETIC
+        c = re.sub(r'\bIS\s+NUMERIC\b', '__CLASS_NUMERIC__', c)
+        c = re.sub(r'\bIS\s+ALPHABETIC\b', '__CLASS_ALPHABETIC__', c)
         # Replace compound COBOL comparisons FIRST — longest patterns first to avoid partial matches
-        c_upper = c_upper.replace(" NOT GREATER THAN OR EQUAL TO ", " < ")
-        c_upper = c_upper.replace(" NOT LESS THAN OR EQUAL TO ", " > ")
-        c_upper = c_upper.replace(" GREATER THAN OR EQUAL TO ", " >= ")
-        c_upper = c_upper.replace(" LESS THAN OR EQUAL TO ", " <= ")
-        c_upper = c_upper.replace(" NOT GREATER THAN ", " <= ")
-        c_upper = c_upper.replace(" NOT LESS THAN ", " >= ")
-        c_upper = c_upper.replace(" NOT EQUAL TO ", " != ")
+        c = c.replace(" NOT GREATER THAN OR EQUAL TO ", " < ")
+        c = c.replace(" NOT LESS THAN OR EQUAL TO ", " > ")
+        c = c.replace(" GREATER THAN OR EQUAL TO ", " >= ")
+        c = c.replace(" LESS THAN OR EQUAL TO ", " <= ")
+        c = c.replace(" NOT GREATER THAN ", " <= ")
+        c = c.replace(" NOT LESS THAN ", " >= ")
+        c = c.replace(" NOT EQUAL TO ", " != ")
         # Simple comparisons
-        c_upper = c_upper.replace(" GREATER THAN ", " > ")
-        c_upper = c_upper.replace(" LESS THAN ", " < ")
-        c_upper = c_upper.replace(" EQUAL TO ", " == ")
-        c_upper = c_upper.replace(" NOT = ", " != ")
-        c_upper = c_upper.replace(" = ", " == ")
-        c = c_upper
+        c = c.replace(" GREATER THAN ", " > ")
+        c = c.replace(" LESS THAN ", " < ")
+        c = c.replace(" EQUAL TO ", " == ")
+        c = c.replace(" NOT = ", " != ")
+        c = c.replace(" = ", " == ")
         # Separate parentheses from adjacent tokens before splitting
         c = re.sub(r'([()])', r' \1 ', c)
         # Convert data names and figurative constants
         tokens = c.split()
         result: list[str] = []
         for t in tokens:
-            if t in ("(", ")"):
+            # Restore literal placeholders
+            lit_m = re.match(r'^__LIT(\d+)__$', t)
+            if lit_m:
+                result.append(literals[int(lit_m.group(1))])
+            elif t in ("(", ")"):
                 result.append(t)
             elif t in (">", "<", "==", "!=", ">=", "<=", "AND", "OR", "NOT"):
                 result.append(t.lower() if t in ("AND", "OR", "NOT") else t)
+            elif t == "__CLASS_NUMERIC__":
+                # Look back — previous token is the subject
+                if result:
+                    subj = result.pop()
+                    result.append(f"str({subj}).replace('.','').replace('-','').isdigit()")
+                else:
+                    result.append("# TODO(high): IS NUMERIC — no subject found")
+            elif t == "__CLASS_ALPHABETIC__":
+                if result:
+                    subj = result.pop()
+                    result.append(f"str({subj}).isalpha()")
+                else:
+                    result.append("# TODO(high): IS ALPHABETIC — no subject found")
             elif _is_numeric_literal(t):
-                result.append(t)
-            elif t.startswith('"') or t.startswith("'"):
                 result.append(t)
             elif t.upper() in ("ZERO", "ZEROS", "ZEROES"):
                 result.append("0")

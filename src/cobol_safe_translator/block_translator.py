@@ -207,7 +207,8 @@ def translate_evaluate_block(
             continue
 
         if is_other:
-            keyword = "else:"
+            # WHEN OTHER as first clause: can't emit bare else: — use if True: instead
+            keyword = "else:" if clause_idx > 0 else "if True:  # WHEN OTHER (no prior WHEN)"
         else:
             if is_true_subject:
                 cond = translate_cond_fn(" ".join(when_ops))
@@ -276,6 +277,31 @@ def is_inline_if(stmt: CobolStatement) -> bool:
     return any(o.upper() in _KNOWN_BODY_VERBS for o in stmt.operands)
 
 
+def _translate_inline_body(
+    body_parts: list[str],
+    translate_stmt_fn: Callable[[CobolStatement], list[str]] | None,
+    indent: int,
+) -> list[str]:
+    """Translate inline IF/ELSE body parts to Python lines."""
+    lines: list[str] = []
+    if translate_stmt_fn and body_parts:
+        body_verb = body_parts[0].upper()
+        body_operands = body_parts[1:]
+        body_stmt = CobolStatement(
+            verb=body_verb,
+            raw_text=" ".join(body_parts),
+            operands=body_operands,
+        )
+        translated = translate_stmt_fn(body_stmt)
+        for tl in translated:
+            lines.append(_indent_line(tl, indent))
+    else:
+        lines.append(
+            _indent_line(f"pass  # TODO(high): inline body: {' '.join(body_parts)}", indent)
+        )
+    return lines
+
+
 def translate_inline_if(
     stmt: CobolStatement,
     translate_cond_fn: Callable[[str], str],
@@ -297,27 +323,28 @@ def translate_inline_if(
         ]
 
     cond_text = " ".join(ops[:verb_idx])
-    body_parts = [o for o in ops[verb_idx:] if o.upper() != "END-IF"]
+    remaining = [o for o in ops[verb_idx:] if o.upper() != "END-IF"]
     py_cond = translate_cond_fn(cond_text)
 
-    lines = [_indent_line(f"if {py_cond}:", indent)]
+    # Split remaining into then-body and else-body at ELSE keyword
+    then_parts: list[str] = []
+    else_parts: list[str] = []
+    in_else = False
+    for o in remaining:
+        if o.upper() == "ELSE":
+            in_else = True
+            continue
+        if in_else:
+            else_parts.append(o)
+        else:
+            then_parts.append(o)
 
-    # Translate the body verb if a statement translator is available
-    if translate_stmt_fn and body_parts:
-        body_verb = body_parts[0].upper()
-        body_operands = body_parts[1:]
-        body_stmt = CobolStatement(
-            verb=body_verb,
-            raw_text=" ".join(body_parts),
-            operands=body_operands,
-        )
-        translated = translate_stmt_fn(body_stmt)
-        for tl in translated:
-            lines.append(_indent_line(tl, indent + 1))
-    else:
-        lines.append(
-            _indent_line(f"pass  # TODO(high): inline body: {' '.join(body_parts)}", indent + 1)
-        )
+    lines = [_indent_line(f"if {py_cond}:", indent)]
+    lines.extend(_translate_inline_body(then_parts, translate_stmt_fn, indent + 1))
+
+    if else_parts:
+        lines.append(_indent_line("else:", indent))
+        lines.extend(_translate_inline_body(else_parts, translate_stmt_fn, indent + 1))
 
     return lines
 

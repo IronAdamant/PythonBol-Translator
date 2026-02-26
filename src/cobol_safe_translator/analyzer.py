@@ -105,6 +105,7 @@ def detect_sensitivities(
     all_names = (
         _collect_all_data_names(program.file_section)
         + _collect_all_data_names(program.working_storage)
+        + _collect_all_data_names(program.linkage_section)
     )
 
     exclude_set = {e.upper() for e in excludes}
@@ -160,6 +161,7 @@ def compute_stats(program: CobolProgram) -> ProgramStats:
     data_count = (
         len(_collect_all_data_names(program.file_section))
         + len(_collect_all_data_names(program.working_storage))
+        + len(_collect_all_data_names(program.linkage_section))
     )
 
     stmt_count = sum(len(p.statements) for p in program.paragraphs)

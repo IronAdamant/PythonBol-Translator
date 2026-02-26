@@ -1225,3 +1225,119 @@ class TestCallWithUsing:
         ast.parse(source)
         assert "SUB-PROG" in source or "sub_prog" in source
         assert "TODO(high)" in source
+
+
+# === Pass 1 fixes ===
+
+
+class TestConditionStringLiteral:
+    """Pass 1 Issue 1-2: Quoted strings in conditions should not be uppercased or split."""
+
+    def test_quoted_string_preserved_in_condition(self):
+        """Quoted string literal in condition should not be uppercased."""
+        src = _make_cobol(['IF WS-A = "hello" DISPLAY WS-A END-IF.'])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # The literal should stay lowercase
+        assert '"hello"' in source
+        assert '"HELLO"' not in source
+
+    def test_quoted_string_with_spaces_not_split(self):
+        """Quoted string with spaces should remain one token."""
+        src = _make_cobol([
+            'IF WS-A = "hello world"',
+            '    DISPLAY WS-A',
+            'END-IF.',
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert '"hello world"' in source
+
+
+class TestClassConditions:
+    """Pass 1 Issue 4: IS NUMERIC / IS ALPHABETIC should produce valid Python."""
+
+    def test_is_numeric_condition(self):
+        """IS NUMERIC should translate to isdigit() check."""
+        src = _make_cobol([
+            "IF WS-A IS NUMERIC",
+            "    DISPLAY WS-A",
+            "END-IF.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "isdigit()" in source
+
+    def test_is_alphabetic_condition(self):
+        """IS ALPHABETIC should translate to isalpha() check."""
+        src = _make_cobol([
+            "IF WS-A IS ALPHABETIC",
+            "    DISPLAY WS-A",
+            "END-IF.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "isalpha()" in source
+
+
+class TestLinkageSectionInMapper:
+    """Pass 1 Issue 5: Linkage section items should appear in generated data class."""
+
+    def test_linkage_items_in_data_class(self):
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. TEST-LINK.",
+            "       DATA DIVISION.",
+            "       WORKING-STORAGE SECTION.",
+            "       01 WS-A PIC 9(5).",
+            "       LINKAGE SECTION.",
+            "       01 LK-PARAM PIC X(10).",
+            "       PROCEDURE DIVISION.",
+            "       MAIN-PARA.",
+            "           DISPLAY LK-PARAM.",
+        ]
+        src = "\n".join(lines) + "\n"
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "lk_param" in source
+
+    def test_linkage_sensitivity_detected(self):
+        """Linkage section items with sensitive names should be flagged."""
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. TEST-LINK.",
+            "       DATA DIVISION.",
+            "       LINKAGE SECTION.",
+            "       01 LK-SSN PIC X(11).",
+            "       PROCEDURE DIVISION.",
+            "       MAIN-PARA.",
+            "           DISPLAY LK-SSN.",
+        ]
+        src = "\n".join(lines) + "\n"
+        program = parse_cobol(src)
+        smap = analyze(program)
+        ssn_flags = [f for f in smap.sensitivities if "SSN" in f.data_name]
+        assert len(ssn_flags) >= 1
+
+
+class TestInlineIfWithElse:
+    """Pass 1 Issue 3: Inline IF with ELSE should produce if/else block."""
+
+    def test_inline_if_else(self):
+        src = _make_cobol(["IF WS-A > 0 DISPLAY WS-A ELSE DISPLAY WS-B END-IF."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "if self.data.ws_a.value > 0:" in source
+        assert "else:" in source

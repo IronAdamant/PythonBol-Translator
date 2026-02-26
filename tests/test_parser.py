@@ -301,6 +301,38 @@ class TestPicRegexExtended:
         assert m is not None
 
 
+class TestPicIsSyntax:
+    """Pass 1 Issue 8: PIC IS / PICTURE IS should be recognized."""
+
+    def test_pic_is_syntax(self):
+        from cobol_safe_translator.parser import _PIC_RE
+        m = _PIC_RE.search("PIC IS 9(5)")
+        assert m is not None
+        assert m.group(1).startswith("9")
+
+    def test_picture_is_syntax(self):
+        from cobol_safe_translator.parser import _PIC_RE
+        m = _PIC_RE.search("PICTURE IS X(10)")
+        assert m is not None
+        assert m.group(1).startswith("X")
+
+    def test_pic_without_is_still_works(self):
+        from cobol_safe_translator.parser import _PIC_RE
+        m = _PIC_RE.search("PIC 9(5)")
+        assert m is not None
+
+    def test_pic_is_in_data_item(self):
+        from cobol_safe_translator.parser import parse_data_division
+        lines = [
+            "WORKING-STORAGE SECTION.",
+            "01 WS-A PIC IS 9(5).",
+        ]
+        _, ws, _ = parse_data_division(lines)
+        assert len(ws) == 1
+        assert ws[0].pic is not None
+        assert ws[0].pic.size == 5
+
+
 class TestOccursRedefines:
     def test_occurs_count_extracted(self):
         lines = [

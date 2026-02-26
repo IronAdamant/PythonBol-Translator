@@ -365,3 +365,59 @@ class TestFigurativeConstantsResolve:
 
     def test_case_insensitive_spaces(self):
         assert _fallback_resolve("spaces") == "' '"
+
+
+# === Pass 1 additions ===
+
+
+class TestInlineIfWithElse:
+    """Pass 1 Issue 3: Inline IF with ELSE branch."""
+
+    def test_inline_if_else_produces_both_branches(self):
+        stmt = _make("IF", "WS-A", ">", "0", "DISPLAY", "WS-A", "ELSE", "DISPLAY", "WS-B")
+        lines = translate_inline_if(stmt, _cond, indent=0, translate_stmt_fn=_stmt_fn)
+        assert any("if " in line for line in lines)
+        assert any("else:" in line for line in lines)
+        assert any("# DISPLAY WS-A" in line for line in lines)
+        assert any("# DISPLAY WS-B" in line for line in lines)
+
+    def test_inline_if_else_without_translator(self):
+        stmt = _make("IF", "WS-A", ">", "0", "MOVE", "1", "TO", "WS-B", "ELSE", "MOVE", "0", "TO", "WS-B")
+        lines = translate_inline_if(stmt, _cond, indent=0)
+        assert any("if " in line for line in lines)
+        assert any("else:" in line for line in lines)
+
+
+class TestEvaluateWhenOtherFirst:
+    """Pass 1 Issue 6: WHEN OTHER as first clause should not emit bare else:."""
+
+    def test_when_other_first_generates_if_true(self):
+        stmts = [
+            _make("EVALUATE", "TRUE"),
+            _make("WHEN", "OTHER"),
+            _make("DISPLAY", "DEFAULT"),
+            _make("END-EVALUATE"),
+        ]
+        lines, next_i = translate_evaluate_block(stmts, 0, _stmt_fn, _cond, _resolve, indent=0)
+        # Should NOT start with bare 'else:' — should use 'if True:' or similar
+        first_code_line = [l for l in lines if l.strip() and not l.strip().startswith("#")][0]
+        assert "else:" not in first_code_line or "if" in first_code_line
+
+
+class TestIsInlineIfFalsePositives:
+    """Pass 1 Issue 7: Data names like DISPLAY-FLAG should not trigger inline IF."""
+
+    def test_hyphenated_verb_prefix_data_name(self):
+        """DISPLAY-FLAG is a data name, not the DISPLAY verb."""
+        stmt = _make("IF", "DISPLAY-FLAG", "=", "1")
+        assert is_inline_if(stmt) is False
+
+    def test_read_status_data_name(self):
+        """READ-STATUS is a data name, not the READ verb."""
+        stmt = _make("IF", "READ-STATUS", "=", "Y")
+        assert is_inline_if(stmt) is False
+
+    def test_exact_verb_name_matches(self):
+        """Exact verb name DISPLAY should still match."""
+        stmt = _make("IF", "WS-A", ">", "0", "DISPLAY", "WS-A")
+        assert is_inline_if(stmt) is True
