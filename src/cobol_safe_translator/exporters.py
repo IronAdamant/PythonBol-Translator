@@ -11,8 +11,6 @@ from datetime import datetime
 
 from .models import (
     DataItem,
-    Dependency,
-    ProgramStats,
     SensitivityFlag,
     SensitivityLevel,
     SoftwareMap,
@@ -155,8 +153,18 @@ class MarkdownExporter:
 
     @staticmethod
     def _mermaid_id(name: str) -> str:
-        """Sanitize a name for use as a Mermaid node ID."""
-        return re.sub(r"[^A-Za-z0-9_]", "_", name)
+        """Sanitize a name for use as a Mermaid node ID.
+
+        Uses char-code encoding for non-alphanumeric characters to avoid
+        collisions (e.g., PROG-A vs PROG.A would otherwise both become PROG_A).
+        """
+        result = []
+        for c in name:
+            if c.isalnum() or c == "_":
+                result.append(c)
+            else:
+                result.append(f"_{ord(c):x}_")
+        return "".join(result)
 
     def _dependency_graph(self) -> str:
         lines = ["## Dependency Graph\n"]

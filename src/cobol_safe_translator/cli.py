@@ -27,11 +27,13 @@ def _supports_color() -> bool:
     return sys.stdout.isatty()
 
 
-_COLOR = _supports_color()
+def _color_enabled() -> bool:
+    """Check color support lazily (not at import time)."""
+    return _supports_color()
 
 
 def _c(code: str, text: str) -> str:
-    if not _COLOR:
+    if not _color_enabled():
         return text
     return f"\033[{code}m{text}\033[0m"
 
@@ -56,18 +58,17 @@ def cyan(text: str) -> str:
     return _c("36", text)
 
 
-# --- Subcommands ---
+# --- Shared helpers ---
 
-def cmd_translate(args: argparse.Namespace) -> int:
-    """Parse, analyze, and generate Python translation."""
+def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple[int, object, object] | tuple[int, None, None]:
+    """Parse and analyze a COBOL source file. Returns (exit_code, program, smap)."""
     source_path = Path(args.path)
-    output_dir = Path(args.output)
 
     if not source_path.exists() or not source_path.is_file():
-        print(red(f"Error: file not found: {source_path}"))
-        return 1
+        print(red(f"Error: file not found: {source_path}"), file=sys.stderr)
+        return 1, None, None
 
-    print(bold(f"Translating: {source_path}"))
+    print(bold(f"{label}: {source_path}"))
 
     # Parse
     program = parse_cobol_file(source_path)
@@ -86,6 +87,19 @@ def cmd_translate(args: argparse.Namespace) -> int:
     for w in smap.warnings:
         print(yellow(f"  Warning: {w}"))
 
+    return 0, program, smap
+
+
+# --- Subcommands ---
+
+def cmd_translate(args: argparse.Namespace) -> int:
+    """Parse, analyze, and generate Python translation."""
+    output_dir = Path(args.output)
+
+    rc, program, smap = _parse_and_analyze(args, "Translating")
+    if rc != 0 or program is None or smap is None:
+        return rc
+
     # Generate Python
     python_source = generate_python(smap)
 
@@ -95,7 +109,7 @@ def cmd_translate(args: argparse.Namespace) -> int:
         out_path = output_dir / out_name
         out_path.write_text(python_source, encoding="utf-8")
     except OSError as e:
-        print(red(f"Error: could not write output: {e}"))
+        print(red(f"Error: could not write output: {e}"), file=sys.stderr)
         return 1
     print(green(f"  Output: {out_path}"))
 
@@ -105,28 +119,11 @@ def cmd_translate(args: argparse.Namespace) -> int:
 
 def cmd_map(args: argparse.Namespace) -> int:
     """Parse, analyze, and export reports."""
-    source_path = Path(args.path)
     output_dir = Path(args.output)
 
-    if not source_path.exists() or not source_path.is_file():
-        print(red(f"Error: file not found: {source_path}"))
-        return 1
-
-    print(bold(f"Mapping: {source_path}"))
-
-    # Parse
-    program = parse_cobol_file(source_path)
-    print(green(f"  Parsed: {program.program_id} ({len(program.paragraphs)} paragraphs)"))
-
-    # Analyze
-    config_path = args.config if args.config else None
-    smap = analyze(program, config_path=config_path)
-
-    if smap.sensitivities:
-        high = sum(1 for s in smap.sensitivities if s.level.value == "high")
-        med = sum(1 for s in smap.sensitivities if s.level.value == "medium")
-        low = sum(1 for s in smap.sensitivities if s.level.value == "low")
-        print(yellow(f"  Sensitivities: {high} high, {med} medium, {low} low"))
+    rc, program, smap = _parse_and_analyze(args, "Mapping")
+    if rc != 0 or program is None or smap is None:
+        return rc
 
     # Export reports
     try:
@@ -142,7 +139,7 @@ def cmd_map(args: argparse.Namespace) -> int:
         json_path.write_text(json_report, encoding="utf-8")
         print(green(f"  JSON: {json_path}"))
     except OSError as e:
-        print(red(f"Error: could not write output: {e}"))
+        print(red(f"Error: could not write output: {e}"), file=sys.stderr)
         return 1
 
     print(bold(green("Done.")))
@@ -150,8 +147,11 @@ def cmd_map(args: argparse.Namespace) -> int:
 
 
 def _to_python_filename(program_id: str) -> str:
-    """Convert COBOL program ID to Python filename."""
-    return program_id.lower().replace("-", "_") + ".py"
+    """Convert COBOL program ID to a safe Python filename."""
+    import re as _re
+    name = program_id.lower().replace("-", "_")
+    name = _re.sub(r"[^\w]", "_", name)
+    return (name or "unnamed") + ".py"
 
 
 # --- Main CLI setup ---
@@ -220,4 +220,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

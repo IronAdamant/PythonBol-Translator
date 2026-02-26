@@ -116,7 +116,8 @@ class CobolDecimal:
 
     def __repr__(self) -> str:
         sign = "S" if self.signed else ""
-        return f"CobolDecimal({sign}9({self.integer_digits})V9({self.decimal_digits})={self._value})"
+        dec_part = f"V9({self.decimal_digits})" if self.decimal_digits > 0 else ""
+        return f"CobolDecimal({sign}9({self.integer_digits}){dec_part}={self._value})"
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, CobolDecimal):
@@ -182,19 +183,67 @@ class CobolString:
     def value(self) -> str:
         return self._value
 
-    def set(self, value: str) -> None:
+    def set(self, value: str | int | float) -> None:
         """MOVE equivalent for string fields."""
         self._value = self._coerce(value)
 
     def __repr__(self) -> str:
         return f"CobolString(X({self.size})={self._value!r})"
 
-    def __eq__(self, other: object) -> bool:
+    def _compare_value(self, other: object) -> str | None:
+        """Get the coerced value of other for comparison, or None if incompatible."""
         if isinstance(other, CobolString):
-            return self._value == other._value
+            # Pad to the longer size for COBOL-style comparison
+            max_size = max(self.size, other.size)
+            return other._value.ljust(max_size)
         if isinstance(other, str):
-            return self._value == self._coerce(other)
-        return NotImplemented
+            return self._coerce(other)
+        return None
+
+    def __eq__(self, other: object) -> bool:
+        val = self._compare_value(other)
+        if val is None:
+            return NotImplemented
+        if isinstance(other, CobolString):
+            max_size = max(self.size, other.size)
+            return self._value.ljust(max_size) == val
+        return self._value == val
+
+    def __lt__(self, other: object) -> bool:
+        val = self._compare_value(other)
+        if val is None:
+            return NotImplemented
+        if isinstance(other, CobolString):
+            max_size = max(self.size, other.size)
+            return self._value.ljust(max_size) < val
+        return self._value < val
+
+    def __gt__(self, other: object) -> bool:
+        val = self._compare_value(other)
+        if val is None:
+            return NotImplemented
+        if isinstance(other, CobolString):
+            max_size = max(self.size, other.size)
+            return self._value.ljust(max_size) > val
+        return self._value > val
+
+    def __le__(self, other: object) -> bool:
+        val = self._compare_value(other)
+        if val is None:
+            return NotImplemented
+        if isinstance(other, CobolString):
+            max_size = max(self.size, other.size)
+            return self._value.ljust(max_size) <= val
+        return self._value <= val
+
+    def __ge__(self, other: object) -> bool:
+        val = self._compare_value(other)
+        if val is None:
+            return NotImplemented
+        if isinstance(other, CobolString):
+            max_size = max(self.size, other.size)
+            return self._value.ljust(max_size) >= val
+        return self._value >= val
 
     def __str__(self) -> str:
         return self._value
@@ -207,8 +256,9 @@ class FileAdapter:
     guarantee of the translator. It provides sequential read access only.
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, encoding: str = "utf-8") -> None:
         self.path = path
+        self.encoding = encoding
         self._file = None
         self._eof = False
 
@@ -220,7 +270,7 @@ class FileAdapter:
         """OPEN INPUT equivalent."""
         if self._file is not None:
             self.close()
-        self._file = open(self.path, "r", encoding="utf-8")
+        self._file = open(self.path, "r", encoding=self.encoding)
         self._eof = False
 
     def read(self) -> str | None:
@@ -246,4 +296,7 @@ class FileAdapter:
         self.close()
 
     def __del__(self) -> None:
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass

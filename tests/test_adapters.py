@@ -212,6 +212,65 @@ class TestAdapterComparisonEdgeCases:
         assert not (d == "not-a-number")
 
 
+class TestCobolStringComparisons:
+    """Tests for CobolString comparison operators (COBOL-style padding)."""
+
+    def test_lt(self):
+        a = CobolString(5, "AB")
+        b = CobolString(5, "CD")
+        assert a < b
+        assert a < "CD"
+
+    def test_gt(self):
+        a = CobolString(5, "CD")
+        b = CobolString(5, "AB")
+        assert a > b
+        assert a > "AB"
+
+    def test_le(self):
+        a = CobolString(5, "AB")
+        b = CobolString(5, "AB")
+        assert a <= b
+        assert a <= "AB"
+        assert a <= "CD"
+
+    def test_ge(self):
+        a = CobolString(5, "CD")
+        assert a >= "AB"
+        assert a >= "CD"
+
+    def test_different_size_padding(self):
+        """COBOL pads shorter operand with spaces for comparison."""
+        a = CobolString(3, "AB")
+        b = CobolString(5, "AB")
+        assert a == b
+
+    def test_set_accepts_int(self):
+        """CobolString.set should accept int (from MOVE ZEROS)."""
+        s = CobolString(5)
+        s.set(0)
+        assert s.value == "0    "
+
+    def test_set_accepts_float(self):
+        s = CobolString(10)
+        s.set(3.14)
+        assert s.value.startswith("3.14")
+
+
+class TestCobolDecimalRepr:
+    def test_repr_no_decimals_omits_v(self):
+        d = CobolDecimal(5, 0)
+        r = repr(d)
+        assert "V" not in r
+        assert "9(5)" in r
+
+    def test_repr_with_decimals_includes_v(self):
+        d = CobolDecimal(5, 2, signed=True)
+        r = repr(d)
+        assert "V9(2)" in r
+        assert "S" in r
+
+
 class TestCobolDecimalConversions:
     def test_float_conversion(self):
         d = CobolDecimal(5, 2, False, "12.34")

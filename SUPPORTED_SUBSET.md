@@ -8,7 +8,7 @@ This document lists every COBOL construct handled by cobol-safe-translator, with
 |----------|---------|-------|
 | IDENTIFICATION | Full | PROGRAM-ID, AUTHOR extracted |
 | ENVIRONMENT | Partial | SELECT/ASSIGN parsed; other clauses ignored |
-| DATA | Partial | FILE SECTION, WORKING-STORAGE SECTION; LINKAGE SECTION skipped |
+| DATA | Partial | FILE SECTION, WORKING-STORAGE SECTION, LINKAGE SECTION (parsed and stored) |
 | PROCEDURE | Partial | See verb table below |
 
 ## Data Division
@@ -65,7 +65,7 @@ This document lists every COBOL construct handled by cobol-safe-translator, with
 | `PERFORM para THRU end` | TODO comment + partial call | Paragraph range not fully supported |
 | `PERFORM para VARYING` | TODO comment | FROM/BY/UNTIL requires manual translation |
 | `INITIALIZE x` | Commented-out `.set(0)` | Numeric/alphanumeric reset |
-| `IF condition` | `if cond:` / `else:` | Multi-line: full translation; inline: condition translated, body TODO |
+| `IF condition` | `if cond:` / `else:` | Multi-line: full translation; inline: condition and body translated |
 | `EVALUATE TRUE` | `if`/`elif`/`else` chain | WHEN conditions translated; WHEN OTHER → else |
 | `EVALUATE variable` | `if subj == val:` chain | Equality comparisons; WHEN OTHER → else |
 | `EVALUATE ALSO` | TODO comment | Multi-subject EVALUATE not supported |
@@ -119,7 +119,7 @@ Default patterns (configurable via `protected.json`):
 1. **No copybook expansion** — COPY/REPLACE statements are not processed
 2. **No GO TO translation** — Emits `raise NotImplementedError`; requires manual restructuring
 3. **No WRITE support** — File output is a safety restriction by design
-4. **Inline IF/EVALUATE** — Single-line IF/EVALUATE have condition translated but body as TODO
+4. **Inline IF** — Single-line IF has condition and body verb translated; inline EVALUATE emits TODO
 5. **No nested programs** — Only single-program files supported
 6. **No REDEFINES logic** — Field name stored but no memory overlay modeled
 7. **88-level conditions** — Skipped; not translated to boolean checks

@@ -327,7 +327,7 @@ class TestValueIsSyntax:
             "WORKING-STORAGE SECTION.",
             '01 WS-X PIC X(5) VALUE IS "HELLO".',
         ]
-        _, ws = parse_data_division(lines)
+        _, ws, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "HELLO"
 
@@ -338,7 +338,7 @@ class TestValueIsSyntax:
             "WORKING-STORAGE SECTION.",
             '01 WS-Y PIC X(5) VALUE "WORLD".',
         ]
-        _, ws = parse_data_division(lines)
+        _, ws, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "WORLD"
 
@@ -362,6 +362,25 @@ class TestConditionIsKeyword:
         ast.parse(source)
         assert ">" in source
         assert "is_" not in source
+
+
+class TestConditionCaseInsensitive:
+    def test_mixed_case_greater_than(self):
+        """Condition translation should be case-insensitive (issue #1)."""
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A Greater Than 10."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert ">" in source
+
+    def test_mixed_case_equal_to(self):
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A Equal To 0."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "==" in source
 
 
 class TestPerformThru:
@@ -634,7 +653,7 @@ class TestValueDecimalLiteral:
             "WORKING-STORAGE SECTION.",
             "01 WS-C PIC 9(3)V99 VALUE 12.34.",
         ]
-        _, ws = parse_data_division(lines)
+        _, ws, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "12.34"
 
@@ -645,7 +664,7 @@ class TestValueDecimalLiteral:
             "WORKING-STORAGE SECTION.",
             "01 WS-D PIC S9(5)V99 VALUE -3.50.",
         ]
-        _, ws = parse_data_division(lines)
+        _, ws, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "-3.50"
 
@@ -766,7 +785,7 @@ class TestIfStatement:
         source = generate_python(smap)
         ast.parse(source)
         assert "if self.data.ws_a.value > 0:" in source
-        assert "TODO(high)" in source  # body is TODO for inline
+        assert "print(" in source  # inline body is now translated
 
     def test_multiline_if_generates_if_block(self):
         """Multi-line IF should generate a proper if block."""

@@ -28,7 +28,6 @@ from .models import (
     Paragraph,
     PicCategory,
     SensitivityFlag,
-    SensitivityLevel,
     SoftwareMap,
 )
 
@@ -103,7 +102,9 @@ class PythonMapper:
     def generate(self) -> str:
         """Generate the complete Python module source."""
         if not self.program.program_id:
-            self.program.program_id = "UNNAMED"
+            self._program_id = "UNNAMED"
+        else:
+            self._program_id = self.program.program_id
         parts: list[str] = []
         parts.append(self._header())
         parts.append(self._imports())
@@ -115,7 +116,7 @@ class PythonMapper:
     def _header(self) -> str:
         lines = [
             '"""',
-            f"Auto-generated Python translation of COBOL program: {self.program.program_id}",
+            f"Auto-generated Python translation of COBOL program: {self._program_id}",
             f"Source: {self.program.source_path}",
             f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "",
@@ -143,7 +144,7 @@ class PythonMapper:
     def _data_class(self) -> str:
         """Generate @dataclass for WORKING-STORAGE data items."""
         all_items = self.program.working_storage + self.program.file_section
-        class_name = _to_python_name(self.program.program_id).title().replace('_', '') + "Data"
+        class_name = _to_python_name(self._program_id).title().replace('_', '') + "Data"
 
         if not all_items:
             # Emit an empty dataclass so the program class can reference it
@@ -226,11 +227,11 @@ class PythonMapper:
 
     def _program_class(self) -> str:
         """Generate the main program class with paragraph methods."""
-        class_name = _to_python_name(self.program.program_id).title().replace("_", "")
+        class_name = _to_python_name(self._program_id).title().replace("_", "")
         data_class = f"{class_name}Data"
 
         lines = [f"class {class_name}Program:"]
-        lines.append(f'    """Translated from COBOL program {self.program.program_id}."""')
+        lines.append(f'    """Translated from COBOL program {self._program_id}."""')
         lines.append("")
         lines.append(f"    def __init__(self) -> None:")
         lines.append(f"        self.data = {data_class}()")
@@ -281,6 +282,7 @@ class PythonMapper:
                 if is_inline_if(stmt):
                     block_lines = translate_inline_if(
                         stmt, self._translate_condition, indent=2,
+                        translate_stmt_fn=self._translate_statement,
                     )
                     lines.extend(block_lines)
                     i += 1
@@ -684,7 +686,6 @@ class PythonMapper:
 
         # PERFORM ... VARYING — needs FROM/BY/UNTIL which we can't fully translate
         if "VARYING" in upper_ops:
-            varying_idx = next(i for i, o in enumerate(upper_ops) if o == "VARYING")
             return [
                 f"# PERFORM VARYING: {raw}",
                 f"# TODO(high): PERFORM VARYING requires manual translation (FROM/BY/UNTIL clauses)",
@@ -731,23 +732,27 @@ class PythonMapper:
     def _translate_condition(self, cond: str) -> str:
         """Best-effort translation of a COBOL condition to Python."""
         c = cond.strip()
+        # Uppercase for case-insensitive comparison operator matching
+        # (data names are resolved later via token-level lookup)
+        c_upper = c.upper()
         # Strip COBOL IS keyword before comparisons (e.g., IS EQUAL TO -> EQUAL TO)
         # Use (?:^|\s) instead of \b to avoid corrupting data names ending in -IS
-        c = re.sub(r'(?:^|\s)IS\s+', ' ', c).strip()
+        c_upper = re.sub(r'(?:^|\s)IS\s+', ' ', c_upper).strip()
         # Replace compound COBOL comparisons FIRST — longest patterns first to avoid partial matches
-        c = c.replace(" NOT GREATER THAN OR EQUAL TO ", " < ")
-        c = c.replace(" NOT LESS THAN OR EQUAL TO ", " > ")
-        c = c.replace(" GREATER THAN OR EQUAL TO ", " >= ")
-        c = c.replace(" LESS THAN OR EQUAL TO ", " <= ")
-        c = c.replace(" NOT GREATER THAN ", " <= ")
-        c = c.replace(" NOT LESS THAN ", " >= ")
-        c = c.replace(" NOT EQUAL TO ", " != ")
+        c_upper = c_upper.replace(" NOT GREATER THAN OR EQUAL TO ", " < ")
+        c_upper = c_upper.replace(" NOT LESS THAN OR EQUAL TO ", " > ")
+        c_upper = c_upper.replace(" GREATER THAN OR EQUAL TO ", " >= ")
+        c_upper = c_upper.replace(" LESS THAN OR EQUAL TO ", " <= ")
+        c_upper = c_upper.replace(" NOT GREATER THAN ", " <= ")
+        c_upper = c_upper.replace(" NOT LESS THAN ", " >= ")
+        c_upper = c_upper.replace(" NOT EQUAL TO ", " != ")
         # Simple comparisons
-        c = c.replace(" GREATER THAN ", " > ")
-        c = c.replace(" LESS THAN ", " < ")
-        c = c.replace(" EQUAL TO ", " == ")
-        c = c.replace(" NOT = ", " != ")
-        c = c.replace(" = ", " == ")
+        c_upper = c_upper.replace(" GREATER THAN ", " > ")
+        c_upper = c_upper.replace(" LESS THAN ", " < ")
+        c_upper = c_upper.replace(" EQUAL TO ", " == ")
+        c_upper = c_upper.replace(" NOT = ", " != ")
+        c_upper = c_upper.replace(" = ", " == ")
+        c = c_upper
         # Separate parentheses from adjacent tokens before splitting
         c = re.sub(r'([()])', r' \1 ', c)
         # Convert data names and figurative constants
@@ -847,7 +852,7 @@ class PythonMapper:
         return results
 
     def _main_block(self) -> str:
-        class_name = _to_python_name(self.program.program_id).title().replace("_", "")
+        class_name = _to_python_name(self._program_id).title().replace("_", "")
         return (
             f'if __name__ == "__main__":\n'
             f"    program = {class_name}Program()\n"

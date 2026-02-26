@@ -72,7 +72,7 @@ class TestLevel77:
             "   05 WS-FIELD-A PIC X(10).",
             "77 WS-STANDALONE PIC 9(5).",
         ]
-        _, ws = parse_data_division(lines)
+        _, ws, _ = parse_data_division(lines)
         root_names = [item.name for item in ws]
         assert "WS-GROUP" in root_names
         assert "WS-STANDALONE" in root_names
@@ -228,9 +228,77 @@ class TestPositiveSignedDecimalValue:
             "WORKING-STORAGE SECTION.",
             "01 WS-D PIC S9(3)V99 VALUE +1.50.",
         ]
-        _, ws = parse_data_division(lines)
+        _, ws, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "+1.50"
+
+
+class TestLinkageSection:
+    def test_linkage_items_stored(self):
+        """LINKAGE SECTION items should now be captured."""
+        from cobol_safe_translator.parser import parse_data_division
+        lines = [
+            "LINKAGE SECTION.",
+            "01 LK-PARAM PIC X(10).",
+            "01 LK-VALUE PIC 9(5).",
+        ]
+        _, _, linkage = parse_data_division(lines)
+        assert len(linkage) == 2
+        names = [item.name for item in linkage]
+        assert "LK-PARAM" in names
+        assert "LK-VALUE" in names
+
+    def test_linkage_section_in_full_parse(self):
+        """Full parse should populate linkage_section."""
+        from cobol_safe_translator.parser import parse_cobol
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. TEST-LINK.\n"
+            "       DATA DIVISION.\n"
+            "       LINKAGE SECTION.\n"
+            "       01 LK-INPUT PIC X(20).\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           DISPLAY LK-INPUT.\n"
+            "           STOP RUN.\n"
+        )
+        program = parse_cobol(src)
+        assert len(program.linkage_section) == 1
+        assert program.linkage_section[0].name == "LK-INPUT"
+
+
+class TestSectionHeaders:
+    def test_section_parsed_as_paragraph(self):
+        """SECTION headers should be recognized as paragraphs."""
+        from cobol_safe_translator.parser import parse_procedure
+        lines = [
+            "MAIN-SECTION SECTION.",
+            "DISPLAY WS-A.",
+        ]
+        paragraphs = parse_procedure(lines)
+        assert len(paragraphs) == 1
+        assert paragraphs[0].name == "MAIN-SECTION"
+        assert len(paragraphs[0].statements) == 1
+
+
+class TestPicRegexExtended:
+    def test_pic_with_asterisk(self):
+        """PIC with check-protect character (*) should be captured."""
+        from cobol_safe_translator.parser import _PIC_RE
+        m = _PIC_RE.search("PIC **,***,**9.99")
+        assert m is not None
+
+    def test_pic_with_slash(self):
+        """PIC with slash insertion (/) should be captured."""
+        from cobol_safe_translator.parser import _PIC_RE
+        m = _PIC_RE.search("PIC 99/99/9999")
+        assert m is not None
+
+    def test_pic_with_p(self):
+        """PIC with scaling position (P) should be captured."""
+        from cobol_safe_translator.parser import _PIC_RE
+        m = _PIC_RE.search("PIC 9(3)PP")
+        assert m is not None
 
 
 class TestOccursRedefines:
@@ -239,7 +307,7 @@ class TestOccursRedefines:
             "WORKING-STORAGE SECTION.",
             "01 WS-ARRAY PIC 9(3) OCCURS 5 TIMES.",
         ]
-        _, ws = parse_data_division(lines)
+        _, ws, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].occurs == 5
 
@@ -249,6 +317,6 @@ class TestOccursRedefines:
             "01 WS-A PIC 9(3).",
             "01 WS-B REDEFINES WS-A PIC X(3).",
         ]
-        _, ws = parse_data_division(lines)
+        _, ws, _ = parse_data_division(lines)
         assert len(ws) == 2
         assert ws[1].redefines == "WS-A"

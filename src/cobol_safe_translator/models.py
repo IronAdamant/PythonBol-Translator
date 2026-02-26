@@ -80,6 +80,7 @@ class CobolProgram:
     # DATA
     file_section: list[DataItem] = field(default_factory=list)
     working_storage: list[DataItem] = field(default_factory=list)
+    linkage_section: list[DataItem] = field(default_factory=list)
 
     # PROCEDURE
     paragraphs: list[Paragraph] = field(default_factory=list)

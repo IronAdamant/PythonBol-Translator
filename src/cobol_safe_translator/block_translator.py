@@ -8,6 +8,8 @@ Pipeline position: Called by mapper.py during paragraph method generation.
 
 from __future__ import annotations
 
+import keyword
+import re
 from typing import Callable
 
 from .models import CobolStatement
@@ -71,7 +73,7 @@ def translate_if_block(
         if stmt.verb == "EVALUATE":
             nested_lines, i = translate_evaluate_block(
                 stmts, i, translate_stmt_fn, translate_cond_fn,
-                _noop_resolve, indent + 1,
+                _fallback_resolve, indent + 1,
             )
             target.extend(nested_lines)
             continue
@@ -229,9 +231,44 @@ def translate_evaluate_block(
     return lines, i
 
 
-def _noop_resolve(op: str) -> str:
-    """Fallback resolve_operand for nested blocks."""
-    return f"self.data.{op.lower().replace('-', '_')}.value"
+def _fallback_resolve(op: str) -> str:
+    """Fallback resolve_operand for nested blocks (when mapper's resolver is unavailable).
+
+    Handles: quoted strings, numeric literals, figurative constants, and data names.
+    Mirrors mapper._resolve_operand logic to avoid incorrect code generation.
+    """
+    if op.startswith('"') or op.startswith("'"):
+        return op
+    # Numeric literal check
+    check = op
+    if check and check[0] in ("-", "+") and len(check) > 1:
+        check = check[1:]
+    parts = check.split(".")
+    is_numeric = False
+    if len(parts) == 1 and parts[0].isdigit():
+        is_numeric = True
+    elif len(parts) == 2 and (parts[0].isdigit() or parts[0] == "") and parts[1].isdigit():
+        is_numeric = True
+    if is_numeric:
+        return op
+    upper = op.upper()
+    if upper in ("ZEROS", "ZEROES", "ZERO"):
+        return "0"
+    if upper in ("SPACES", "SPACE"):
+        return "' '"
+    if upper in ("HIGH-VALUES", "HIGH-VALUE"):
+        return "'\\xff'"
+    if upper in ("LOW-VALUES", "LOW-VALUE"):
+        return "'\\x00'"
+    # Convert to Python name
+    name = op.lower().replace("-", "_")
+    if name and name[0].isdigit():
+        name = f"f_{name}"
+    if keyword.iskeyword(name):
+        name = f"{name}_"
+    name = re.sub(r"[^\w]", "_", name)
+    name = name or "_unnamed"
+    return f"self.data.{name}.value"
 
 
 def is_inline_if(stmt: CobolStatement) -> bool:
@@ -243,6 +280,7 @@ def translate_inline_if(
     stmt: CobolStatement,
     translate_cond_fn: Callable[[str], str],
     indent: int = 0,
+    translate_stmt_fn: Callable[[CobolStatement], list[str]] | None = None,
 ) -> list[str]:
     """Translate an inline IF (condition + body packed in one statement's operands)."""
     ops = stmt.operands
@@ -262,10 +300,26 @@ def translate_inline_if(
     body_parts = [o for o in ops[verb_idx:] if o.upper() != "END-IF"]
     py_cond = translate_cond_fn(cond_text)
 
-    return [
-        _indent_line(f"if {py_cond}:", indent),
-        _indent_line(f"pass  # TODO(high): inline body: {' '.join(body_parts)}", indent + 1),
-    ]
+    lines = [_indent_line(f"if {py_cond}:", indent)]
+
+    # Translate the body verb if a statement translator is available
+    if translate_stmt_fn and body_parts:
+        body_verb = body_parts[0].upper()
+        body_operands = body_parts[1:]
+        body_stmt = CobolStatement(
+            verb=body_verb,
+            raw_text=" ".join(body_parts),
+            operands=body_operands,
+        )
+        translated = translate_stmt_fn(body_stmt)
+        for tl in translated:
+            lines.append(_indent_line(tl, indent + 1))
+    else:
+        lines.append(
+            _indent_line(f"pass  # TODO(high): inline body: {' '.join(body_parts)}", indent + 1)
+        )
+
+    return lines
 
 
 def is_inline_evaluate(stmt: CobolStatement) -> bool:

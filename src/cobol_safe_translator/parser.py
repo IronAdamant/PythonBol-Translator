@@ -282,17 +282,18 @@ def parse_environment(lines: list[str]) -> list[FileControl]:
 # --- DATA DIVISION ---
 
 _LEVEL_RE = re.compile(r"^(\d{1,2})\s+([\w-]+)")
-_PIC_RE = re.compile(r"PIC(?:TURE)?\s+(S?[0-9XAVZBS().,+\-$CRDB]+)", re.IGNORECASE)
+_PIC_RE = re.compile(r"PIC(?:TURE)?\s+(S?[0-9XAVZBS().,+\-$CRDB*P/]+)", re.IGNORECASE)
 _VALUE_RE = re.compile(r'VALUE\s+(?:IS\s+)?("[^"]*"|\'[^\']*\'|[+\-]?\d+\.\d+|[^\s.]+)(?:\.|$|\s)', re.IGNORECASE)
 _OCCURS_RE = re.compile(r"OCCURS\s+(\d+)", re.IGNORECASE)
 _REDEFINES_RE = re.compile(r"REDEFINES\s+([\w-]+)", re.IGNORECASE)
 
 
-def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem]]:
-    """Parse DATA DIVISION into file section and working-storage items."""
+def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem], list[DataItem]]:
+    """Parse DATA DIVISION into file section, working-storage, and linkage items."""
     section = "UNKNOWN"
     file_items: list[DataItem] = []
     ws_items: list[DataItem] = []
+    linkage_items: list[DataItem] = []
 
     for line in lines:
         upper = line.strip().upper()
@@ -317,11 +318,14 @@ def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem
             file_items.append(item)
         elif section == "WS":
             ws_items.append(item)
+        elif section == "LINKAGE":
+            linkage_items.append(item)
 
     # Build hierarchy
     file_items = _build_hierarchy(file_items)
     ws_items = _build_hierarchy(ws_items)
-    return file_items, ws_items
+    linkage_items = _build_hierarchy(linkage_items)
+    return file_items, ws_items, linkage_items
 
 
 def _parse_data_item(line: str) -> DataItem | None:
@@ -406,7 +410,8 @@ def _build_hierarchy(flat_items: list[DataItem]) -> list[DataItem]:
 
 # --- PROCEDURE DIVISION ---
 
-_PARAGRAPH_RE = re.compile(r"^([\w-]+)\.$")
+_PARAGRAPH_RE = re.compile(r"^([\w-]+)\.\s*$")
+_SECTION_RE = re.compile(r"^([\w-]+)\s+SECTION\s*\.\s*$", re.IGNORECASE)
 _VERB_RE = re.compile(r"^([\w-]+)")
 
 # Verbs we explicitly recognize
@@ -429,6 +434,15 @@ def parse_procedure(lines: list[str]) -> list[Paragraph]:
         stripped = line.strip()
         if not stripped:
             continue
+
+        # Detect SECTION headers (e.g., MAIN-SECTION SECTION.)
+        section_m = _SECTION_RE.match(stripped)
+        if section_m:
+            candidate = section_m.group(1).upper()
+            if candidate not in KNOWN_VERBS:
+                current_para = Paragraph(name=candidate)
+                paragraphs.append(current_para)
+                continue
 
         # Strip trailing period for paragraph detection
         para_m = _PARAGRAPH_RE.match(stripped)
@@ -521,7 +535,7 @@ def parse_cobol(source: str, source_path: str = "") -> CobolProgram:
 
     program_id, author = parse_identification(divisions["IDENTIFICATION"])
     file_controls = parse_environment(divisions["ENVIRONMENT"])
-    file_section, working_storage = parse_data_division(divisions["DATA"])
+    file_section, working_storage, linkage_section = parse_data_division(divisions["DATA"])
     paragraphs = parse_procedure(divisions["PROCEDURE"])
 
     return CobolProgram(
@@ -531,6 +545,7 @@ def parse_cobol(source: str, source_path: str = "") -> CobolProgram:
         file_controls=file_controls,
         file_section=file_section,
         working_storage=working_storage,
+        linkage_section=linkage_section,
         paragraphs=paragraphs,
         raw_lines=source.splitlines(),
     )
