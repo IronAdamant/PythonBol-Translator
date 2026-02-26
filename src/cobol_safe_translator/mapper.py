@@ -698,6 +698,13 @@ class PythonMapper:
             if not cond_parts:
                 return [f"# PERFORM UNTIL: missing condition — {' '.join(ops)}"]
             cond = " ".join(cond_parts)
+            # Inline PERFORM UNTIL (no paragraph name — UNTIL is first operand)
+            if until_idx == 0:
+                return [
+                    f"# PERFORM UNTIL {cond} (inline — no paragraph)",
+                    f"while not ({self._translate_condition(cond)}):",
+                    f"    pass  # TODO(high): inline PERFORM UNTIL — statements should be moved here",
+                ]
             return [
                 f"# PERFORM {ops[0]} UNTIL {cond}",
                 f"while not ({self._translate_condition(cond)}):",
@@ -745,12 +752,17 @@ class PythonMapper:
 
         # Uppercase for case-insensitive comparison operator matching
         c = c.upper()
-        # Strip COBOL IS keyword (but not class conditions — handled below)
-        # Use (?:^|\s) instead of \b to avoid corrupting data names ending in -IS
-        c = re.sub(r'(?:^|\s)IS\s+(?!NUMERIC|ALPHABETIC)', ' ', c).strip()
-        # COBOL class conditions: IS NUMERIC / IS ALPHABETIC
+        # COBOL class conditions: IS [NOT] NUMERIC / IS [NOT] ALPHABETIC
+        # Must be handled BEFORE stripping IS keyword
+        c = re.sub(r'\bIS\s+NOT\s+NUMERIC\b', '__CLASS_NOT_NUMERIC__', c)
+        c = re.sub(r'\bIS\s+NOT\s+ALPHABETIC\b', '__CLASS_NOT_ALPHABETIC__', c)
+        c = re.sub(r'\bNOT\s+NUMERIC\b', '__CLASS_NOT_NUMERIC__', c)
+        c = re.sub(r'\bNOT\s+ALPHABETIC\b', '__CLASS_NOT_ALPHABETIC__', c)
         c = re.sub(r'\bIS\s+NUMERIC\b', '__CLASS_NUMERIC__', c)
         c = re.sub(r'\bIS\s+ALPHABETIC\b', '__CLASS_ALPHABETIC__', c)
+        # Strip COBOL IS keyword (class conditions already handled above)
+        # Use (?:^|\s) instead of \b to avoid corrupting data names ending in -IS
+        c = re.sub(r'(?:^|\s)IS\s+(?!__CLASS)', ' ', c).strip()
         # Replace compound COBOL comparisons FIRST — longest patterns first to avoid partial matches
         c = c.replace(" NOT GREATER THAN OR EQUAL TO ", " < ")
         c = c.replace(" NOT LESS THAN OR EQUAL TO ", " > ")
@@ -792,6 +804,18 @@ class PythonMapper:
                     result.append(f"str({subj}).isalpha()")
                 else:
                     result.append("# TODO(high): IS ALPHABETIC — no subject found")
+            elif t == "__CLASS_NOT_NUMERIC__":
+                if result:
+                    subj = result.pop()
+                    result.append(f"not str({subj}).replace('.','').replace('-','').isdigit()")
+                else:
+                    result.append("# TODO(high): IS NOT NUMERIC — no subject found")
+            elif t == "__CLASS_NOT_ALPHABETIC__":
+                if result:
+                    subj = result.pop()
+                    result.append(f"not str({subj}).isalpha()")
+                else:
+                    result.append("# TODO(high): IS NOT ALPHABETIC — no subject found")
             elif _is_numeric_literal(t):
                 result.append(t)
             elif t.upper() in ("ZERO", "ZEROS", "ZEROES"):

@@ -63,6 +63,25 @@ class TestMarkdownExporter:
         assert "MAIN-PROGRAM" in md
 
 
+    def test_linkage_section_in_markdown(self):
+        """Pass 2: Linkage section items should appear in Markdown report."""
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. TEST-LINK.\n"
+            "       DATA DIVISION.\n"
+            "       LINKAGE SECTION.\n"
+            "       01 LK-PARAM PIC X(10).\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           DISPLAY LK-PARAM.\n"
+        )
+        program = parse_cobol(src)
+        smap = analyze(program)
+        md = export_markdown(smap)
+        assert "### Linkage Section" in md
+        assert "LK-PARAM" in md
+
+
 class TestJsonExporter:
     def test_valid_json(self, customer_report_source):
         program = parse_cobol(customer_report_source)

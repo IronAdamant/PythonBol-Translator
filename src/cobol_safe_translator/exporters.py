@@ -99,6 +99,12 @@ class MarkdownExporter:
                 lines.extend(self._format_data_tree(item, 0))
             lines.append("")
 
+        if self.program.linkage_section:
+            lines.append("### Linkage Section\n")
+            for item in self.program.linkage_section:
+                lines.extend(self._format_data_tree(item, 0))
+            lines.append("")
+
         return "\n".join(lines)
 
     def _format_data_tree(self, item: DataItem, depth: int) -> list[str]:

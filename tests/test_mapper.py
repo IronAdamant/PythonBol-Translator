@@ -1341,3 +1341,116 @@ class TestInlineIfWithElse:
         ast.parse(source)
         assert "if self.data.ws_a.value > 0:" in source
         assert "else:" in source
+
+
+# === Pass 2 fixes ===
+
+
+class TestNotNumericAlphabetic:
+    """Pass 2: IS NOT NUMERIC / IS NOT ALPHABETIC class conditions."""
+
+    def test_is_not_numeric(self):
+        src = _make_cobol([
+            "IF WS-A IS NOT NUMERIC",
+            "    DISPLAY WS-A",
+            "END-IF.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "not" in source
+        assert "isdigit()" in source
+
+    def test_is_not_alphabetic(self):
+        src = _make_cobol([
+            "IF WS-A IS NOT ALPHABETIC",
+            "    DISPLAY WS-A",
+            "END-IF.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "not" in source
+        assert "isalpha()" in source
+
+
+class TestPerformUntilInline:
+    """Pass 2: PERFORM UNTIL without paragraph name."""
+
+    def test_perform_until_inline_emits_todo(self):
+        src = _make_cobol(["PERFORM UNTIL WS-A > 10."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "while not" in source
+        assert "TODO(high)" in source
+        # Should NOT call self.until_()
+        assert "self.until_()" not in source
+
+
+class TestConditionMultipleStringLiterals:
+    """Pass 2: Multiple string literals in conditions."""
+
+    def test_two_string_literals(self):
+        src = _make_cobol([
+            'IF WS-A = "hello" OR WS-B = "world"',
+            "    DISPLAY WS-A",
+            "END-IF.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert '"hello"' in source
+        assert '"world"' in source
+
+
+class TestPicStarSize:
+    """Pass 2: PIC with * (check-protection) should count in size."""
+
+    def test_check_protection_size(self):
+        from cobol_safe_translator.parser import compute_pic_size
+        size, dec, signed = compute_pic_size("***,**9.99")
+        # 5 stars + 1 comma + 1 nine + 1 period + 2 nines = 10 display positions
+        assert size == 10
+
+
+class TestLinkageSectionInStats:
+    """Pass 2: Linkage section items should be counted in stats."""
+
+    def test_linkage_items_counted(self):
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. TEST-LINK.",
+            "       DATA DIVISION.",
+            "       WORKING-STORAGE SECTION.",
+            "       01 WS-A PIC 9(5).",
+            "       LINKAGE SECTION.",
+            "       01 LK-PARAM PIC X(10).",
+            "       01 LK-VALUE PIC 9(5).",
+            "       PROCEDURE DIVISION.",
+            "       MAIN-PARA.",
+            "           DISPLAY WS-A.",
+        ]
+        src = "\n".join(lines) + "\n"
+        program = parse_cobol(src)
+        smap = analyze(program)
+        # 1 WS item + 2 linkage items = 3 data items
+        assert smap.stats.data_item_count == 3
+
+
+class TestParagraphWhitespace:
+    """Pass 2: Paragraph name with whitespace before period."""
+
+    def test_space_before_period(self):
+        from cobol_safe_translator.parser import parse_procedure
+        lines = [
+            "MAIN-PARA .",
+            "    DISPLAY WS-A.",
+        ]
+        paragraphs = parse_procedure(lines)
+        assert len(paragraphs) == 1
+        assert paragraphs[0].name == "MAIN-PARA"

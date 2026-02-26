@@ -182,7 +182,7 @@ def compute_pic_size(expanded: str) -> tuple[int, int, bool]:
 
     size = cr_db_extra * 2  # Each CR/DB occupies 2 display positions
     for c in count_clean:
-        if c in ("9", "X", "A", "Z"):
+        if c in ("9", "X", "A", "Z", "*"):
             size += 1
         elif c in (".", ",", "B", "+", "-", "$"):
             size += 1
@@ -410,7 +410,7 @@ def _build_hierarchy(flat_items: list[DataItem]) -> list[DataItem]:
 
 # --- PROCEDURE DIVISION ---
 
-_PARAGRAPH_RE = re.compile(r"^([\w-]+)\.\s*$")
+_PARAGRAPH_RE = re.compile(r"^([\w-]+)\s*\.\s*$")
 _SECTION_RE = re.compile(r"^([\w-]+)\s+SECTION\s*\.\s*$", re.IGNORECASE)
 _VERB_RE = re.compile(r"^([\w-]+)")
 
