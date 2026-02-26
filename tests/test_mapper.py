@@ -790,3 +790,71 @@ class TestMoveFunction:
         ast.parse(source)
         assert "TODO(high)" in source
         assert "FUNCTION" in source
+
+
+class TestDisplayFigurativeConstants:
+    def test_display_zeros(self):
+        """DISPLAY ZEROS should resolve to print(0), not self.data.zeros.value."""
+        src = _make_cobol(["DISPLAY ZEROS."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "zeros.value" not in source
+        assert "print(0" in source
+
+    def test_display_spaces(self):
+        """DISPLAY SPACES should resolve to print(' ')."""
+        src = _make_cobol(["DISPLAY SPACES."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "spaces.value" not in source
+        assert "print(' '" in source
+
+
+class TestComputeMultipleTargets:
+    def test_compute_two_targets(self):
+        """COMPUTE A B = expr should store result in both A and B."""
+        src = _make_cobol(["COMPUTE WS-A WS-B = WS-C + 1."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ws_a.set(" in source
+        assert "ws_b.set(" in source
+
+
+class TestToPythonName:
+    def test_digit_leading_name_prefixed(self):
+        from cobol_safe_translator.mapper import _to_python_name
+        result = _to_python_name("88-CONDITION")
+        assert result.startswith("f_")
+        assert result == "f_88_condition"
+
+    def test_python_keyword_suffixed(self):
+        from cobol_safe_translator.mapper import _to_python_name
+        assert _to_python_name("RETURN") == "return_"
+
+    def test_empty_name_produces_unnamed(self):
+        from cobol_safe_translator.mapper import _to_python_name
+        assert _to_python_name("") == "_unnamed"
+
+
+class TestBasicSubtract:
+    def test_subtract_from_without_giving(self):
+        src = _make_cobol(["SUBTRACT WS-A FROM WS-B."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "self.data.ws_b.subtract(self.data.ws_a.value)" in source
+
+    def test_multiply_without_giving(self):
+        src = _make_cobol(["MULTIPLY WS-A BY WS-B."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "self.data.ws_b.multiply(self.data.ws_a.value)" in source

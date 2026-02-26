@@ -163,3 +163,50 @@ class TestFileAdapter:
         fa = FileAdapter("dummy.dat")
         with pytest.raises(RuntimeError, match="File not opened"):
             fa.read()
+
+    def test_reopen_resets_to_beginning(self, tmp_path):
+        """Re-opening should close previous handle and restart from beginning."""
+        f = tmp_path / "reopen.txt"
+        f.write_text("line1\nline2\n")
+        fa = FileAdapter(str(f))
+        fa.open_input()
+        assert fa.read() == "line1"
+        fa.open_input()  # re-open
+        assert fa.read() == "line1", "Re-open should restart from beginning"
+        fa.close()
+
+
+class TestCobolDecimalInvalidOperand:
+    def test_add_invalid_string_leaves_value_unchanged(self):
+        import warnings as w_mod
+        d = CobolDecimal(5, 2, False, "10.00")
+        with w_mod.catch_warnings(record=True) as w:
+            w_mod.simplefilter("always")
+            d.add("not-a-number")
+            assert len(w) == 1
+            assert "Invalid operand" in str(w[0].message)
+        assert d.value == Decimal("10.00")
+
+
+class TestSignedNegativeOverflow:
+    def test_signed_negative_overflow_truncates(self):
+        d = CobolDecimal(2, 0, signed=True)  # range -99 to 99
+        d.set(-90)
+        d.subtract(20)  # -110, should truncate to -10
+        assert d.value == Decimal("-10")
+
+    def test_signed_negative_decimal_truncation(self):
+        d = CobolDecimal(3, 2, signed=True)
+        d.set("-5.999")
+        # COBOL truncates toward zero: -5.99, not rounded to -6.00
+        assert d.value == Decimal("-5.99")
+
+
+class TestAdapterComparisonEdgeCases:
+    def test_cobol_string_eq_int_returns_false(self):
+        s = CobolString(5, "HELLO")
+        assert not (s == 42)
+
+    def test_cobol_decimal_eq_string_returns_false(self):
+        d = CobolDecimal(5, 2, False, "10.00")
+        assert not (d == "not-a-number")

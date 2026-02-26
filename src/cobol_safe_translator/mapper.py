@@ -343,14 +343,7 @@ class PythonMapper:
                 operands = operands[:i]
                 break
         for op in operands:
-            if (len(op) >= 2 and ((op.startswith('"') and op.endswith('"')) or (op.startswith("'") and op.endswith("'")))):
-                # Quoted string literal — keep as-is
-                parts.append(op)
-            elif _is_numeric_literal(op):
-                parts.append(op)
-            else:
-                # Data name reference
-                parts.append(f"self.data.{_to_python_name(op)}.value")
+            parts.append(self._resolve_operand(op))
         if parts:
             return [f"print({', '.join(parts)}, sep='')"]
         return ["print()"]
@@ -597,11 +590,11 @@ class PythonMapper:
         return [f"# DIVIDE: could not parse operands: {' '.join(ops)}"]
 
     def _translate_compute(self, ops: list[str]) -> list[str]:
-        # COMPUTE target = expression
+        # COMPUTE target [target2 ...] = expression
         _COMPUTE_OPERATORS = {"+", "-", "*", "/", "(", ")", "**"}
         if "=" in ops:
             eq_idx = ops.index("=")
-            target = _to_python_name(ops[0])
+            targets = [t for t in ops[:eq_idx] if t.upper() != "ROUNDED"]
             expr_parts = ops[eq_idx + 1:]
             resolved: list[str] = []
             for part in expr_parts:
@@ -610,10 +603,12 @@ class PythonMapper:
                 else:
                     resolved.append(self._resolve_operand(part))
             expr = " ".join(resolved)
-            return [
-                f"# COMPUTE: {' '.join(ops)}",
-                f"self.data.{target}.set({expr})  # TODO(high): verify expression translation",
-            ]
+            results = [f"# COMPUTE: {' '.join(ops)}"]
+            for t in targets:
+                results.append(
+                    f"self.data.{_to_python_name(t)}.set({expr})  # TODO(high): verify expression translation"
+                )
+            return results
         return [f"# COMPUTE: could not parse operands: {' '.join(ops)}"]
 
     def _translate_perform(self, ops: list[str], raw: str) -> list[str]:
