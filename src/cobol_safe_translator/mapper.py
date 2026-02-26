@@ -386,17 +386,24 @@ class PythonMapper:
 
     def _translate_display(self, stmt: CobolStatement) -> list[str]:
         parts: list[str] = []
-        # Filter out UPON clause (DISPLAY x UPON CONSOLE)
+        no_advancing = False
+        # Filter out UPON clause and WITH NO ADVANCING
         operands = list(stmt.operands)
         for i, op in enumerate(operands):
             if op.upper() == "UPON":
                 operands = operands[:i]
                 break
+            if op.upper() == "WITH" and i + 2 < len(operands):
+                if operands[i + 1].upper() == "NO" and operands[i + 2].upper() == "ADVANCING":
+                    no_advancing = True
+                    operands = operands[:i]
+                    break
         for op in operands:
             parts.append(self._resolve_operand(op))
+        end_kwarg = ", end=''" if no_advancing else ""
         if parts:
-            return [f"print({', '.join(parts)}, sep='')"]
-        return ["print()"]
+            return [f"print({', '.join(parts)}, sep=''{end_kwarg})"]
+        return [f"print({end_kwarg.lstrip(', ')})"] if no_advancing else ["print()"]
 
     def _translate_move(self, ops: list[str]) -> list[str]:
         # MOVE CORRESPONDING requires field-by-field matching
@@ -760,6 +767,9 @@ class PythonMapper:
         c = re.sub(r'\bNOT\s+ALPHABETIC\b', '__CLASS_NOT_ALPHABETIC__', c)
         c = re.sub(r'\bIS\s+NUMERIC\b', '__CLASS_NUMERIC__', c)
         c = re.sub(r'\bIS\s+ALPHABETIC\b', '__CLASS_ALPHABETIC__', c)
+        # Bare NUMERIC/ALPHABETIC (without IS) — must come AFTER IS/NOT variants
+        c = re.sub(r'\bNUMERIC\b(?!__)', '__CLASS_NUMERIC__', c)
+        c = re.sub(r'\bALPHABETIC\b(?!__)', '__CLASS_ALPHABETIC__', c)
         # Strip COBOL IS keyword (class conditions already handled above)
         # Use (?:^|\s) instead of \b to avoid corrupting data names ending in -IS
         c = re.sub(r'(?:^|\s)IS\s+(?!__CLASS)', ' ', c).strip()
@@ -771,11 +781,17 @@ class PythonMapper:
         c = c.replace(" NOT GREATER THAN ", " <= ")
         c = c.replace(" NOT LESS THAN ", " >= ")
         c = c.replace(" NOT EQUAL TO ", " != ")
-        # Simple comparisons
+        # Simple comparisons (long forms before short forms)
         c = c.replace(" GREATER THAN ", " > ")
         c = c.replace(" LESS THAN ", " < ")
         c = c.replace(" EQUAL TO ", " == ")
+        # Short comparison forms (COBOL permits EQUAL, GREATER, LESS without TO/THAN)
+        c = c.replace(" NOT > ", " <= ")
+        c = c.replace(" NOT < ", " >= ")
         c = c.replace(" NOT = ", " != ")
+        c = c.replace(" EQUAL ", " == ")
+        c = c.replace(" GREATER ", " > ")
+        c = c.replace(" LESS ", " < ")
         c = c.replace(" = ", " == ")
         # Separate parentheses from adjacent tokens before splitting
         c = re.sub(r'([()])', r' \1 ', c)

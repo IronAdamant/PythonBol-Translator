@@ -194,27 +194,55 @@ def translate_evaluate_block(
         if current_when_ops is not None:
             when_clauses.append((current_when_ops, current_body))
 
+    # Merge consecutive WHEN clauses with empty bodies (fall-through → OR)
+    merged_clauses: list[tuple[list[list[str]], list[str]]] = []  # (list_of_when_ops, body_lines)
+    for when_ops, body in when_clauses:
+        if merged_clauses and not merged_clauses[-1][1]:
+            # Previous clause had empty body — merge as fall-through
+            merged_clauses[-1][0].append(when_ops)
+            merged_clauses[-1] = (merged_clauses[-1][0], body)
+        else:
+            merged_clauses.append(([when_ops], body))
+
     # Generate if/elif/else chain
     lines: list[str] = []
-    for clause_idx, (when_ops, body) in enumerate(when_clauses):
-        is_other = len(when_ops) == 1 and when_ops[0].upper() == "OTHER"
+    for clause_idx, (when_ops_list, body) in enumerate(merged_clauses):
+        # Check if any sub-clause is OTHER
+        is_other = any(
+            len(ops) == 1 and ops[0].upper() == "OTHER" for ops in when_ops_list
+        )
 
         # THRU/THROUGH — emit TODO
-        upper_when = [o.upper() for o in when_ops]
-        if "THRU" in upper_when or "THROUGH" in upper_when:
-            lines.append(_indent_line(f"# TODO(high): WHEN THRU/THROUGH — manual translation required", indent))
-            lines.append(_indent_line(f"# WHEN {' '.join(when_ops)}", indent))
+        has_thru = any(
+            "THRU" in [o.upper() for o in ops] or "THROUGH" in [o.upper() for o in ops]
+            for ops in when_ops_list
+        )
+        if has_thru:
+            for ops in when_ops_list:
+                lines.append(_indent_line(f"# TODO(high): WHEN THRU/THROUGH — manual translation required", indent))
+                lines.append(_indent_line(f"# WHEN {' '.join(ops)}", indent))
             continue
 
         if is_other:
-            # WHEN OTHER as first clause: can't emit bare else: — use if True: instead
             keyword = "else:" if clause_idx > 0 else "if True:  # WHEN OTHER (no prior WHEN)"
         else:
-            if is_true_subject:
-                cond = translate_cond_fn(" ".join(when_ops))
-            else:
-                value = resolve_operand_fn(when_ops[0]) if when_ops else "''"
-                cond = f"{subject_expr} == {value}"
+            cond_parts: list[str] = []
+            for ops in when_ops_list:
+                if is_true_subject:
+                    cond_parts.append(translate_cond_fn(" ".join(ops)))
+                else:
+                    # Handle WHEN x OR y OR z — split on OR keyword
+                    or_groups: list[list[str]] = [[]]
+                    for o in ops:
+                        if o.upper() == "OR":
+                            or_groups.append([])
+                        else:
+                            or_groups[-1].append(o)
+                    for grp in or_groups:
+                        if grp:
+                            value = resolve_operand_fn(grp[0])
+                            cond_parts.append(f"{subject_expr} == {value}")
+            cond = " or ".join(cond_parts) if cond_parts else "True"
             prefix = "if" if clause_idx == 0 else "elif"
             keyword = f"{prefix} {cond}:"
 

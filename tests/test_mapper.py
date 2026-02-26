@@ -1454,3 +1454,109 @@ class TestParagraphWhitespace:
         paragraphs = parse_procedure(lines)
         assert len(paragraphs) == 1
         assert paragraphs[0].name == "MAIN-PARA"
+
+
+# === Pass 3 fixes ===
+
+
+class TestShortComparisonForms:
+    """Pass 3: EQUAL, GREATER, LESS without TO/THAN."""
+
+    def test_equal_short_form(self):
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A EQUAL 10."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        while_line = [l for l in source.split("\n") if "while not" in l][0]
+        assert "==" in while_line
+        assert "EQUAL" not in while_line
+
+    def test_greater_short_form(self):
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A GREATER 10."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        while_line = [l for l in source.split("\n") if "while not" in l][0]
+        assert ">" in while_line
+
+    def test_less_short_form(self):
+        src = _make_cobol(["PERFORM MAIN-PARA UNTIL WS-A LESS 10."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        while_line = [l for l in source.split("\n") if "while not" in l][0]
+        assert "<" in while_line
+
+
+class TestNotSymbolOperators:
+    """Pass 3: NOT > and NOT < comparison operators."""
+
+    def test_not_greater(self):
+        src = _make_cobol([
+            "IF WS-A NOT > WS-B",
+            "    DISPLAY WS-A",
+            "END-IF.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "<=" in source
+
+    def test_not_less(self):
+        src = _make_cobol([
+            "IF WS-A NOT < WS-B",
+            "    DISPLAY WS-A",
+            "END-IF.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert ">=" in source
+
+
+class TestBareNumericAlphabetic:
+    """Pass 3: Bare NUMERIC/ALPHABETIC without IS keyword."""
+
+    def test_bare_numeric(self):
+        src = _make_cobol([
+            "IF WS-A NUMERIC",
+            "    DISPLAY WS-A",
+            "END-IF.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "isdigit()" in source
+
+    def test_bare_alphabetic(self):
+        src = _make_cobol([
+            "IF WS-A ALPHABETIC",
+            "    DISPLAY WS-A",
+            "END-IF.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "isalpha()" in source
+
+
+class TestDisplayWithNoAdvancing:
+    """Pass 3: DISPLAY WITH NO ADVANCING suppresses newline."""
+
+    def test_no_advancing_generates_end_empty(self):
+        src = _make_cobol(['DISPLAY "Enter: " WITH NO ADVANCING.'])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "end=''" in source
+        # Should not include WITH, NO, ADVANCING as data names
+        assert "with_" not in source
+        assert "advancing" not in source

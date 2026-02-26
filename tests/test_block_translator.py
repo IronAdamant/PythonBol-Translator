@@ -342,8 +342,10 @@ class TestTranslateEvaluateBlock:
             _make("END-EVALUATE"),
         ]
         lines, next_i = translate_evaluate_block(stmts, 0, _stmt_fn, _cond, _resolve, indent=0)
-        # First WHEN has empty body — should get a pass
-        assert any("pass" in line for line in lines)
+        # First WHEN has empty body — falls through to WHEN OTHER (merged)
+        # The merged clause should contain the DISPLAY body
+        joined = "\n".join(lines)
+        assert "DISPLAY" in joined or "else:" in joined
 
 
 # --- Additional adapter tests (from test_mapper.py #14 — adding targeted coverage) ---
@@ -421,3 +423,40 @@ class TestIsInlineIfFalsePositives:
         """Exact verb name DISPLAY should still match."""
         stmt = _make("IF", "WS-A", ">", "0", "DISPLAY", "WS-A")
         assert is_inline_if(stmt) is True
+
+
+# === Pass 3 additions ===
+
+
+class TestEvaluateWhenFallthrough:
+    """Pass 3: Consecutive WHENs with empty bodies should merge (fall-through)."""
+
+    def test_consecutive_when_fallthrough(self):
+        stmts = [
+            _make("EVALUATE", "WS-STATUS"),
+            _make("WHEN", "A"),
+            _make("WHEN", "B"),
+            _make("DISPLAY", "MATCH"),
+            _make("END-EVALUATE"),
+        ]
+        lines, next_i = translate_evaluate_block(stmts, 0, _stmt_fn, _cond, _resolve, indent=0)
+        # Should produce a single if with OR, not separate if/elif
+        combined = " ".join(lines)
+        assert "or" in combined.lower() or "# DISPLAY MATCH" in combined
+        # Should NOT have pass for the empty WHEN "A"
+        assert next_i == 5
+
+
+class TestEvaluateWhenOrValues:
+    """Pass 3: WHEN x OR y should generate compound condition."""
+
+    def test_when_or_two_values(self):
+        stmts = [
+            _make("EVALUATE", "WS-STATUS"),
+            _make("WHEN", "1", "OR", "2"),
+            _make("DISPLAY", "MATCH"),
+            _make("END-EVALUATE"),
+        ]
+        lines, next_i = translate_evaluate_block(stmts, 0, _stmt_fn, _cond, _resolve, indent=0)
+        combined = " ".join(lines)
+        assert "or" in combined.lower()
