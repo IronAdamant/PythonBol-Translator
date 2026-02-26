@@ -1831,6 +1831,24 @@ class TestConditionUnbalancedParens:
         ast.parse(source)  # must be valid Python
 
 
+class TestPerformTimesNumericLiteral:
+    def test_trailing_dot_literal_in_times_generates_valid_range(self):
+        """PERFORM N. TIMES with trailing-dot literal must not treat N. as a field name."""
+        from cobol_safe_translator.statement_translators import translate_perform
+        # Simulate parser passing "5." as a TIMES operand (trailing-dot numeric)
+        lines = translate_perform(["MY-PARA", "5.", "TIMES"], "PERFORM MY-PARA 5. TIMES", lambda c: c)
+        source = "\n".join(lines)
+        ast.parse(f"class T:\n def f(self):\n  {source.replace(chr(10), chr(10) + '  ')}")
+        assert "range(5)" in source  # must use integer 5, not "5." or a field ref
+
+    def test_integer_literal_times_unchanged(self):
+        """PERFORM N TIMES with plain integer literal still generates range(N)."""
+        from cobol_safe_translator.statement_translators import translate_perform
+        lines = translate_perform(["MY-PARA", "10", "TIMES"], "PERFORM MY-PARA 10 TIMES", lambda c: c)
+        source = "\n".join(lines)
+        assert "range(10)" in source
+
+
 class TestPerformVaryingZeroStep:
     def test_zero_step_emits_todo_not_infinite_loop(self):
         """PERFORM VARYING with BY 0 must emit TODO, not generate infinite loop code."""

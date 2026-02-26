@@ -507,14 +507,20 @@ def translate_perform(
             target = _to_method_name(ops[0])
         elif times_idx == 1:
             times_op = ops[0]
-            times_val = times_op if times_op.isdigit() else f"int(self.data.{_to_python_name(times_op)}.value)"
+            if _is_numeric_literal(times_op):
+                times_val = str(int(float(times_op)))
+            else:
+                times_val = f"int(self.data.{_to_python_name(times_op)}.value)"
             return [
                 f"for _ in range({times_val}):",
                 f"    pass  # TODO(high): inline PERFORM TIMES — statements should be moved here",
             ]
         else:
             return [f"# PERFORM TIMES: invalid syntax — {' '.join(ops)}"]
-        times_val = times_op if times_op.isdigit() else f"int(self.data.{_to_python_name(times_op)}.value)"
+        if _is_numeric_literal(times_op):
+            times_val = str(int(float(times_op)))
+        else:
+            times_val = f"int(self.data.{_to_python_name(times_op)}.value)"
         return [
             f"for _ in range({times_val}):",
             f"    self.{target}()",
