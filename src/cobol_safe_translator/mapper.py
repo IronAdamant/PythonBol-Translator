@@ -13,6 +13,14 @@ import re
 import textwrap
 from datetime import datetime
 
+from .block_translator import (
+    is_inline_evaluate,
+    is_inline_if,
+    translate_evaluate_block,
+    translate_if_block,
+    translate_inline_evaluate,
+    translate_inline_if,
+)
 from .models import (
     CobolProgram,
     CobolStatement,
@@ -265,10 +273,50 @@ class PythonMapper:
             lines.append("")
             return "\n".join(lines)
 
-        for stmt in para.statements:
+        i = 0
+        while i < len(para.statements):
+            stmt = para.statements[i]
+
+            if stmt.verb == "IF":
+                if is_inline_if(stmt):
+                    block_lines = translate_inline_if(
+                        stmt, self._translate_condition, indent=2,
+                    )
+                    lines.extend(block_lines)
+                    i += 1
+                else:
+                    block_lines, i = translate_if_block(
+                        para.statements, i,
+                        self._translate_statement,
+                        self._translate_condition,
+                        indent=2,
+                    )
+                    lines.extend(block_lines)
+                continue
+
+            if stmt.verb == "EVALUATE":
+                if is_inline_evaluate(stmt):
+                    block_lines = translate_inline_evaluate(
+                        stmt, self._translate_condition,
+                        self._resolve_operand, indent=2,
+                    )
+                    lines.extend(block_lines)
+                    i += 1
+                else:
+                    block_lines, i = translate_evaluate_block(
+                        para.statements, i,
+                        self._translate_statement,
+                        self._translate_condition,
+                        self._resolve_operand,
+                        indent=2,
+                    )
+                    lines.extend(block_lines)
+                continue
+
             translated = self._translate_statement(stmt)
             for tl in translated:
                 lines.append(f"        {tl}")
+            i += 1
 
         lines.append("")
         return "\n".join(lines)
@@ -300,11 +348,11 @@ class PythonMapper:
             return self._translate_evaluate(stmt.raw_text)
         elif verb in ("END-IF", "END-EVALUATE", "END-PERFORM", "END-READ",
                        "END-WRITE", "END-CALL", "END-STRING"):
-            return [f"# {verb}"]
+            return [f"# {verb} (orphaned — normally consumed by block translator)"]
         elif verb == "ELSE":
-            return [f"# else:  (see surrounding IF)"]
+            return [f"# else (orphaned — normally consumed by block translator)"]
         elif verb == "WHEN":
-            return [f"# WHEN branch: {stmt.raw_text}"]
+            return [f"# WHEN (orphaned — normally consumed by block translator): {stmt.raw_text}"]
         elif verb == "OPEN":
             return self._translate_open(ops)
         elif verb == "CLOSE":
@@ -727,7 +775,7 @@ class PythonMapper:
         return " ".join(result)
 
     def _translate_if(self, raw: str) -> list[str]:
-        """Translate IF statement (simplified)."""
+        """Fallback IF translation (used when block translator can't handle it)."""
         return [
             f"# IF statement (manual review recommended):",
             f"# {raw}",
@@ -735,7 +783,7 @@ class PythonMapper:
         ]
 
     def _translate_evaluate(self, raw: str) -> list[str]:
-        """Translate EVALUATE as if/elif chain."""
+        """Fallback EVALUATE translation (used when block translator can't handle it)."""
         return [
             f"# EVALUATE statement (translates to if/elif):",
             f"# {raw}",
