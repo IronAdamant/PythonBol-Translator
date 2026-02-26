@@ -398,3 +398,22 @@ class TestPicRepeatExpansion:
     def test_slash_in_size(self):
         size, _, _ = compute_pic_size("99/99/9999")
         assert size == 10  # 8 digits + 2 slashes
+
+
+class TestExtractValueFirstTokenOnly:
+    def test_program_id_with_extra_words_takes_first(self):
+        """PROGRAM-ID with extra garbage after the id must return only the first token."""
+        from cobol_safe_translator.parser import _extract_value
+        result = _extract_value("PROGRAM-ID. MY-PROG EXTRA GARBAGE.", "PROGRAM-ID")
+        assert result == "MY-PROG"
+        assert " " not in result
+
+    def test_author_with_extra_words_takes_first(self):
+        from cobol_safe_translator.parser import _extract_value
+        result = _extract_value("AUTHOR. JOHN DOE.", "AUTHOR")
+        assert result == "JOHN"
+
+    def test_normal_single_word_unchanged(self):
+        from cobol_safe_translator.parser import _extract_value
+        result = _extract_value("PROGRAM-ID. HELLO-WORLD.", "PROGRAM-ID")
+        assert result == "HELLO-WORLD"

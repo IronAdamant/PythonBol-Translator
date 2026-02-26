@@ -252,13 +252,15 @@ def parse_identification(lines: list[str]) -> tuple[str, str]:
 
 
 def _extract_value(line: str, keyword: str) -> str:
-    """Extract the value after 'KEYWORD. value.' or 'KEYWORD. value'."""
+    """Extract the single-token value after 'KEYWORD. value.' or 'KEYWORD. value'."""
     # Remove keyword, then strip dots and whitespace
     idx = line.upper().find(keyword.upper())
     if idx == -1:
         return ""
     rest = line[idx + len(keyword):].strip().lstrip(".").strip().rstrip(".")
-    return rest.strip()
+    # Take only the first token — PROGRAM-ID, AUTHOR etc. must be single identifiers
+    first = rest.split()[0] if rest.split() else ""
+    return first
 
 
 # --- ENVIRONMENT DIVISION ---

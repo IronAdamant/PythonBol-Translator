@@ -1811,3 +1811,21 @@ class TestIsNumericLiteralTrailingDotMapper:
     def test_leading_dot_resolve_is_numeric(self):
         from cobol_safe_translator.mapper import _is_numeric_literal
         assert _is_numeric_literal(".5") is True
+
+
+class TestConditionUnbalancedParens:
+    def test_unbalanced_open_paren_emits_todo(self):
+        """Condition with unmatched ( must not produce invalid Python."""
+        src = _make_cobol(["IF (WS-A = 1."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)  # must be valid Python
+
+    def test_unbalanced_close_paren_emits_todo(self):
+        """Condition with unmatched ) must not produce invalid Python."""
+        src = _make_cobol(["IF WS-A = 1)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)  # must be valid Python

@@ -564,7 +564,10 @@ class PythonMapper:
             else:
                 fixed.append(result[i])
                 i += 1
-        return " ".join(fixed)
+        joined = " ".join(fixed)
+        if joined.count("(") != joined.count(")"):
+            return "True"  # unbalanced parens — fall through to let programmer review
+        return joined
 
     def _translate_if(self, raw: str) -> list[str]:
         """Fallback IF translation (used when block translator can't handle it)."""
