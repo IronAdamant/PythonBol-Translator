@@ -980,3 +980,46 @@ class TestDivideMultipleTargets:
         ast.parse(source)
         assert "ws_b.divide(" in source
         assert "ws_c.divide(" in source
+
+
+class TestConditionIsDataNamePreserved:
+    def test_data_name_ending_in_is_not_corrupted(self):
+        """Data names like WS-STATUS-IS should not have IS stripped."""
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. TEST-PROG.",
+            "       DATA DIVISION.",
+            "       WORKING-STORAGE SECTION.",
+            "       01 WS-STATUS-IS PIC 9(5).",
+            "       PROCEDURE DIVISION.",
+            "       MAIN-PARA.",
+            "           PERFORM MAIN-PARA UNTIL WS-STATUS-IS EQUAL TO 0.",
+        ]
+        src = "\n".join(lines) + "\n"
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ws_status_is" in source
+
+
+class TestCallWithUsing:
+    def test_call_with_using_generates_args(self):
+        """CALL 'SUBPROG' USING WS-A should include argument in TODO."""
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. TEST-PROG.",
+            "       DATA DIVISION.",
+            "       WORKING-STORAGE SECTION.",
+            "       01 WS-A PIC 9(5).",
+            "       PROCEDURE DIVISION.",
+            "       MAIN-PARA.",
+            "           CALL 'SUB-PROG' USING WS-A.",
+        ]
+        src = "\n".join(lines) + "\n"
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "SUB-PROG" in source or "sub_prog" in source
+        assert "TODO(high)" in source

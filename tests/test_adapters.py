@@ -210,3 +210,15 @@ class TestAdapterComparisonEdgeCases:
     def test_cobol_decimal_eq_string_returns_false(self):
         d = CobolDecimal(5, 2, False, "10.00")
         assert not (d == "not-a-number")
+
+
+class TestCobolDecimalConversions:
+    def test_float_conversion(self):
+        d = CobolDecimal(5, 2, False, "12.34")
+        assert float(d) == 12.34
+        assert isinstance(float(d), float)
+
+    def test_int_conversion(self):
+        d = CobolDecimal(5, 2, False, "12.99")
+        assert int(d) == 12
+        assert isinstance(int(d), int)

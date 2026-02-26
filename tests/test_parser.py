@@ -107,6 +107,10 @@ class TestPicClassification:
     def test_signed_numeric(self):
         assert classify_pic("S99999V99") == PicCategory.NUMERIC
 
+    def test_unknown_category(self):
+        """Empty or unrecognizable PIC string should return UNKNOWN."""
+        assert classify_pic("V") == PicCategory.UNKNOWN
+
 
 class TestPicSize:
     def test_simple_numeric(self):

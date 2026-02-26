@@ -684,7 +684,8 @@ class PythonMapper:
         """Best-effort translation of a COBOL condition to Python."""
         c = cond.strip()
         # Strip COBOL IS keyword before comparisons (e.g., IS EQUAL TO -> EQUAL TO)
-        c = re.sub(r'\bIS\s+', '', c)
+        # Use (?:^|\s) instead of \b to avoid corrupting data names ending in -IS
+        c = re.sub(r'(?:^|\s)IS\s+', ' ', c).strip()
         # Replace compound COBOL comparisons FIRST — longest patterns first to avoid partial matches
         c = c.replace(" NOT GREATER THAN OR EQUAL TO ", " < ")
         c = c.replace(" NOT LESS THAN OR EQUAL TO ", " > ")
