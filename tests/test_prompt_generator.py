@@ -157,3 +157,20 @@ class TestPromptCLI:
         content = out_file.read_text()
         assert "CUSTOMER-REPORT" in content
         assert "HIGH" in content  # should have sensitive fields
+
+
+class TestEmptyParagraphSection:
+    def test_empty_paragraph_no_trailing_colon(self):
+        """Paragraph with no statements must not produce trailing ': '."""
+        from cobol_safe_translator.models import CobolProgram, SoftwareMap, Paragraph
+        from cobol_safe_translator.prompt_generator import PromptGenerator
+
+        program = CobolProgram(program_id="TEST", paragraphs=[Paragraph(name="EMPTY-PARA", statements=[])])
+        smap = SoftwareMap(program=program)
+        gen = PromptGenerator(smap, "")
+        section = gen._paragraphs_section()
+        assert "EMPTY-PARA" in section
+        # Should not end with ': ' (no trailing colon-space with nothing after)
+        for line in section.splitlines():
+            if "EMPTY-PARA" in line:
+                assert not line.endswith(": "), f"Line has trailing ': ' : {line!r}"

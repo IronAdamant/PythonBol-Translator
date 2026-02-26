@@ -85,7 +85,8 @@ class PromptGenerator:
             verb_summary = ", ".join(
                 f"{v}\u00d7{c}" for v, c in sorted(verb_counts.items())
             )
-            lines.append(f"- **{para.name}** ({len(para.statements)} stmts): {verb_summary}")
+            suffix = f": {verb_summary}" if verb_summary else ""
+            lines.append(f"- **{para.name}** ({len(para.statements)} stmts){suffix}")
         lines.append("")
         return "\n".join(lines)
 

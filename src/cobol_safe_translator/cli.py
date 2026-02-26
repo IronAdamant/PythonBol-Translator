@@ -70,7 +70,11 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
     print(bold(f"{label}: {source_path}"))
 
     # Parse
-    program = parse_cobol_file(source_path)
+    try:
+        program = parse_cobol_file(source_path)
+    except OSError as e:
+        print(red(f"Error: could not read file: {e}"), file=sys.stderr)
+        return 1, None, None
     print(green(f"  Parsed: {program.program_id} ({len(program.paragraphs)} paragraphs)"))
 
     # Analyze

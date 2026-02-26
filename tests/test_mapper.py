@@ -1799,3 +1799,15 @@ class TestGivingEmptyTarget:
         result = translate_multiply(["2", "BY", "WS-X", "GIVING"], lambda x: x)
         assert any("MULTIPLY" in r for r in result)
         assert any("missing" in r or "no valid" in r for r in result)
+
+
+class TestIsNumericLiteralTrailingDotMapper:
+    def test_trailing_dot_resolve_is_numeric(self):
+        """mapper._is_numeric_literal('5.') must return True (was False before fix)."""
+        from cobol_safe_translator.mapper import _is_numeric_literal
+        assert _is_numeric_literal("5.") is True
+        assert _is_numeric_literal("123.") is True
+
+    def test_leading_dot_resolve_is_numeric(self):
+        from cobol_safe_translator.mapper import _is_numeric_literal
+        assert _is_numeric_literal(".5") is True
