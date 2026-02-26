@@ -221,6 +221,18 @@ class TestFullParse:
         assert "CUST-BALANCE" in child_names
 
 
+class TestPositiveSignedDecimalValue:
+    def test_value_positive_signed_decimal(self):
+        """VALUE +1.50 should capture the full decimal, not truncate at period."""
+        lines = [
+            "WORKING-STORAGE SECTION.",
+            "01 WS-D PIC S9(3)V99 VALUE +1.50.",
+        ]
+        _, ws = parse_data_division(lines)
+        assert len(ws) == 1
+        assert ws[0].value == "+1.50"
+
+
 class TestOccursRedefines:
     def test_occurs_count_extracted(self):
         lines = [
