@@ -2,6 +2,8 @@
 
 This document lists every COBOL construct handled by cobol-safe-translator, with examples and known limitations.
 
+> **Known parser limitation:** Statements that span multiple physical COBOL lines (without a column-7 continuation `-`) are not joined by the parser. Each physical line is treated as a separate statement. As a result, a DIVIDE or MULTIPLY whose `GIVING` clause is on the next line will produce two separate statements instead of one complete translation. Write all statement clauses on a single line (or use the column-7 `-` continuation character) to get the best translation results.
+
 ## Divisions
 
 | Division | Support | Notes |

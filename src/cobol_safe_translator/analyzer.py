@@ -77,6 +77,9 @@ def load_config(config_path: str | Path | None) -> tuple[list[dict[str, str]], l
         if pat["level"] not in valid_levels:
             print(f"Warning: pattern #{i} has invalid level '{pat['level']}' — skipping", file=sys.stderr)
             continue
+        if not isinstance(pat["pattern"], str):
+            print(f"Warning: pattern #{i} has non-string value — skipping", file=sys.stderr)
+            continue
         try:
             re.compile(pat["pattern"], re.IGNORECASE)
         except re.error as e:
@@ -147,7 +150,7 @@ def extract_dependencies(program: CobolProgram) -> list[Dependency]:
 
 def _extract_call_target(operands: list[str]) -> str:
     """Extract the target program name from CALL operands."""
-    if not operands:
+    if not operands or operands[0] is None:
         return ""
     target = operands[0].strip('"').strip("'")
     return target

@@ -168,3 +168,45 @@ class TestAnalyzerWarnings:
         program = parse_cobol(src)
         smap = analyze(program)
         assert any("GO TO" in w for w in smap.warnings)
+
+
+class TestConfigNullPattern:
+    def test_null_pattern_value_skipped_not_crash(self, tmp_path):
+        """load_config with null (non-string) pattern value must warn and skip, not crash."""
+        import json
+        cfg = tmp_path / "config.json"
+        cfg.write_text(json.dumps({
+            "sensitive_patterns": [
+                {"pattern": None, "level": "high", "reason": "null-pattern test"},
+                {"pattern": "SSN", "level": "high", "reason": "should still load"},
+            ]
+        }))
+        patterns, _ = load_config(str(cfg))
+        assert len(patterns) == 1
+        assert patterns[0]["pattern"] == "SSN"
+
+    def test_integer_pattern_value_skipped(self, tmp_path):
+        """Numeric pattern values must be skipped without crashing."""
+        import json
+        cfg = tmp_path / "config.json"
+        cfg.write_text(json.dumps({
+            "sensitive_patterns": [
+                {"pattern": 42, "level": "medium", "reason": "integer-pattern test"},
+            ]
+        }))
+        patterns, _ = load_config(str(cfg))
+        assert len(patterns) == 0
+
+
+class TestExtractCallTargetNoneOperand:
+    def test_none_operand_returns_empty(self):
+        """_extract_call_target with None as first operand must not crash."""
+        from cobol_safe_translator.analyzer import _extract_call_target
+        result = _extract_call_target([None])
+        assert result == ""
+
+    def test_empty_operands_returns_empty(self):
+        """_extract_call_target with empty list must return empty string."""
+        from cobol_safe_translator.analyzer import _extract_call_target
+        result = _extract_call_target([])
+        assert result == ""
