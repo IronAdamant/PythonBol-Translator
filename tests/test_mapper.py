@@ -1594,3 +1594,28 @@ class TestDisplayWithNoAdvancingIncludesSep:
         source = generate_python(smap)
         assert "sep=''" in source
         assert "end=''" in source
+
+
+class TestUnsupportedVerbsTodo:
+    """Unsupported verbs should generate TODO comments."""
+
+    def test_accept_emits_todo(self):
+        src = _make_cobol(["ACCEPT WS-A."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        assert "TODO" in source
+
+    def test_set_emits_todo(self):
+        src = _make_cobol(["SET WS-A TO 1."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        assert "TODO" in source or "SET" in source
+
+    def test_string_emits_todo(self):
+        src = _make_cobol(["STRING WS-A DELIMITED BY SIZE INTO WS-B."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        assert "TODO" in source

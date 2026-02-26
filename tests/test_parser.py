@@ -380,3 +380,21 @@ class TestValueQuoteStripping:
         ]
         _, ws, _ = parse_data_division(lines)
         assert ws[0].value == "123"
+
+
+class TestPicRepeatExpansion:
+    """PIC repeat notation should expand P and / characters."""
+
+    def test_p_repeat(self):
+        assert expand_pic("P(3)999") == "PPP999"
+
+    def test_slash_repeat(self):
+        assert expand_pic("99/(2)99") == "99//99"
+
+    def test_p_in_size(self):
+        size, _, _ = compute_pic_size("PPP999")
+        assert size == 6  # 3 P + 3 digits
+
+    def test_slash_in_size(self):
+        size, _, _ = compute_pic_size("99/99/9999")
+        assert size == 10  # 8 digits + 2 slashes

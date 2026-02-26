@@ -120,7 +120,7 @@ def count_raw_lines(raw_text: str) -> tuple[int, int, int, int]:
 
 # --- PIC parsing ---
 
-_PIC_REPEAT = re.compile(r"(CR|DB|[A9XZVBS,.\-+$])\((\d+)\)", re.IGNORECASE)
+_PIC_REPEAT = re.compile(r"(CR|DB|[A9XZVBS,.\-+$P/])\((\d+)\)", re.IGNORECASE)
 
 
 def expand_pic(raw: str) -> str:
@@ -184,7 +184,9 @@ def compute_pic_size(expanded: str) -> tuple[int, int, bool]:
     for c in count_clean:
         if c in ("9", "X", "A", "Z", "*"):
             size += 1
-        elif c in (".", ",", "B", "+", "-", "$"):
+        elif c in (".", ",", "B", "+", "-", "$", "/"):
+            size += 1
+        elif c == "P":
             size += 1
         elif c == "V":
             pass  # implied decimal, no display position
