@@ -130,3 +130,41 @@ class TestConfigValidation:
         assert patterns[0]["pattern"] == "CUSTOM-FIELD"
         assert patterns[0]["level"] == "high"
         assert excludes == ["FILLER"]
+
+
+class TestAnalyzerWarnings:
+    def test_copy_statement_generates_warning(self):
+        """COPY statement should produce analyzer warning."""
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. TEST-PROG.",
+            "       DATA DIVISION.",
+            "       WORKING-STORAGE SECTION.",
+            "       01 WS-A PIC 9(5).",
+            "       PROCEDURE DIVISION.",
+            "       MAIN-PARA.",
+            "           COPY MY-COPYBOOK.",
+        ]
+        src = "\n".join(lines) + "\n"
+        from cobol_safe_translator.parser import parse_cobol
+        program = parse_cobol(src)
+        smap = analyze(program)
+        assert any("COPY" in w for w in smap.warnings)
+
+    def test_goto_statement_generates_warning(self):
+        """GO TO statement should produce analyzer warning."""
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. TEST-PROG.",
+            "       DATA DIVISION.",
+            "       WORKING-STORAGE SECTION.",
+            "       01 WS-A PIC 9(5).",
+            "       PROCEDURE DIVISION.",
+            "       MAIN-PARA.",
+            "           GO TO MAIN-PARA.",
+        ]
+        src = "\n".join(lines) + "\n"
+        from cobol_safe_translator.parser import parse_cobol
+        program = parse_cobol(src)
+        smap = analyze(program)
+        assert any("GO TO" in w for w in smap.warnings)

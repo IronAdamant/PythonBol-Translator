@@ -728,7 +728,7 @@ class TestDivideIntoWithoutGiving:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "self.data.ws_b.divide(" in source
+        assert "self.data.ws_b.divide(self.data.ws_a.value)" in source
 
 
 class TestMoveAll:
@@ -778,3 +778,15 @@ class TestEvaluateStatement:
         source = generate_python(smap)
         ast.parse(source)
         assert "TODO(high)" in source
+
+
+class TestMoveFunction:
+    def test_move_function_emits_todo(self):
+        """MOVE FUNCTION should emit TODO for manual translation."""
+        src = _make_cobol(["MOVE FUNCTION CURRENT-DATE TO WS-A."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "TODO(high)" in source
+        assert "FUNCTION" in source
