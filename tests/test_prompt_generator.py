@@ -159,6 +159,20 @@ class TestPromptCLI:
         assert "HIGH" in content  # should have sensitive fields
 
 
+class TestNonePythonSource:
+    def test_none_python_source_does_not_crash(self):
+        """PromptGenerator with None python_source must not crash on generate()."""
+        from cobol_safe_translator.models import CobolProgram, SoftwareMap
+        from cobol_safe_translator.prompt_generator import PromptGenerator
+
+        program = CobolProgram(program_id="TEST")
+        smap = SoftwareMap(program=program)
+        gen = PromptGenerator(smap, None)  # type: ignore[arg-type]
+        result = gen.generate()
+        assert isinstance(result, str)
+        assert "# COBOL Translation Brief" in result
+
+
 class TestEmptyParagraphSection:
     def test_empty_paragraph_no_trailing_colon(self):
         """Paragraph with no statements must not produce trailing ': '."""

@@ -1829,3 +1829,28 @@ class TestConditionUnbalancedParens:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)  # must be valid Python
+
+
+class TestPerformVaryingZeroStep:
+    def test_zero_step_emits_todo_not_infinite_loop(self):
+        """PERFORM VARYING with BY 0 must emit TODO, not generate infinite loop code."""
+        src = _make_cobol([
+            "PERFORM MAIN-PARA VARYING WS-A FROM 1 BY 0 UNTIL WS-A > 10.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "TODO(high)" in source
+        assert "infinite loop" in source.lower() or "zero step" in source.lower()
+
+    def test_nonzero_step_generates_loop(self):
+        """PERFORM VARYING with BY 1 generates a while loop (not a TODO)."""
+        src = _make_cobol([
+            "PERFORM MAIN-PARA VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 10.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "while not" in source

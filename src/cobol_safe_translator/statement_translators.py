@@ -435,6 +435,12 @@ def _translate_perform_varying(
             f"# TODO(high): PERFORM VARYING requires manual translation (FROM/BY/UNTIL clauses)",
         ]
 
+    if _is_numeric_literal(step_val) and float(step_val) == 0:
+        return [
+            f"# PERFORM VARYING: {raw}",
+            f"# TODO(high): PERFORM VARYING with zero step would generate infinite loop — manual translation required",
+        ]
+
     py_var = _to_python_name(loop_var)
     start_expr = start_val if _is_numeric_literal(start_val) else f"self.data.{_to_python_name(start_val)}.value"
     step_expr = step_val if _is_numeric_literal(step_val) else f"self.data.{_to_python_name(step_val)}.value"

@@ -20,7 +20,7 @@ class PromptGenerator:
     def __init__(self, smap: SoftwareMap, python_source: str) -> None:
         self.smap = smap
         self.program = smap.program
-        self.python_source = python_source
+        self.python_source = python_source if python_source is not None else ""
 
     def generate(self) -> str:
         """Join all sections into the complete brief."""
