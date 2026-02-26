@@ -350,6 +350,11 @@ def translate_compute(
             else:
                 resolved.append(resolve(part))
         expr = " ".join(resolved)
+        if not expr:
+            return [
+                f"# COMPUTE: {' '.join(ops)}",
+                f"# TODO(high): COMPUTE has no right-hand side — manual translation required",
+            ]
         results = [f"# COMPUTE: {' '.join(ops)}"]
         for t in targets:
             results.append(
@@ -357,6 +362,82 @@ def translate_compute(
             )
         return results
     return [f"# COMPUTE: could not parse operands: {' '.join(ops)}"]
+
+
+def _translate_perform_varying(
+    ops: list[str],
+    raw: str,
+    translate_condition: Callable[[str], str],
+) -> list[str]:
+    """Translate PERFORM [para] VARYING var FROM start BY step UNTIL cond.
+
+    Supports single-variable VARYING only.  Multi-VARYING (nested loops) and
+    any missing/out-of-order keyword fall back to TODO(high).
+    """
+    upper_ops = [o.upper() for o in ops]
+
+    # Reject multi-VARYING (nested loops not supported)
+    if upper_ops.count("VARYING") > 1:
+        return [
+            f"# PERFORM VARYING (multi): {raw}",
+            f"# TODO(high): multi-VARYING nested loops require manual translation",
+        ]
+
+    # Locate required keywords
+    try:
+        varying_idx = upper_ops.index("VARYING")
+        from_idx = upper_ops.index("FROM")
+        by_idx = upper_ops.index("BY")
+        until_idx = upper_ops.index("UNTIL")
+    except ValueError:
+        return [
+            f"# PERFORM VARYING: {raw}",
+            f"# TODO(high): PERFORM VARYING requires manual translation (FROM/BY/UNTIL clauses)",
+        ]
+
+    # Validate keyword order
+    if not (varying_idx < from_idx < by_idx < until_idx):
+        return [
+            f"# PERFORM VARYING: {raw}",
+            f"# TODO(high): PERFORM VARYING requires manual translation (FROM/BY/UNTIL clauses)",
+        ]
+
+    # Inline (VARYING at position 0) vs paragraph call
+    is_inline = (varying_idx == 0)
+    if is_inline:
+        para_call = None
+    else:
+        para_call = f"self.{_to_method_name(ops[0])}()"
+
+    # Extract loop components
+    loop_var = ops[varying_idx + 1] if varying_idx + 1 < from_idx else None
+    start_val = ops[from_idx + 1] if from_idx + 1 < by_idx else None
+    step_val = ops[by_idx + 1] if by_idx + 1 < until_idx else None
+    cond_parts = ops[until_idx + 1:]
+
+    if not loop_var or not start_val or not step_val or not cond_parts:
+        return [
+            f"# PERFORM VARYING: {raw}",
+            f"# TODO(high): PERFORM VARYING requires manual translation (FROM/BY/UNTIL clauses)",
+        ]
+
+    py_var = _to_python_name(loop_var)
+    start_expr = start_val if _is_numeric_literal(start_val) else f"self.data.{_to_python_name(start_val)}.value"
+    step_expr = step_val if _is_numeric_literal(step_val) else f"self.data.{_to_python_name(step_val)}.value"
+    cond = " ".join(cond_parts)
+    translated_cond = translate_condition(cond)
+
+    lines = [
+        f"# PERFORM VARYING {loop_var} FROM {start_val} BY {step_val} UNTIL {cond}",
+        f"self.data.{py_var}.set({start_expr})",
+        f"while not ({translated_cond}):",
+    ]
+    if para_call:
+        lines.append(f"    {para_call}")
+    else:
+        lines.append(f"    pass  # TODO(high): inline PERFORM VARYING — statements should be moved here")
+    lines.append(f"    self.data.{py_var}.add({step_expr})")
+    return lines
 
 
 def translate_perform(
@@ -379,10 +460,7 @@ def translate_perform(
         ]
 
     if "VARYING" in upper_ops:
-        return [
-            f"# PERFORM VARYING: {raw}",
-            f"# TODO(high): PERFORM VARYING requires manual translation (FROM/BY/UNTIL clauses)",
-        ]
+        return _translate_perform_varying(ops, raw, translate_condition)
 
     if "UNTIL" in upper_ops:
         until_idx = next(i for i, o in enumerate(ops) if o.upper() == "UNTIL")

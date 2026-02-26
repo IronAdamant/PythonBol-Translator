@@ -45,3 +45,8 @@ def bankacct_cob() -> Path:
 @pytest.fixture
 def bankacct_source(bankacct_cob: Path) -> str:
     return bankacct_cob.read_text()
+
+
+@pytest.fixture
+def samples_dir() -> Path:
+    return SAMPLES_DIR

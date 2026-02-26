@@ -281,7 +281,7 @@ class FileAdapter:
         if not line:
             self._eof = True
             return None
-        return line.rstrip("\n")
+        return line.rstrip("\r\n")
 
     def close(self) -> None:
         """CLOSE equivalent."""

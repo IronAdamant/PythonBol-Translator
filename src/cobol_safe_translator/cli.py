@@ -1,21 +1,25 @@
 """CLI entry point for the COBOL-to-Python safe translator.
 
 Usage:
-    cobol2py translate <path> --output ./translated
-    cobol2py map <path> --output ./report
+    cobol2py translate <path> [--output ./translated] [--recursive]
+    cobol2py map <path> [--output ./report] [--recursive]
+    cobol2py prompt <path> [--output /path/to/brief.md] [--recursive]
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import sys
 from pathlib import Path
 
 from . import __version__
+from . import batch as _batch
 from .analyzer import analyze
 from .exporters import export_json, export_markdown
 from .mapper import generate_python
 from .parser import parse_cobol_file
+from .prompt_generator import generate_prompt
 
 
 # --- ANSI color helpers (no rich dependency) ---
@@ -70,7 +74,7 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
     print(green(f"  Parsed: {program.program_id} ({len(program.paragraphs)} paragraphs)"))
 
     # Analyze
-    config_path = args.config if args.config else None
+    config_path = args.config if hasattr(args, "config") and args.config else None
     smap = analyze(program, config_path=config_path)
 
     if smap.sensitivities:
@@ -85,52 +89,56 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
     return 0, program, smap
 
 
-# --- Subcommands ---
+def _to_python_filename(program_id: str) -> str:
+    """Convert COBOL program ID to a safe Python filename."""
+    import re as _re
+    name = program_id.lower().replace("-", "_")
+    name = _re.sub(r"[^\w]", "_", name)
+    return (name or "unnamed") + ".py"
 
-def cmd_translate(args: argparse.Namespace) -> int:
-    """Parse, analyze, and generate Python translation."""
-    output_dir = Path(args.output)
 
+# --- Single-file workers ---
+
+def _translate_single(src: Path, out_dir: Path, config: str | None) -> int:
+    """Translate one COBOL file to Python; write to out_dir."""
+    args = argparse.Namespace(path=str(src), config=config)
     rc, program, smap = _parse_and_analyze(args, "Translating")
     if rc != 0 or program is None or smap is None:
         return rc
 
-    # Generate Python
     python_source = generate_python(smap)
 
     try:
-        output_dir.mkdir(parents=True, exist_ok=True)
+        out_dir.mkdir(parents=True, exist_ok=True)
         out_name = _to_python_filename(program.program_id)
-        out_path = output_dir / out_name
+        out_path = out_dir / out_name
         out_path.write_text(python_source, encoding="utf-8")
     except OSError as e:
         print(red(f"Error: could not write output: {e}"), file=sys.stderr)
         return 1
-    print(green(f"  Output: {out_path}"))
 
+    print(green(f"  Output: {out_path}"))
     print(bold(green("Done.")))
     return 0
 
 
-def cmd_map(args: argparse.Namespace) -> int:
-    """Parse, analyze, and export reports."""
-    output_dir = Path(args.output)
-
+def _map_single(src: Path, out_dir: Path, config: str | None) -> int:
+    """Generate analysis reports for one COBOL file; write to out_dir."""
+    args = argparse.Namespace(path=str(src), config=config)
     rc, program, smap = _parse_and_analyze(args, "Mapping")
     if rc != 0 or program is None or smap is None:
         return rc
 
-    # Export reports
     try:
-        output_dir.mkdir(parents=True, exist_ok=True)
+        out_dir.mkdir(parents=True, exist_ok=True)
 
         md_report = export_markdown(smap)
-        md_path = output_dir / "software-map.md"
+        md_path = out_dir / "software-map.md"
         md_path.write_text(md_report, encoding="utf-8")
         print(green(f"  Markdown: {md_path}"))
 
         json_report = export_json(smap)
-        json_path = output_dir / "software-map.json"
+        json_path = out_dir / "software-map.json"
         json_path.write_text(json_report, encoding="utf-8")
         print(green(f"  JSON: {json_path}"))
     except OSError as e:
@@ -141,12 +149,88 @@ def cmd_map(args: argparse.Namespace) -> int:
     return 0
 
 
-def _to_python_filename(program_id: str) -> str:
-    """Convert COBOL program ID to a safe Python filename."""
-    import re as _re
-    name = program_id.lower().replace("-", "_")
-    name = _re.sub(r"[^\w]", "_", name)
-    return (name or "unnamed") + ".py"
+def _prompt_single(src: Path, out_path: Path | None, config: str | None) -> int:
+    """Generate LLM brief for one COBOL file; write to out_path or stdout."""
+    args = argparse.Namespace(path=str(src), config=config)
+    rc, program, smap = _parse_and_analyze(args, "Prompting")
+    if rc != 0 or program is None or smap is None:
+        return rc
+
+    python_source = generate_python(smap)
+    brief = generate_prompt(smap, python_source)
+
+    if out_path is None:
+        print(brief)
+    else:
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(brief, encoding="utf-8")
+            print(green(f"  Brief: {out_path}"))
+        except OSError as e:
+            print(red(f"Error: could not write output: {e}"), file=sys.stderr)
+            return 1
+
+    print(bold(green("Done.")))
+    return 0
+
+
+# --- Subcommands ---
+
+def cmd_translate(args: argparse.Namespace) -> int:
+    """Parse, analyze, and generate Python translation."""
+    p = Path(args.path)
+    config = args.config if hasattr(args, "config") else None
+    recursive = getattr(args, "recursive", False)
+
+    if p.is_dir():
+        base_out = Path(args.output)
+
+        def process(src: Path, out_dir: Path) -> int:
+            return _translate_single(src, out_dir, config)
+
+        return _batch.run_batch(p, base_out, recursive, process)
+
+    return _translate_single(p, Path(args.output), config)
+
+
+def cmd_map(args: argparse.Namespace) -> int:
+    """Parse, analyze, and export reports."""
+    p = Path(args.path)
+    config = args.config if hasattr(args, "config") else None
+    recursive = getattr(args, "recursive", False)
+
+    if p.is_dir():
+        base_out = Path(args.output)
+
+        def process(src: Path, out_dir: Path) -> int:
+            return _map_single(src, out_dir, config)
+
+        return _batch.run_batch(p, base_out, recursive, process)
+
+    return _map_single(p, Path(args.output), config)
+
+
+def cmd_prompt(args: argparse.Namespace) -> int:
+    """Generate an LLM translation brief (stdout or file)."""
+    p = Path(args.path)
+    config = args.config if hasattr(args, "config") else None
+    recursive = getattr(args, "recursive", False)
+    output = getattr(args, "output", None)
+
+    if p.is_dir():
+        if output is None:
+            print(red("Error: --output is required for directory prompt mode"), file=sys.stderr)
+            return 1
+        base_out = Path(output)
+
+        def process(src: Path, out_dir: Path) -> int:
+            brief_path = out_dir / f"{src.stem}_brief.md"
+            return _prompt_single(src, brief_path, config)
+
+        return _batch.run_batch(p, base_out, recursive, process)
+
+    out_path = Path(output) if output else None
+    return _prompt_single(p, out_path, config)
 
 
 # --- Main CLI setup ---
@@ -168,7 +252,7 @@ def build_parser() -> argparse.ArgumentParser:
         "translate",
         help="Translate COBOL source to Python skeleton",
     )
-    tr.add_argument("path", help="Path to COBOL source file")
+    tr.add_argument("path", help="Path to COBOL source file or directory")
     tr.add_argument(
         "--output", "-o", default="./translated",
         help="Output directory (default: ./translated)",
@@ -177,13 +261,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--config", "-c", default=None,
         help="Path to protected.json config file",
     )
+    tr.add_argument(
+        "--recursive", "-r", action="store_true",
+        help="Recurse into subdirectories (directory mode only)",
+    )
 
     # map subcommand
     mp = subparsers.add_parser(
         "map",
         help="Generate analysis reports (Markdown + JSON)",
     )
-    mp.add_argument("path", help="Path to COBOL source file")
+    mp.add_argument("path", help="Path to COBOL source file or directory")
     mp.add_argument(
         "--output", "-o", default="./report",
         help="Output directory (default: ./report)",
@@ -191,6 +279,29 @@ def build_parser() -> argparse.ArgumentParser:
     mp.add_argument(
         "--config", "-c", default=None,
         help="Path to protected.json config file",
+    )
+    mp.add_argument(
+        "--recursive", "-r", action="store_true",
+        help="Recurse into subdirectories (directory mode only)",
+    )
+
+    # prompt subcommand
+    pr = subparsers.add_parser(
+        "prompt",
+        help="Generate a compact LLM translation brief",
+    )
+    pr.add_argument("path", help="Path to COBOL source file or directory")
+    pr.add_argument(
+        "--output", "-o", default=None,
+        help="Output file or directory (default: stdout for single file)",
+    )
+    pr.add_argument(
+        "--config", "-c", default=None,
+        help="Path to protected.json config file",
+    )
+    pr.add_argument(
+        "--recursive", "-r", action="store_true",
+        help="Recurse into subdirectories (directory mode only)",
     )
 
     return parser
@@ -209,6 +320,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_translate(args)
     elif args.command == "map":
         return cmd_map(args)
+    elif args.command == "prompt":
+        return cmd_prompt(args)
     else:
         parser.print_help()
         return 1

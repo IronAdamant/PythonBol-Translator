@@ -175,6 +175,17 @@ class TestFileAdapter:
         assert fa.read() == "line1", "Re-open should restart from beginning"
         fa.close()
 
+    def test_read_strips_windows_crlf(self, tmp_path):
+        """read() must strip both \\r and \\n so Windows CRLF files work correctly."""
+        f = tmp_path / "windows.dat"
+        f.write_bytes(b"RECORD001\r\nRECORD002\r\n")
+        fa = FileAdapter(str(f))
+        fa.open_input()
+        assert fa.read() == "RECORD001"
+        assert fa.read() == "RECORD002"
+        assert fa.read() is None
+        fa.close()
+
 
 class TestCobolDecimalInvalidOperand:
     def test_add_invalid_string_leaves_value_unchanged(self):

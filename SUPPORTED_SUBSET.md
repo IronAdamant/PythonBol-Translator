@@ -63,7 +63,7 @@ This document lists every COBOL construct handled by cobol-safe-translator, with
 | `PERFORM para N TIMES` | `for _ in range(N): self.para()` | Literal or variable count |
 | `PERFORM para UNTIL cond` | `while not (cond): self.para()` | Best-effort condition translation |
 | `PERFORM para THRU end` | TODO comment + partial call | Paragraph range not fully supported |
-| `PERFORM para VARYING` | TODO comment | FROM/BY/UNTIL requires manual translation |
+| `PERFORM para VARYING` | `while not (cond): self.para()` | Partial — single-variable FROM/BY/UNTIL pattern translated; multi-VARYING falls back to TODO |
 | `INITIALIZE x` | Commented-out `.set(0)` | Numeric/alphanumeric reset |
 | `IF condition` | `if cond:` / `else:` | Multi-line: full translation; inline: condition, body, and ELSE translated |
 | `EVALUATE TRUE` | `if`/`elif`/`else` chain | WHEN conditions translated; WHEN OTHER → else |

@@ -366,7 +366,15 @@ class PythonMapper:
         elif verb == "ACCEPT":
             return [f"# ACCEPT: {stmt.raw_text}", f"# TODO(high): ACCEPT — user input requires manual implementation"]
         elif verb == "REWRITE":
-            return [f"# REWRITE: {stmt.raw_text}", f"# TODO(high): REWRITE — file update requires manual implementation"]
+            record_name = ops[0] if ops else "RECORD"
+            py_record = _to_python_name(record_name)
+            file_hint = py_record.replace("_record", "_file").replace("_rec", "_file")
+            return [
+                f"# REWRITE {record_name}",
+                f"# TODO(high): REWRITE — FileAdapter is read-only by design (safety guarantee)",
+                f"# To implement: open file in write mode, seek to record, write updated data",
+                f"# self.{file_hint}.rewrite(self.data.{py_record})",
+            ]
         elif verb == "SET":
             return [f"# SET: {stmt.raw_text}", f"# TODO(high): manual translation required"]
         elif verb == "GO":

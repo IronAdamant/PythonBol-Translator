@@ -241,6 +241,15 @@ class TestComputeResolution:
         assert "10" in source
         assert "5" in source
 
+    def test_compute_empty_rhs_emits_todo_not_syntax_error(self):
+        """COMPUTE with no right-hand side must not generate self.data.x.set() (invalid Python)."""
+        from cobol_safe_translator.statement_translators import translate_compute
+        result = translate_compute(["WS-A", "="], lambda op: op)
+        combined = "\n".join(result)
+        assert "TODO(high)" in combined
+        # Verify the output is syntactically safe (no bare .set() call)
+        assert ".set()" not in combined
+
 
 class TestPerformVarying:
     def test_perform_varying_emits_todo(self):
@@ -1618,3 +1627,68 @@ class TestUnsupportedVerbsTodo:
         smap = analyze(program)
         source = generate_python(smap)
         assert "TODO" in source
+
+
+class TestPerformVarying:
+    def test_varying_normal_loop(self):
+        """PERFORM para VARYING idx FROM 1 BY 1 UNTIL idx > 5 generates a while loop."""
+        src = _make_cobol(["PERFORM MAIN-PARA VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 5."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "while not" in source
+        assert "ws_a.set(" in source or ".set(1)" in source
+        assert "ws_a.add(" in source or ".add(1)" in source
+
+    def test_varying_inline(self):
+        """PERFORM VARYING idx FROM 1 BY 1 UNTIL cond (no paragraph) generates while loop."""
+        src = _make_cobol(["PERFORM VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 5."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "while not" in source
+        assert "TODO(high)" in source  # inline body needs manual fill
+
+    def test_varying_multi_fallback(self):
+        """Multi-VARYING (nested loops) falls back to TODO(high)."""
+        src = _make_cobol([
+            "PERFORM MAIN-PARA VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 3",
+            "    AFTER VARYING WS-B FROM 1 BY 1 UNTIL WS-B > 3.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "TODO(high)" in source
+
+    def test_varying_missing_keyword_fallback(self):
+        """PERFORM VARYING without UNTIL falls back to TODO(high)."""
+        from cobol_safe_translator.statement_translators import translate_perform
+        # Simulate operands missing UNTIL
+        ops = ["SOME-PARA", "VARYING", "IDX", "FROM", "1", "BY", "1"]
+        result = translate_perform(ops, "PERFORM SOME-PARA VARYING IDX FROM 1 BY 1", lambda c: c)
+        combined = "\n".join(result)
+        assert "TODO(high)" in combined
+
+
+class TestRewriteSkeleton:
+    def test_rewrite_helpful_comment(self):
+        """REWRITE generates a helpful comment with file_hint."""
+        src = _make_cobol(["REWRITE CUSTOMER-RECORD."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "REWRITE" in source
+        assert "rewrite" in source or "FileAdapter" in source
+
+    def test_rewrite_has_todo_high(self):
+        """REWRITE always emits TODO(high)."""
+        src = _make_cobol(["REWRITE CUSTOMER-RECORD."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "TODO(high)" in source
