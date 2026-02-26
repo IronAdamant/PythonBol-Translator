@@ -134,3 +134,31 @@ class TestJsonExporter:
         assert len(data["file_controls"]) > 0
         fc_names = [fc["name"] for fc in data["file_controls"]]
         assert "CUSTOMER-FILE" in fc_names
+
+
+class TestMermaidEdgeCases:
+    def test_mermaid_id_empty_string_returns_unknown(self):
+        """_mermaid_id('') must return 'unknown', not empty string."""
+        from cobol_safe_translator.exporters import MarkdownExporter
+        assert MarkdownExporter._mermaid_id("") == "unknown"
+
+    def test_mermaid_id_normal_name_unchanged(self):
+        from cobol_safe_translator.exporters import MarkdownExporter
+        assert MarkdownExporter._mermaid_id("HELLO") == "HELLO"
+
+    def test_empty_call_target_skipped_in_graph(self, hello_source):
+        """Dependencies with empty call_target must not produce invalid Mermaid."""
+        from cobol_safe_translator.models import Dependency
+        from cobol_safe_translator.exporters import export_markdown
+        program = parse_cobol(hello_source)
+        smap = analyze(program)
+        # Inject an empty-target dependency
+        smap.dependencies.append(Dependency(call_target="", source_paragraph="MAIN"))
+        md = export_markdown(smap)
+        # The word immediately after --> in mermaid should not be empty
+        for line in md.splitlines():
+            if "-->" in line:
+                parts = line.strip().split("-->")
+                target_part = parts[1].strip()
+                assert target_part  # not empty
+                assert not target_part.startswith('[""]')

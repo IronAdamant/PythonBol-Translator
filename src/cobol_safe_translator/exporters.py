@@ -163,6 +163,8 @@ class MarkdownExporter:
         Uses char-code encoding for non-alphanumeric characters to avoid
         collisions (e.g., PROG-A vs PROG.A would otherwise both become PROG_A).
         """
+        if not name:
+            return "unknown"
         result = []
         for c in name:
             if c.isalnum() or c == "_":
@@ -187,6 +189,8 @@ class MarkdownExporter:
 
         seen: set[str] = set()
         for dep in self.smap.dependencies:
+            if not dep.call_target:
+                continue  # skip empty targets — would produce invalid Mermaid
             dep_id = self._mermaid_id(dep.call_target)
             if dep_id not in seen:
                 dep_label = dep.call_target.replace('"', '#quot;')
@@ -199,6 +203,8 @@ class MarkdownExporter:
         lines.append("| Source Paragraph | Target Program |")
         lines.append("|-----------------|----------------|")
         for dep in self.smap.dependencies:
+            if not dep.call_target:
+                continue  # skip empty targets in table too
             lines.append(f"| `{self._esc(dep.source_paragraph)}` | `{self._esc(dep.call_target)}` |")
         lines.append("")
 
