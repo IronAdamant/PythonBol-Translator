@@ -378,7 +378,15 @@ class PythonMapper:
         elif verb == "SET":
             return [f"# SET: {stmt.raw_text}", f"# TODO(high): manual translation required"]
         elif verb == "GO":
-            safe_text = stmt.raw_text.replace("\\", "\\\\").replace("'", "\\'").replace("{", "{{").replace("}", "}}")
+            safe_text = (
+                stmt.raw_text
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("{", "{{")
+                .replace("}", "}}")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+            )
             return [
                 f"raise NotImplementedError('GO TO not supported: {safe_text}')",
                 f"# TODO(high): GO TO requires manual restructuring",

@@ -223,6 +223,8 @@ def translate_multiply(
     upper_ops = [o.upper() for o in ops]
     if "BY" in upper_ops:
         by_idx = next(i for i, o in enumerate(upper_ops) if o == "BY")
+        if by_idx == 0:
+            return [f"# MULTIPLY: missing source operand: {' '.join(ops)}"]
         source = resolve(ops[0])
         if "GIVING" in upper_ops:
             giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
@@ -253,6 +255,8 @@ def translate_divide(
     upper_ops = [o.upper() for o in ops]
     if "INTO" in upper_ops:
         into_idx = next(i for i, o in enumerate(upper_ops) if o == "INTO")
+        if into_idx == 0:
+            return [f"# DIVIDE: missing divisor operand: {' '.join(ops)}"]
         divisor = resolve(ops[0])
         if "GIVING" in upper_ops:
             giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
@@ -294,6 +298,8 @@ def translate_divide(
         return results
     if "BY" in upper_ops:
         by_idx = next(i for i, o in enumerate(upper_ops) if o == "BY")
+        if by_idx == 0:
+            return [f"# DIVIDE: missing dividend operand: {' '.join(ops)}"]
         dividend = resolve(ops[0])
         if "GIVING" in upper_ops:
             giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")

@@ -1692,3 +1692,69 @@ class TestRewriteSkeleton:
         source = generate_python(smap)
         ast.parse(source)
         assert "TODO(high)" in source
+
+
+class TestGoToNewlineEscape:
+    def _make_mapper(self):
+        from cobol_safe_translator.models import CobolProgram, SoftwareMap
+        return PythonMapper(SoftwareMap(program=CobolProgram()))
+
+    def test_goto_with_newline_in_raw_text_produces_valid_python(self):
+        """GO TO with embedded newline in raw_text must produce valid Python (no SyntaxError)."""
+        from cobol_safe_translator.models import CobolStatement
+        stmt = CobolStatement(verb="GO", operands=["TO", "SOME-PARA"], raw_text="GO TO SOME-PARA\nEXTRA")
+        mapper = self._make_mapper()
+        lines = mapper._translate_statement(stmt)
+        ast.parse(f"def f():\n    {lines[0]}")  # must be valid Python
+        assert "\\n" in lines[0]
+
+    def test_goto_with_carriage_return_produces_valid_python(self):
+        """GO TO with embedded \\r in raw_text must not break the raise string."""
+        from cobol_safe_translator.models import CobolStatement
+        stmt = CobolStatement(verb="GO", operands=["TO", "PARA"], raw_text="GO TO PARA\rMORE")
+        mapper = self._make_mapper()
+        lines = mapper._translate_statement(stmt)
+        ast.parse(f"def f():\n    {lines[0]}")
+        assert "\\r" in lines[0]
+
+
+class TestMultiplyMissingSource:
+    def test_multiply_by_without_source_returns_comment(self):
+        """MULTIPLY BY X (no source operand before BY) must not crash."""
+        from cobol_safe_translator.statement_translators import translate_multiply
+        result = translate_multiply(["BY", "WS-X"], lambda x: x)
+        combined = "\n".join(result)
+        assert "MULTIPLY" in combined
+        assert "missing" in combined
+
+    def test_multiply_by_with_source_works(self):
+        """Normal MULTIPLY 2 BY WS-X must still work after guard."""
+        from cobol_safe_translator.statement_translators import translate_multiply
+        result = translate_multiply(["2", "BY", "WS-X"], lambda x: x)
+        combined = "\n".join(result)
+        assert "multiply" in combined or "set" in combined
+
+
+class TestDivideMissingOperand:
+    def test_divide_into_without_divisor_returns_comment(self):
+        """DIVIDE INTO X (no divisor before INTO) must not crash."""
+        from cobol_safe_translator.statement_translators import translate_divide
+        result = translate_divide(["INTO", "WS-X"], lambda x: x)
+        combined = "\n".join(result)
+        assert "DIVIDE" in combined
+        assert "missing" in combined
+
+    def test_divide_by_without_dividend_returns_comment(self):
+        """DIVIDE BY X (no dividend before BY) must not crash."""
+        from cobol_safe_translator.statement_translators import translate_divide
+        result = translate_divide(["BY", "WS-X"], lambda x: x)
+        combined = "\n".join(result)
+        assert "DIVIDE" in combined
+        assert "missing" in combined
+
+    def test_divide_into_with_operands_works(self):
+        """Normal DIVIDE 2 INTO WS-X must still work after guard."""
+        from cobol_safe_translator.statement_translators import translate_divide
+        result = translate_divide(["2", "INTO", "WS-X"], lambda x: x)
+        combined = "\n".join(result)
+        assert "divide" in combined or "set" in combined
