@@ -1758,3 +1758,44 @@ class TestDivideMissingOperand:
         result = translate_divide(["2", "INTO", "WS-X"], lambda x: x)
         combined = "\n".join(result)
         assert "divide" in combined or "set" in combined
+
+
+class TestDisplayWithClause:
+    def test_display_with_without_no_advancing_excludes_with(self):
+        """DISPLAY X WITH OTHER-CLAUSE: WITH clause must not be passed to print as a data name."""
+        src = _make_cobol(["DISPLAY WS-A WITH SOME-CLAUSE."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # After the fix, WITH and SOME-CLAUSE are stripped; only WS-A is printed
+        assert "some_clause" not in source
+
+    def test_display_with_no_advancing_still_works(self):
+        """DISPLAY X WITH NO ADVANCING must still set end=''."""
+        src = _make_cobol(["DISPLAY WS-A WITH NO ADVANCING."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "end=''" in source
+
+
+class TestGivingEmptyTarget:
+    def test_subtract_giving_no_target_returns_comment(self):
+        from cobol_safe_translator.statement_translators import translate_subtract
+        result = translate_subtract(["A", "FROM", "B", "GIVING"], lambda x: x)
+        assert any("SUBTRACT" in r for r in result)
+        assert any("missing" in r or "no valid" in r for r in result)
+
+    def test_add_giving_keyword_only_target_returns_comment(self):
+        from cobol_safe_translator.statement_translators import translate_add
+        result = translate_add(["A", "GIVING", "ON", "SIZE", "ERROR"], lambda x: x)
+        assert any("ADD" in r for r in result)
+        assert any("missing" in r or "no valid" in r for r in result)
+
+    def test_multiply_giving_no_target_returns_comment(self):
+        from cobol_safe_translator.statement_translators import translate_multiply
+        result = translate_multiply(["2", "BY", "WS-X", "GIVING"], lambda x: x)
+        assert any("MULTIPLY" in r for r in result)
+        assert any("missing" in r or "no valid" in r for r in result)

@@ -65,6 +65,8 @@ class CobolDecimal:
         # positive -> ROUND_FLOOR, negative -> ROUND_CEILING (both truncate toward zero)
         rounding = ROUND_FLOOR if d >= 0 else ROUND_CEILING
         d = d.quantize(quant, rounding=rounding)
+        if d == 0:
+            d = d.copy_abs()  # prevent -0 from overflow at exact modulus boundary
 
         return d
 

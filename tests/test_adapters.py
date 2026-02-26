@@ -292,3 +292,17 @@ class TestCobolDecimalConversions:
         d = CobolDecimal(5, 2, False, "12.99")
         assert int(d) == 12
         assert isinstance(int(d), int)
+
+
+class TestCobolDecimalNegativeZero:
+    def test_overflow_at_exact_modulus_does_not_produce_negative_zero(self):
+        """set(-100) on (2,0) should overflow to 0, not -0."""
+        d = CobolDecimal(2, 0, signed=True)
+        d.set(-100)
+        assert str(d.value) == "0"
+        assert d.value >= 0
+
+    def test_overflow_non_zero_negative_is_fine(self):
+        d = CobolDecimal(2, 0, signed=True)
+        d.set(-150)  # -150 mod 100 = -50
+        assert d.value == Decimal("-50")

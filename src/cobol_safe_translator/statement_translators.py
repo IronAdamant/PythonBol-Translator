@@ -47,7 +47,7 @@ def _is_numeric_literal(s: str) -> bool:
     if len(parts) == 1:
         return parts[0].isdigit()
     if len(parts) == 2:
-        return (parts[0].isdigit() or parts[0] == "") and parts[1].isdigit()
+        return (parts[0].isdigit() or parts[0] == "") and (parts[1].isdigit() or parts[1] == "")
     return False
 
 
@@ -78,11 +78,11 @@ def translate_display(
         if op.upper() == "UPON":
             operands = operands[:i]
             break
-        if op.upper() == "WITH" and i + 2 < len(operands):
-            if operands[i + 1].upper() == "NO" and operands[i + 2].upper() == "ADVANCING":
+        if op.upper() == "WITH":
+            if i + 2 < len(operands) and operands[i + 1].upper() == "NO" and operands[i + 2].upper() == "ADVANCING":
                 no_advancing = True
-                operands = operands[:i]
-                break
+            operands = operands[:i]  # WITH is always a clause marker, never a data name
+            break
     for op in operands:
         parts.append(resolve(op))
     end_kwarg = ", end=''" if no_advancing else ""
@@ -156,6 +156,8 @@ def translate_add(
                 break
             if t.upper() != "ROUNDED":
                 results.append(f"self.data.{_to_python_name(t)}.set({sum_expr})")
+        if not results:
+            return [f"# ADD GIVING: no valid target found: {' '.join(ops)}"]
         return results
     if "TO" in upper_ops:
         to_idx = next(i for i, o in enumerate(upper_ops) if o == "TO")
@@ -183,6 +185,8 @@ def translate_subtract(
     if "GIVING" in upper_ops:
         giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
         giving_targets = ops[giving_idx + 1:]
+        if not giving_targets:
+            return [f"# SUBTRACT GIVING: missing target operand: {' '.join(ops)}"]
         pre_giving = ops[:giving_idx]
         if "FROM" in [o.upper() for o in pre_giving]:
             from_idx = next(i for i, o in enumerate(pre_giving) if o.upper() == "FROM")
@@ -199,6 +203,8 @@ def translate_subtract(
                 break
             if t.upper() != "ROUNDED":
                 results.append(f"self.data.{_to_python_name(t)}.set({expr})")
+        if not results:
+            return [f"# SUBTRACT GIVING: no valid target found: {' '.join(ops)}"]
         return results
     if "FROM" in upper_ops:
         from_idx = next(i for i, o in enumerate(upper_ops) if o == "FROM")
@@ -235,6 +241,8 @@ def translate_multiply(
                     break
                 if t.upper() != "ROUNDED":
                     results.append(f"self.data.{_to_python_name(t)}.set({source} * {multiplicand})")
+            if not results:
+                return [f"# MULTIPLY GIVING: no valid target found: {' '.join(ops)}"]
             return results
         raw_targets = ops[by_idx + 1:]
         targets = [t for t in raw_targets if t.upper() not in _ARITHMETIC_KEYWORDS and t.upper() != "ROUNDED"]
