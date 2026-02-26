@@ -353,7 +353,12 @@ def _parse_data_item(line: str) -> DataItem | None:
     value: str | None = None
     value_m = _VALUE_RE.search(stripped)
     if value_m:
-        value = value_m.group(1).strip().strip('"').strip("'")
+        raw_val = value_m.group(1).strip()
+        if (raw_val.startswith('"') and raw_val.endswith('"')) or \
+           (raw_val.startswith("'") and raw_val.endswith("'")):
+            value = raw_val[1:-1]
+        else:
+            value = raw_val
 
     occurs: int | None = None
     occurs_m = _OCCURS_RE.search(stripped)

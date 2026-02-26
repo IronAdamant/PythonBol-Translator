@@ -1560,3 +1560,37 @@ class TestDisplayWithNoAdvancing:
         # Should not include WITH, NO, ADVANCING as data names
         assert "with_" not in source
         assert "advancing" not in source
+
+
+class TestComputeWithoutEquals:
+    """COMPUTE without = operator should emit error comment."""
+
+    def test_compute_no_equals(self):
+        src = _make_cobol(["COMPUTE WS-A WS-B."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        assert "could not parse" in source.lower()
+
+
+class TestMoveWithoutTo:
+    """MOVE without TO clause should emit error comment."""
+
+    def test_move_no_to(self):
+        src = _make_cobol(["MOVE WS-A WS-B."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        assert "could not parse" in source.lower() or "MOVE" in source
+
+
+class TestDisplayWithNoAdvancingIncludesSep:
+    """DISPLAY WITH NO ADVANCING should have both sep='' and end=''."""
+
+    def test_sep_and_end(self):
+        src = _make_cobol(['DISPLAY "HELLO" WITH NO ADVANCING.'])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        assert "sep=''" in source
+        assert "end=''" in source

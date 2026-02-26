@@ -460,3 +460,20 @@ class TestEvaluateWhenOrValues:
         lines, next_i = translate_evaluate_block(stmts, 0, _stmt_fn, _cond, _resolve, indent=0)
         combined = " ".join(lines)
         assert "or" in combined.lower()
+
+
+class TestEvaluateAlsoDetection:
+    """EVALUATE ALSO should emit TODO and skip the block."""
+
+    def test_also_emits_todo(self):
+        stmts = [
+            _make("EVALUATE", "WS-A", "ALSO", "WS-B"),
+            _make("WHEN", "1", "ALSO", "2"),
+            _make("DISPLAY", "MATCH"),
+            _make("END-EVALUATE"),
+        ]
+        lines, next_i = translate_evaluate_block(stmts, 0, _stmt_fn, _cond, _resolve, indent=0)
+        combined = " ".join(lines)
+        assert "TODO" in combined
+        assert "ALSO" in combined
+        assert next_i == 4  # Should consume the whole block

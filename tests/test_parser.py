@@ -352,3 +352,31 @@ class TestOccursRedefines:
         _, ws, _ = parse_data_division(lines)
         assert len(ws) == 2
         assert ws[1].redefines == "WS-A"
+
+
+class TestValueQuoteStripping:
+    """VALUE clause only strips matching outer quotes, not inner ones."""
+
+    def test_double_quoted_value(self):
+        lines = [
+            "WORKING-STORAGE SECTION.",
+            '01 WS-MSG PIC X(10) VALUE "HELLO".',
+        ]
+        _, ws, _ = parse_data_division(lines)
+        assert ws[0].value == "HELLO"
+
+    def test_single_quoted_value(self):
+        lines = [
+            "WORKING-STORAGE SECTION.",
+            "01 WS-MSG PIC X(10) VALUE 'WORLD'.",
+        ]
+        _, ws, _ = parse_data_division(lines)
+        assert ws[0].value == "WORLD"
+
+    def test_numeric_value_no_stripping(self):
+        lines = [
+            "WORKING-STORAGE SECTION.",
+            "01 WS-NUM PIC 9(3) VALUE 123.",
+        ]
+        _, ws, _ = parse_data_division(lines)
+        assert ws[0].value == "123"
