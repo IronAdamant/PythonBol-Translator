@@ -1831,6 +1831,16 @@ class TestConditionUnbalancedParens:
         ast.parse(source)  # must be valid Python
 
 
+class TestHeaderTripleQuoteEscape:
+    def test_triple_quote_in_source_path_produces_valid_python(self):
+        """source_path containing triple-quotes must not close the module docstring early."""
+        from cobol_safe_translator.models import CobolProgram, SoftwareMap
+        program = CobolProgram(program_id="TEST-PROG", source_path='/tmp/weird"""path.cob')
+        smap = SoftwareMap(program=program)
+        source = generate_python(smap)
+        ast.parse(source)  # must not raise SyntaxError
+
+
 class TestPerformTimesNumericLiteral:
     def test_trailing_dot_literal_in_times_generates_valid_range(self):
         """PERFORM N. TIMES with trailing-dot literal must not treat N. as a field name."""

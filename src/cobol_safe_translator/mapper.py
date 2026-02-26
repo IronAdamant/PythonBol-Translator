@@ -109,10 +109,11 @@ class PythonMapper:
         return "\n".join(parts)
 
     def _header(self) -> str:
+        safe_path = str(self.program.source_path).replace('"""', r'\"\"\"')
         lines = [
             '"""',
             f"Auto-generated Python translation of COBOL program: {self._program_id}",
-            f"Source: {self.program.source_path}",
+            f"Source: {safe_path}",
             f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "",
             "WARNING: This is a machine-generated skeleton. Manual review is REQUIRED",
