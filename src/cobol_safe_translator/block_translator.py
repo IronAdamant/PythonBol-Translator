@@ -39,6 +39,8 @@ def translate_if_block(
     """Translate a multi-line IF block. Returns (python_lines, next_index)."""
     if_stmt = stmts[start_idx]
     cond_text = " ".join(if_stmt.operands)
+    if not cond_text.strip():
+        return [_indent_line("# TODO(high): IF block has no condition — manual translation required", indent)], start_idx + 1
     py_cond = translate_cond_fn(cond_text)
 
     lines: list[str] = [_indent_line(f"if {py_cond}:", indent)]
@@ -266,7 +268,7 @@ def _fallback_resolve(op: str) -> str:
     Handles: quoted strings, numeric literals, figurative constants, and data names.
     Mirrors mapper._resolve_operand logic to avoid incorrect code generation.
     """
-    if op.startswith('"') or op.startswith("'"):
+    if (op.startswith('"') and op.endswith('"')) or (op.startswith("'") and op.endswith("'")):
         return op
     # Numeric literal check
     check = op
@@ -276,7 +278,7 @@ def _fallback_resolve(op: str) -> str:
     is_numeric = False
     if len(parts) == 1 and parts[0].isdigit():
         is_numeric = True
-    elif len(parts) == 2 and (parts[0].isdigit() or parts[0] == "") and parts[1].isdigit():
+    elif len(parts) == 2 and (parts[0].isdigit() or parts[0] == "") and (parts[1].isdigit() or parts[1] == ""):
         is_numeric = True
     if is_numeric:
         return op

@@ -477,3 +477,43 @@ class TestEvaluateAlsoDetection:
         assert "TODO" in combined
         assert "ALSO" in combined
         assert next_i == 4  # Should consume the whole block
+
+
+class TestFallbackResolveQuotes:
+    """_fallback_resolve must require matching closing quote."""
+
+    def test_full_double_quoted_string_returned_as_is(self):
+        from cobol_safe_translator.block_translator import _fallback_resolve
+        assert _fallback_resolve('"HELLO"') == '"HELLO"'
+
+    def test_unmatched_double_quote_treated_as_data_name(self):
+        from cobol_safe_translator.block_translator import _fallback_resolve
+        # Missing closing quote — should not be returned as a raw string literal
+        result = _fallback_resolve('"HELLO')
+        assert result != '"HELLO'  # must not return bare unclosed literal
+
+    def test_full_single_quoted_string_returned_as_is(self):
+        from cobol_safe_translator.block_translator import _fallback_resolve
+        assert _fallback_resolve("'HELLO'") == "'HELLO'"
+
+    def test_trailing_dot_numeric_is_numeric(self):
+        """123. (trailing dot) should resolve to numeric, not a data name."""
+        from cobol_safe_translator.block_translator import _fallback_resolve
+        result = _fallback_resolve("123.")
+        assert result == "123."
+        assert "self.data" not in result
+
+
+class TestIfEmptyCondition:
+    """IF with no operands must emit TODO, not bare 'if :'."""
+
+    def test_empty_condition_emits_todo(self):
+        stmts = [
+            _make("IF"),
+            _make("DISPLAY", "A"),
+            _make("END-IF"),
+        ]
+        lines, next_i = translate_if_block(stmts, 0, _stmt_fn, _cond, indent=0)
+        combined = "\n".join(lines)
+        assert "TODO(high)" in combined
+        assert "if :" not in combined

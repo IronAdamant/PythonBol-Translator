@@ -78,7 +78,11 @@ def run_batch(
     errors: list[tuple[Path, int]] = []
     for src in files:
         out_dir = base_output / src.stem
-        rc = process_fn(src, out_dir)
+        try:
+            rc = process_fn(src, out_dir)
+        except Exception as exc:  # noqa: BLE001
+            print_fn(f"  ERROR: {src}: {exc}", file=sys.stderr)
+            rc = 1
         if rc != 0:
             errors.append((src, rc))
 

@@ -154,3 +154,22 @@ class TestBatchCLI:
         for py_file in out_dir.rglob("*.py"):
             source = py_file.read_text()
             ast.parse(source)  # must be valid Python
+
+
+class TestRunBatchExceptionHandling:
+    def test_exception_in_process_fn_continues_batch(self, tmp_path):
+        """run_batch must continue processing even if process_fn raises."""
+        (tmp_path / "a.cob").write_text("IDENTIFICATION DIVISION.")
+        (tmp_path / "b.cob").write_text("IDENTIFICATION DIVISION.")
+
+        calls = []
+        def process_fn(src, out_dir):
+            calls.append(src.name)
+            if src.name == "a.cob":
+                raise RuntimeError("simulated crash")
+            return 0
+
+        rc = run_batch(tmp_path, tmp_path / "out", False, process_fn, print)
+        assert rc == 1  # one failure → non-zero
+        assert "a.cob" in calls
+        assert "b.cob" in calls  # b.cob must still be processed despite a.cob crash
