@@ -858,3 +858,125 @@ class TestBasicSubtract:
         source = generate_python(smap)
         ast.parse(source)
         assert "self.data.ws_b.multiply(self.data.ws_a.value)" in source
+
+
+class TestOpenStatement:
+    def test_open_input_generates_open_input_call(self):
+        """OPEN INPUT should generate .open_input() on the file adapter."""
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. TEST-PROG.",
+            "       ENVIRONMENT DIVISION.",
+            "       INPUT-OUTPUT SECTION.",
+            "       FILE-CONTROL.",
+            "           SELECT CUST-FILE ASSIGN TO 'cust.dat'.",
+            "       DATA DIVISION.",
+            "       FILE SECTION.",
+            "       FD CUST-FILE.",
+            "       01 CUST-REC PIC X(80).",
+            "       WORKING-STORAGE SECTION.",
+            "       01 WS-A PIC 9(5).",
+            "       PROCEDURE DIVISION.",
+            "       MAIN-PARA.",
+            "           OPEN INPUT CUST-FILE.",
+        ]
+        src = "\n".join(lines) + "\n"
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert ".open_input()" in source
+
+    def test_open_output_generates_safety_comment(self):
+        """OPEN OUTPUT should generate safety comment, not actual file write."""
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. TEST-PROG.",
+            "       ENVIRONMENT DIVISION.",
+            "       INPUT-OUTPUT SECTION.",
+            "       FILE-CONTROL.",
+            "           SELECT RPT-FILE ASSIGN TO 'report.dat'.",
+            "       DATA DIVISION.",
+            "       FILE SECTION.",
+            "       FD RPT-FILE.",
+            "       01 RPT-REC PIC X(80).",
+            "       WORKING-STORAGE SECTION.",
+            "       01 WS-A PIC 9(5).",
+            "       PROCEDURE DIVISION.",
+            "       MAIN-PARA.",
+            "           OPEN OUTPUT RPT-FILE.",
+        ]
+        src = "\n".join(lines) + "\n"
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "not supported" in source.lower() or "TODO(high)" in source
+        # Must NOT generate .open_output() — safety guarantee
+        assert "open_output()" not in source
+
+
+class TestReadStatement:
+    def test_read_generates_read_call_and_eof_check(self):
+        """READ should generate .read() call with EOF None check."""
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. TEST-PROG.",
+            "       ENVIRONMENT DIVISION.",
+            "       INPUT-OUTPUT SECTION.",
+            "       FILE-CONTROL.",
+            "           SELECT CUST-FILE ASSIGN TO 'cust.dat'.",
+            "       DATA DIVISION.",
+            "       FILE SECTION.",
+            "       FD CUST-FILE.",
+            "       01 CUST-REC PIC X(80).",
+            "       WORKING-STORAGE SECTION.",
+            "       01 WS-A PIC 9(5).",
+            "       PROCEDURE DIVISION.",
+            "       MAIN-PARA.",
+            "           READ CUST-FILE.",
+        ]
+        src = "\n".join(lines) + "\n"
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert ".read()" in source
+        assert "is None" in source or "AT END" in source
+
+
+class TestStopStatement:
+    def test_stop_run_generates_return(self):
+        """STOP RUN should generate a return statement."""
+        src = _make_cobol(["STOP RUN."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # Find lines in the method body that have 'return'
+        method_lines = [l.strip() for l in source.split("\n") if l.strip() == "return"]
+        assert len(method_lines) >= 1, "STOP RUN should generate 'return'"
+
+
+class TestMultiplyMultipleTargets:
+    def test_multiply_two_targets(self):
+        """MULTIPLY x BY y z should multiply both y and z by x."""
+        src = _make_cobol(["MULTIPLY WS-A BY WS-B WS-C."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ws_b.multiply(" in source
+        assert "ws_c.multiply(" in source
+
+
+class TestDivideMultipleTargets:
+    def test_divide_into_two_targets(self):
+        """DIVIDE x INTO y z should divide both y and z by x."""
+        src = _make_cobol(["DIVIDE WS-A INTO WS-B WS-C."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ws_b.divide(" in source
+        assert "ws_c.divide(" in source

@@ -500,10 +500,14 @@ class PythonMapper:
                     if t.upper() != "ROUNDED":
                         results.append(f"self.data.{_to_python_name(t)}.set({source} * {multiplicand})")
                 return results
-            if by_idx + 1 >= len(ops):
+            raw_targets = ops[by_idx + 1:]
+            targets = [t for t in raw_targets if t.upper() not in _ARITHMETIC_KEYWORDS and t.upper() != "ROUNDED"]
+            if not targets:
                 return [f"# MULTIPLY: missing target operand: {' '.join(ops)}"]
-            target = _to_python_name(ops[by_idx + 1])
-            return [f"self.data.{target}.multiply({source})"]
+            results = []
+            for t in targets:
+                results.append(f"self.data.{_to_python_name(t)}.multiply({source})")
+            return results
         return [f"# MULTIPLY: could not parse operands: {' '.join(ops)}"]
 
     def _translate_divide(self, ops: list[str]) -> list[str]:
@@ -543,10 +547,14 @@ class PythonMapper:
                     results.append(f"# TODO(high): REMAINDER {remainder_target} — compute modulo manually")
                     results.append(f"# self.data.{_to_python_name(remainder_target)}.set({dividend} % {divisor})")
                 return results
-            if into_idx + 1 >= len(ops):
+            raw_targets = ops[into_idx + 1:]
+            targets = [t for t in raw_targets if t.upper() not in _ARITHMETIC_KEYWORDS and t.upper() != "ROUNDED"]
+            if not targets:
                 return [f"# DIVIDE: missing target operand: {' '.join(ops)}"]
-            target = _to_python_name(ops[into_idx + 1])
-            return [f"self.data.{target}.divide({divisor})"]
+            results = []
+            for t in targets:
+                results.append(f"self.data.{_to_python_name(t)}.divide({divisor})")
+            return results
         # DIVIDE x BY y GIVING z [REMAINDER r] (dividend is x, divisor is y)
         if "BY" in upper_ops:
             by_idx = next(i for i, o in enumerate(upper_ops) if o == "BY")
