@@ -58,7 +58,7 @@ This document lists every COBOL construct handled by cobol-safe-translator, with
 | `DIVIDE x INTO y` | `self.data.y.divide(x)` | Supports GIVING; REMAINDER emits TODO |
 | `DIVIDE x BY y GIVING z` | `self.data.z.set(x / y)` | BY form (x is dividend) |
 | `COMPUTE y = expr` | `self.data.y.set(expr)` | Expression needs manual review |
-| `DISPLAY items` | `print(items)` | |
+| `DISPLAY items` | `print(items)` | `WITH NO ADVANCING` → `end=''` |
 | `PERFORM para` | `self.para()` | Simple perform |
 | `PERFORM para N TIMES` | `for _ in range(N): self.para()` | Literal or variable count |
 | `PERFORM para UNTIL cond` | `while not (cond): self.para()` | Best-effort condition translation |
@@ -75,6 +75,8 @@ This document lists every COBOL construct handled by cobol-safe-translator, with
 | `READ file` | `self.file.read()` | With EOF detection |
 | `WRITE` | TODO comment | Write not supported (safety) |
 | `CALL "prog"` | TODO comment | External dependency flagged |
+| `ACCEPT var` | TODO comment | User input requires manual implementation |
+| `REWRITE record` | TODO comment | File update requires manual implementation |
 | `STOP RUN` | `return` | |
 | `GO TO` | `raise NotImplementedError` | Requires manual restructuring |
 
@@ -85,9 +87,12 @@ These emit `# TODO(high)` comments in generated code:
 - `STRING` / `UNSTRING` — string manipulation
 - `INSPECT` — character inspection/replacement
 - `SET` — condition/index setting
+- `ACCEPT` — user input (emits TODO)
+- `REWRITE` — record update (emits TODO)
 - `COPY` / `REPLACE` — copybook expansion (analyzer warning + TODO comment)
 - `SORT` / `MERGE` — file sorting
 - `SEARCH` — table searching
+- `FUNCTION` — intrinsic functions (emits TODO in MOVE FUNCTION)
 
 ## File Handling
 

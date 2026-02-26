@@ -215,7 +215,6 @@ class TestFileAdapterContextManager:
         f = tmp_path / "test.txt"
         f.write_text("line1\nline2\n")
         with FileAdapter(str(f)) as fa:
-            fa.open_input()
             assert fa.read() == "line1"
         # After exit, file should be closed
         assert fa._file is None

@@ -290,6 +290,7 @@ class FileAdapter:
             self._file = None
 
     def __enter__(self) -> FileAdapter:
+        self.open_input()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:

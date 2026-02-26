@@ -19,3 +19,4 @@ protected.json
 # Default output directories
 translated/
 report/
+output/

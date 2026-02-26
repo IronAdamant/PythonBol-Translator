@@ -25,3 +25,23 @@ def hello_source(hello_cob: Path) -> str:
 @pytest.fixture
 def customer_report_source(customer_report_cob: Path) -> str:
     return customer_report_cob.read_text()
+
+
+@pytest.fixture
+def payroll_calc_cob() -> Path:
+    return SAMPLES_DIR / "payroll-calc.cob"
+
+
+@pytest.fixture
+def payroll_calc_source(payroll_calc_cob: Path) -> str:
+    return payroll_calc_cob.read_text()
+
+
+@pytest.fixture
+def bankacct_cob() -> Path:
+    return SAMPLES_DIR / "BANKACCT.cob"
+
+
+@pytest.fixture
+def bankacct_source(bankacct_cob: Path) -> str:
+    return bankacct_cob.read_text()

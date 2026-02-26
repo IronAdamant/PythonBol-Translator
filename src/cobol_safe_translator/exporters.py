@@ -6,7 +6,6 @@ Pipeline position: Analyzer -> SoftwareMap -> **Exporter** -> Reports (MD / JSON
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime
 
 from .models import (
@@ -180,7 +179,7 @@ class MarkdownExporter:
             return "\n".join(lines)
 
         prog_id = self._mermaid_id(self.program.program_id)
-        prog_label = self.program.program_id
+        prog_label = self.program.program_id.replace('"', '#quot;')
 
         lines.append("```mermaid")
         lines.append("graph TD")
@@ -190,7 +189,8 @@ class MarkdownExporter:
         for dep in self.smap.dependencies:
             dep_id = self._mermaid_id(dep.call_target)
             if dep_id not in seen:
-                lines.append(f"    {prog_id} --> {dep_id}[\"{dep.call_target}\"]")
+                dep_label = dep.call_target.replace('"', '#quot;')
+                lines.append(f"    {prog_id} --> {dep_id}[\"{dep_label}\"]")
                 seen.add(dep_id)
 
         lines.append("```\n")

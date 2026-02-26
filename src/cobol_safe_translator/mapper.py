@@ -30,6 +30,7 @@ from .models import (
     SensitivityFlag,
     SoftwareMap,
 )
+from . import statement_translators as st
 
 
 def _is_numeric_literal(s: str) -> bool:
@@ -78,12 +79,6 @@ def _to_method_name(para_name: str) -> str:
 def _indent(text: str, level: int = 1) -> str:
     """Indent text by the given number of 4-space levels."""
     return textwrap.indent(text, "    " * level)
-
-
-# Keywords that should be filtered from arithmetic operand/target lists
-_ARITHMETIC_KEYWORDS = frozenset({
-    "ROUNDED", "ON", "SIZE", "ERROR", "NOT",
-})
 
 
 class PythonMapper:
@@ -186,9 +181,10 @@ class PythonMapper:
         # Deduplicate field names (e.g., multiple FILLER items)
         if py_name in self._field_name_counts:
             self._field_name_counts[py_name] += 1
-            py_name = f"{py_name}_{self._field_name_counts[py_name]}"
+            count = self._field_name_counts[py_name]
+            py_name = f"{py_name}_{count}"
         else:
-            self._field_name_counts[py_name] = 1
+            self._field_name_counts[py_name] = 0
 
         # Sensitivity warning
         if item.name.upper() in self._sensitive_names:
@@ -367,6 +363,10 @@ class PythonMapper:
             return self._translate_call(ops)
         elif verb == "STOP":
             return ["return"]
+        elif verb == "ACCEPT":
+            return [f"# ACCEPT: {stmt.raw_text}", f"# TODO(high): ACCEPT — user input requires manual implementation"]
+        elif verb == "REWRITE":
+            return [f"# REWRITE: {stmt.raw_text}", f"# TODO(high): REWRITE — file update requires manual implementation"]
         elif verb == "SET":
             return [f"# SET: {stmt.raw_text}", f"# TODO(high): manual translation required"]
         elif verb == "GO":
@@ -385,64 +385,10 @@ class PythonMapper:
             return [f"# TODO(high): unsupported verb {verb}", f"# {stmt.raw_text}"]
 
     def _translate_display(self, stmt: CobolStatement) -> list[str]:
-        parts: list[str] = []
-        no_advancing = False
-        # Filter out UPON clause and WITH NO ADVANCING
-        operands = list(stmt.operands)
-        for i, op in enumerate(operands):
-            if op.upper() == "UPON":
-                operands = operands[:i]
-                break
-            if op.upper() == "WITH" and i + 2 < len(operands):
-                if operands[i + 1].upper() == "NO" and operands[i + 2].upper() == "ADVANCING":
-                    no_advancing = True
-                    operands = operands[:i]
-                    break
-        for op in operands:
-            parts.append(self._resolve_operand(op))
-        end_kwarg = ", end=''" if no_advancing else ""
-        if parts:
-            return [f"print({', '.join(parts)}, sep=''{end_kwarg})"]
-        return [f"print({end_kwarg.lstrip(', ')})"] if no_advancing else ["print()"]
+        return st.translate_display(stmt, self._resolve_operand)
 
     def _translate_move(self, ops: list[str]) -> list[str]:
-        # MOVE CORRESPONDING requires field-by-field matching
-        if ops and ops[0].upper() == "CORRESPONDING":
-            return [f"# TODO(high): MOVE CORRESPONDING — manual field matching required"]
-        # MOVE ALL repeats a character to fill the target
-        if ops and ops[0].upper() == "ALL":
-            return [f"# TODO(high): MOVE ALL — repeats value to fill target field: {' '.join(ops)}"]
-        if "TO" not in [o.upper() for o in ops]:
-            return [f"# MOVE: could not parse operands: {' '.join(ops)}"]
-        to_idx = next(i for i, o in enumerate(ops) if o.upper() == "TO")
-        source = ops[0]
-        targets = ops[to_idx + 1:]
-        if not targets:
-            return [f"# MOVE: missing target operand: {' '.join(ops)}"]
-
-        # Resolve source value
-        if source.startswith('"') or source.startswith("'"):
-            src_expr = source
-        elif _is_numeric_literal(source):
-            src_expr = source
-        elif source.upper().startswith("FUNCTION"):
-            return [f"# TODO(high): MOVE FUNCTION — manual translation required"]
-        elif source.upper() in ("ZEROS", "ZEROES", "ZERO"):
-            src_expr = "0"
-        elif source.upper() in ("SPACES", "SPACE"):
-            src_expr = "' '"
-        elif source.upper() in ("HIGH-VALUES", "HIGH-VALUE"):
-            src_expr = "'\\xff'"
-        elif source.upper() in ("LOW-VALUES", "LOW-VALUE"):
-            src_expr = "'\\x00'"
-        else:
-            src_expr = f"self.data.{_to_python_name(source)}.value"
-
-        results: list[str] = []
-        for t in targets:
-            target = _to_python_name(t)
-            results.append(f"self.data.{target}.set({src_expr})")
-        return results
+        return st.translate_move(ops)
 
     def _resolve_operand(self, op: str) -> str:
         """Resolve a COBOL operand to a Python expression."""
@@ -462,286 +408,22 @@ class PythonMapper:
         return f"self.data.{_to_python_name(op)}.value"
 
     def _translate_add(self, ops: list[str]) -> list[str]:
-        if not ops:
-            return ["# ADD: no operands"]
-        # ADD x [y ...] TO z [GIVING r]
-        upper_ops = [o.upper() for o in ops]
-        # Handle GIVING clause: result stored in GIVING target, not TO target
-        if "GIVING" in upper_ops:
-            giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
-            giving_targets = ops[giving_idx + 1:]
-            if not giving_targets:
-                return [f"# ADD GIVING: missing target operand: {' '.join(ops)}"]
-            pre_giving = ops[:giving_idx]
-            # Collect all source values (before TO, or all of pre_giving if no TO)
-            if "TO" in [o.upper() for o in pre_giving]:
-                to_idx = next(i for i, o in enumerate(pre_giving) if o.upper() == "TO")
-                all_sources = pre_giving[:to_idx] + pre_giving[to_idx + 1:]
-            else:
-                all_sources = pre_giving
-            exprs = [self._resolve_operand(s) for s in all_sources]
-            sum_expr = " + ".join(exprs) if exprs else "0"
-            results: list[str] = []
-            for t in giving_targets:
-                if t.upper() in _ARITHMETIC_KEYWORDS:
-                    break
-                if t.upper() != "ROUNDED":
-                    results.append(f"self.data.{_to_python_name(t)}.set({sum_expr})")
-            return results
-        if "TO" in upper_ops:
-            to_idx = next(i for i, o in enumerate(upper_ops) if o == "TO")
-            sources = ops[:to_idx]
-            targets = [t for t in ops[to_idx + 1:] if t.upper() not in _ARITHMETIC_KEYWORDS]
-            if not sources or not targets:
-                return [f"# ADD: missing operand(s): {' '.join(ops)}"]
-            results = []
-            for src in sources:
-                src_expr = self._resolve_operand(src)
-                for t in targets:
-                    results.append(f"self.data.{_to_python_name(t)}.add({src_expr})")
-            return results
-        return [f"# ADD: could not parse operands: {' '.join(ops)}"]
+        return st.translate_add(ops, self._resolve_operand)
 
     def _translate_subtract(self, ops: list[str]) -> list[str]:
-        if not ops:
-            return ["# SUBTRACT: no operands"]
-        # SUBTRACT x [y ...] FROM z [GIVING r]
-        upper_ops = [o.upper() for o in ops]
-        if "GIVING" in upper_ops:
-            giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
-            giving_targets = ops[giving_idx + 1:]
-            pre_giving = ops[:giving_idx]
-            if "FROM" in [o.upper() for o in pre_giving]:
-                from_idx = next(i for i, o in enumerate(pre_giving) if o.upper() == "FROM")
-                sources = pre_giving[:from_idx]
-                base = pre_giving[from_idx + 1] if from_idx + 1 < len(pre_giving) else "0"
-                base_expr = self._resolve_operand(base)
-                sub_exprs = [self._resolve_operand(s) for s in sources]
-                expr = base_expr + "".join(f" - {e}" for e in sub_exprs)
-            else:
-                expr = " - ".join(self._resolve_operand(s) for s in pre_giving) or "0"
-            results: list[str] = []
-            for t in giving_targets:
-                if t.upper() in _ARITHMETIC_KEYWORDS:
-                    break
-                if t.upper() != "ROUNDED":
-                    results.append(f"self.data.{_to_python_name(t)}.set({expr})")
-            return results
-        if "FROM" in upper_ops:
-            from_idx = next(i for i, o in enumerate(upper_ops) if o == "FROM")
-            sources = ops[:from_idx]
-            targets = [t for t in ops[from_idx + 1:] if t.upper() not in _ARITHMETIC_KEYWORDS]
-            if not sources or not targets:
-                return [f"# SUBTRACT: missing operand(s): {' '.join(ops)}"]
-            results = []
-            for src in sources:
-                src_expr = self._resolve_operand(src)
-                for t in targets:
-                    results.append(f"self.data.{_to_python_name(t)}.subtract({src_expr})")
-            return results
-        return [f"# SUBTRACT: could not parse operands: {' '.join(ops)}"]
+        return st.translate_subtract(ops, self._resolve_operand)
 
     def _translate_multiply(self, ops: list[str]) -> list[str]:
-        # MULTIPLY x BY y [GIVING z]
-        upper_ops = [o.upper() for o in ops]
-        if "BY" in upper_ops:
-            by_idx = next(i for i, o in enumerate(upper_ops) if o == "BY")
-            source = self._resolve_operand(ops[0])
-            if "GIVING" in upper_ops:
-                giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
-                multiplicand = self._resolve_operand(ops[by_idx + 1]) if (by_idx + 1 < len(ops) and by_idx + 1 < giving_idx) else "1"
-                results: list[str] = []
-                for t in ops[giving_idx + 1:]:
-                    if t.upper() in _ARITHMETIC_KEYWORDS:
-                        break
-                    if t.upper() != "ROUNDED":
-                        results.append(f"self.data.{_to_python_name(t)}.set({source} * {multiplicand})")
-                return results
-            raw_targets = ops[by_idx + 1:]
-            targets = [t for t in raw_targets if t.upper() not in _ARITHMETIC_KEYWORDS and t.upper() != "ROUNDED"]
-            if not targets:
-                return [f"# MULTIPLY: missing target operand: {' '.join(ops)}"]
-            results = []
-            for t in targets:
-                results.append(f"self.data.{_to_python_name(t)}.multiply({source})")
-            return results
-        return [f"# MULTIPLY: could not parse operands: {' '.join(ops)}"]
+        return st.translate_multiply(ops, self._resolve_operand)
 
     def _translate_divide(self, ops: list[str]) -> list[str]:
-        # DIVIDE x INTO y [GIVING z] [REMAINDER r]
-        upper_ops = [o.upper() for o in ops]
-        if "INTO" in upper_ops:
-            into_idx = next(i for i, o in enumerate(upper_ops) if o == "INTO")
-            divisor = self._resolve_operand(ops[0])
-            if "GIVING" in upper_ops:
-                giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
-                dividend = self._resolve_operand(ops[into_idx + 1]) if into_idx + 1 < len(ops) and into_idx + 1 < giving_idx else "0"
-                # Filter out REMAINDER, ROUNDED, ON SIZE ERROR keywords
-                giving_targets = []
-                has_remainder = False
-                remainder_target = None
-                i = giving_idx + 1
-                while i < len(ops):
-                    upper_op = ops[i].upper()
-                    if upper_op == "REMAINDER":
-                        has_remainder = True
-                        if i + 1 < len(ops):
-                            remainder_target = ops[i + 1]
-                            i += 2
-                        else:
-                            i += 1
-                        continue
-                    if upper_op in _ARITHMETIC_KEYWORDS:
-                        break
-                    if upper_op != "ROUNDED":
-                        giving_targets.append(ops[i])
-                    i += 1
-                results: list[str] = []
-                results.append(f"# TODO: verify divisor is non-zero before division (COBOL EC-SIZE-ZERO-DIVIDE)")
-                for t in giving_targets:
-                    results.append(f"self.data.{_to_python_name(t)}.set({dividend} / {divisor})")
-                if has_remainder and remainder_target:
-                    results.append(f"# TODO(high): REMAINDER {remainder_target} — compute modulo manually")
-                    results.append(f"# self.data.{_to_python_name(remainder_target)}.set({dividend} % {divisor})")
-                return results
-            raw_targets = ops[into_idx + 1:]
-            targets = [t for t in raw_targets if t.upper() not in _ARITHMETIC_KEYWORDS and t.upper() != "ROUNDED"]
-            if not targets:
-                return [f"# DIVIDE: missing target operand: {' '.join(ops)}"]
-            results = []
-            for t in targets:
-                results.append(f"self.data.{_to_python_name(t)}.divide({divisor})")
-            return results
-        # DIVIDE x BY y GIVING z [REMAINDER r] (dividend is x, divisor is y)
-        if "BY" in upper_ops:
-            by_idx = next(i for i, o in enumerate(upper_ops) if o == "BY")
-            dividend = self._resolve_operand(ops[0])
-            if "GIVING" in upper_ops:
-                giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
-                divisor = self._resolve_operand(ops[by_idx + 1]) if by_idx + 1 < len(ops) and by_idx + 1 < giving_idx else "1"
-                # Filter REMAINDER and ROUNDED from giving targets
-                giving_targets = []
-                has_remainder = False
-                remainder_target = None
-                i = giving_idx + 1
-                while i < len(ops):
-                    upper_op = ops[i].upper()
-                    if upper_op == "REMAINDER":
-                        has_remainder = True
-                        if i + 1 < len(ops):
-                            remainder_target = ops[i + 1]
-                            i += 2
-                        else:
-                            i += 1
-                        continue
-                    if upper_op in _ARITHMETIC_KEYWORDS:
-                        break
-                    if upper_op != "ROUNDED":
-                        giving_targets.append(ops[i])
-                    i += 1
-                results = []
-                results.append(f"# TODO: verify divisor is non-zero before division (COBOL EC-SIZE-ZERO-DIVIDE)")
-                for t in giving_targets:
-                    results.append(f"self.data.{_to_python_name(t)}.set({dividend} / {divisor})")
-                if has_remainder and remainder_target:
-                    results.append(f"# TODO(high): REMAINDER {remainder_target} — compute modulo manually")
-                    results.append(f"# self.data.{_to_python_name(remainder_target)}.set({dividend} % {divisor})")
-                return results
-            if by_idx + 1 >= len(ops):
-                return [f"# DIVIDE BY: missing divisor: {' '.join(ops)}"]
-            divisor = self._resolve_operand(ops[by_idx + 1])
-            return [f"# TODO(high): DIVIDE BY without GIVING — manual translation required",
-                    f"# {dividend} / {divisor}"]
-        return [f"# DIVIDE: could not parse operands: {' '.join(ops)}"]
+        return st.translate_divide(ops, self._resolve_operand)
 
     def _translate_compute(self, ops: list[str]) -> list[str]:
-        # COMPUTE target [target2 ...] = expression
-        _COMPUTE_OPERATORS = {"+", "-", "*", "/", "(", ")", "**"}
-        if "=" in ops:
-            eq_idx = ops.index("=")
-            targets = [t for t in ops[:eq_idx] if t.upper() != "ROUNDED"]
-            expr_parts = ops[eq_idx + 1:]
-            resolved: list[str] = []
-            for part in expr_parts:
-                if part in _COMPUTE_OPERATORS:
-                    resolved.append(part)
-                else:
-                    resolved.append(self._resolve_operand(part))
-            expr = " ".join(resolved)
-            results = [f"# COMPUTE: {' '.join(ops)}"]
-            for t in targets:
-                results.append(
-                    f"self.data.{_to_python_name(t)}.set({expr})  # TODO(high): verify expression translation"
-                )
-            return results
-        return [f"# COMPUTE: could not parse operands: {' '.join(ops)}"]
+        return st.translate_compute(ops, self._resolve_operand)
 
     def _translate_perform(self, ops: list[str], raw: str) -> list[str]:
-        if not ops:
-            return [f"# PERFORM with no target"]
-
-        target = _to_method_name(ops[0])
-        upper_ops = [o.upper() for o in ops]
-
-        # PERFORM ... THRU/THROUGH — paragraph range, can't fully translate
-        if "THRU" in upper_ops or "THROUGH" in upper_ops:
-            return [
-                f"# PERFORM THRU: {raw}",
-                f"# TODO(high): PERFORM THRU/THROUGH requires manual translation (paragraph range)",
-                f"self.{target}()  # only first paragraph — range endpoint missing",
-            ]
-
-        # PERFORM ... VARYING — needs FROM/BY/UNTIL which we can't fully translate
-        if "VARYING" in upper_ops:
-            return [
-                f"# PERFORM VARYING: {raw}",
-                f"# TODO(high): PERFORM VARYING requires manual translation (FROM/BY/UNTIL clauses)",
-            ]
-
-        # PERFORM ... UNTIL
-        if "UNTIL" in upper_ops:
-            until_idx = next(i for i, o in enumerate(ops) if o.upper() == "UNTIL")
-            cond_parts = ops[until_idx + 1:]
-            if not cond_parts:
-                return [f"# PERFORM UNTIL: missing condition — {' '.join(ops)}"]
-            cond = " ".join(cond_parts)
-            # Inline PERFORM UNTIL (no paragraph name — UNTIL is first operand)
-            if until_idx == 0:
-                return [
-                    f"# PERFORM UNTIL {cond} (inline — no paragraph)",
-                    f"while not ({self._translate_condition(cond)}):",
-                    f"    pass  # TODO(high): inline PERFORM UNTIL — statements should be moved here",
-                ]
-            return [
-                f"# PERFORM {ops[0]} UNTIL {cond}",
-                f"while not ({self._translate_condition(cond)}):",
-                f"    self.{target}()",
-            ]
-
-        # PERFORM ... TIMES
-        if "TIMES" in [o.upper() for o in ops]:
-            times_idx = next(i for i, o in enumerate(ops) if o.upper() == "TIMES")
-            if times_idx >= 2:
-                # PERFORM para-name count TIMES
-                times_op = ops[times_idx - 1]
-                target = _to_method_name(ops[0])
-            elif times_idx == 1:
-                # PERFORM count TIMES (inline block, no paragraph name)
-                times_op = ops[0]
-                times_val = times_op if times_op.isdigit() else f"int(self.data.{_to_python_name(times_op)}.value)"
-                return [
-                    f"for _ in range({times_val}):",
-                    f"    pass  # TODO(high): inline PERFORM TIMES — statements should be moved here",
-                ]
-            else:
-                return [f"# PERFORM TIMES: invalid syntax — {' '.join(ops)}"]
-            times_val = times_op if times_op.isdigit() else f"int(self.data.{_to_python_name(times_op)}.value)"
-            return [
-                f"for _ in range({times_val}):",
-                f"    self.{target}()",
-            ]
-
-        return [f"self.{target}()"]
+        return st.translate_perform(ops, raw, self._translate_condition)
 
     def _translate_condition(self, cond: str) -> str:
         """Best-effort translation of a COBOL condition to Python."""
@@ -805,33 +487,37 @@ class PythonMapper:
                 result.append(literals[int(lit_m.group(1))])
             elif t in ("(", ")"):
                 result.append(t)
-            elif t in (">", "<", "==", "!=", ">=", "<=", "AND", "OR", "NOT"):
-                result.append(t.lower() if t in ("AND", "OR", "NOT") else t)
+            elif t in (">", "<", "==", "!=", ">=", "<=", "AND", "OR"):
+                result.append(t.lower() if t in ("AND", "OR") else t)
+            elif t == "NOT":
+                # Wrap the following comparison in parentheses so Python
+                # evaluates "not (a > b)" rather than "(not a) > b".
+                result.append("not")
             elif t == "__CLASS_NUMERIC__":
                 # Look back — previous token is the subject
                 if result:
                     subj = result.pop()
                     result.append(f"str({subj}).replace('.','').replace('-','').isdigit()")
                 else:
-                    result.append("# TODO(high): IS NUMERIC — no subject found")
+                    result.append("False  # TODO(high): IS NUMERIC — no subject found")
             elif t == "__CLASS_ALPHABETIC__":
                 if result:
                     subj = result.pop()
                     result.append(f"str({subj}).isalpha()")
                 else:
-                    result.append("# TODO(high): IS ALPHABETIC — no subject found")
+                    result.append("False  # TODO(high): IS ALPHABETIC — no subject found")
             elif t == "__CLASS_NOT_NUMERIC__":
                 if result:
                     subj = result.pop()
                     result.append(f"not str({subj}).replace('.','').replace('-','').isdigit()")
                 else:
-                    result.append("# TODO(high): IS NOT NUMERIC — no subject found")
+                    result.append("True  # TODO(high): IS NOT NUMERIC — no subject found")
             elif t == "__CLASS_NOT_ALPHABETIC__":
                 if result:
                     subj = result.pop()
                     result.append(f"not str({subj}).isalpha()")
                 else:
-                    result.append("# TODO(high): IS NOT ALPHABETIC — no subject found")
+                    result.append("True  # TODO(high): IS NOT ALPHABETIC — no subject found")
             elif _is_numeric_literal(t):
                 result.append(t)
             elif t.upper() in ("ZERO", "ZEROS", "ZEROES"):
@@ -844,7 +530,25 @@ class PythonMapper:
                 result.append("'\\x00'")
             else:
                 result.append(f"self.data.{_to_python_name(t)}.value")
-        return " ".join(result)
+        # Post-process: wrap "not X op Y" into "not (X op Y)" to fix
+        # Python operator precedence (not binds tighter than comparisons).
+        _CMP_OPS = {">", "<", "==", "!=", ">=", "<="}
+        fixed: list[str] = []
+        i = 0
+        while i < len(result):
+            if result[i] == "not" and i + 3 < len(result) and result[i + 2] in _CMP_OPS:
+                # not X op Y -> not (X op Y)
+                fixed.append("not")
+                fixed.append("(")
+                fixed.append(result[i + 1])
+                fixed.append(result[i + 2])
+                fixed.append(result[i + 3])
+                fixed.append(")")
+                i += 4
+            else:
+                fixed.append(result[i])
+                i += 1
+        return " ".join(fixed)
 
     def _translate_if(self, raw: str) -> list[str]:
         """Fallback IF translation (used when block translator can't handle it)."""
@@ -863,60 +567,19 @@ class PythonMapper:
         ]
 
     def _translate_open(self, ops: list[str]) -> list[str]:
-        if len(ops) >= 2:
-            mode = ops[0].upper()
-            file_names = ops[1:]
-            results: list[str] = []
-            for fn in file_names:
-                py_name = _to_python_name(fn)
-                if mode == "INPUT":
-                    results.append(f"self.{py_name}.open_input()")
-                elif mode == "OUTPUT":
-                    results.append(f"# OPEN OUTPUT {fn} — write not supported (safety)")
-                    results.append(f"# TODO(high): file output requires manual implementation")
-            return results if results else [f"# OPEN: could not parse: {' '.join(ops)}"]
-        return [f"# OPEN: could not parse: {' '.join(ops)}"]
+        return st.translate_open(ops)
 
     def _translate_close(self, ops: list[str]) -> list[str]:
-        _CLOSE_KEYWORDS = {"WITH", "LOCK", "NO", "REWIND"}
-        results: list[str] = []
-        for op in ops:
-            if op.upper() in _CLOSE_KEYWORDS:
-                continue
-            py_name = _to_python_name(op)
-            results.append(f"self.{py_name}.close()")
-        return results
+        return st.translate_close(ops)
 
     def _translate_read(self, ops: list[str], raw: str) -> list[str]:
-        if ops:
-            file_name = _to_python_name(ops[0])
-            return [
-                f"_record = self.{file_name}.read()",
-                f"if _record is None:",
-                f"    pass  # AT END — set EOF flag",
-                f"    # {raw}",
-            ]
-        return [f"# READ: could not parse: {raw}"]
+        return st.translate_read(ops, raw)
 
     def _translate_call(self, ops: list[str]) -> list[str]:
-        if ops:
-            target = ops[0].strip('"').strip("'")
-            py_target = _to_python_name(target)
-            args = [_to_python_name(o) for o in ops[2:] if o.upper() != "USING"]
-            arg_str = ", ".join(f"self.data.{a}.value" for a in args) if args else ""
-            return [
-                f"# CALL '{target}'",
-                f"# TODO(high): implement or import {py_target}({arg_str})",
-            ]
-        return [f"# CALL: no target specified"]
+        return st.translate_call(ops)
 
     def _translate_initialize(self, ops: list[str]) -> list[str]:
-        results: list[str] = []
-        for op in ops:
-            py_name = _to_python_name(op)
-            results.append(f"# INITIALIZE {op}")
-            results.append(f"# self.data.{py_name}.set(0)  # or '' for alphanumeric")
-        return results
+        return st.translate_initialize(ops)
 
     def _main_block(self) -> str:
         class_name = _to_python_name(self._program_id).title().replace("_", "")

@@ -111,7 +111,7 @@ def count_raw_lines(raw_text: str) -> tuple[int, int, int, int]:
         stripped = line.strip()
         if not stripped:
             blanks += 1
-        elif len(line) > 6 and line[6] in ("*", "/", "D", "d"):
+        elif len(line) > 6 and line[6] in ("*", "/"):
             comments += 1
         else:
             code += 1
@@ -146,7 +146,7 @@ def classify_pic(expanded: str) -> PicCategory:
     has_nine = "9" in upper
     has_x = "X" in upper
     has_a = "A" in upper
-    has_edit = any(c in upper for c in ("Z", "B", ",", ".", "+", "-", "CR", "DB", "$"))
+    has_edit = any(tok in upper for tok in ("CR", "DB")) or any(c in upper for c in "ZB,.+-$")
 
     if has_edit:
         return PicCategory.EDITED
@@ -427,6 +427,7 @@ KNOWN_VERBS = frozenset({
     "DISPLAY", "ACCEPT", "PERFORM", "GO", "IF", "ELSE", "EVALUATE",
     "WHEN", "READ", "WRITE", "OPEN", "CLOSE", "CALL", "STOP",
     "SET", "STRING", "UNSTRING", "INSPECT", "INITIALIZE",
+    "REWRITE",
     "END-IF", "END-EVALUATE", "END-PERFORM", "END-READ",
     "NOT", "END-WRITE", "END-CALL", "END-STRING",
 })

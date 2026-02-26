@@ -27,13 +27,8 @@ def _supports_color() -> bool:
     return sys.stdout.isatty()
 
 
-def _color_enabled() -> bool:
-    """Check color support lazily (not at import time)."""
-    return _supports_color()
-
-
 def _c(code: str, text: str) -> str:
-    if not _color_enabled():
+    if not _supports_color():
         return text
     return f"\033[{code}m{text}\033[0m"
 
@@ -60,7 +55,7 @@ def cyan(text: str) -> str:
 
 # --- Shared helpers ---
 
-def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple[int, object, object] | tuple[int, None, None]:
+def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
     """Parse and analyze a COBOL source file. Returns (exit_code, program, smap)."""
     source_path = Path(args.path)
 

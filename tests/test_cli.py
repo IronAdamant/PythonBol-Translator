@@ -39,6 +39,28 @@ class TestTranslateCommand:
         result = main(["translate", str(tmp_path), "--output", str(tmp_path / "out")])
         assert result == 1
 
+    def test_translate_payroll_calc(self, payroll_calc_cob, tmp_path):
+        out_dir = tmp_path / "translated"
+        result = main(["translate", str(payroll_calc_cob), "--output", str(out_dir)])
+        assert result == 0
+
+        py_file = out_dir / "payroll_calc.py"
+        assert py_file.exists()
+        source = py_file.read_text()
+        ast.parse(source)
+
+    def test_translate_bankacct(self, bankacct_cob, tmp_path):
+        out_dir = tmp_path / "translated"
+        result = main(["translate", str(bankacct_cob), "--output", str(out_dir)])
+        assert result == 0
+
+        py_file = out_dir / "bankacct.py"
+        assert py_file.exists()
+        source = py_file.read_text()
+        ast.parse(source)
+        # Banking program should produce TODOs for WRITE, STRING, ACCEPT, REWRITE
+        assert "TODO" in source
+
 
 class TestMapCommand:
     def test_map_customer_report(self, customer_report_cob, tmp_path):
@@ -74,6 +96,39 @@ class TestMapCommand:
     def test_map_missing_file(self, tmp_path):
         result = main(["map", "/nonexistent/file.cob", "--output", str(tmp_path)])
         assert result == 1
+
+    def test_map_payroll_calc(self, payroll_calc_cob, tmp_path):
+        out_dir = tmp_path / "report"
+        result = main(["map", str(payroll_calc_cob), "--output", str(out_dir)])
+        assert result == 0
+
+        md_file = out_dir / "software-map.md"
+        json_file = out_dir / "software-map.json"
+        assert md_file.exists()
+        assert json_file.exists()
+
+        # Validate sensitivity detection on payroll data
+        data = json.loads(json_file.read_text())
+        assert data["program_id"] == "PAYROLL-CALC"
+        sensitivities = data["sensitivities"]
+        assert len(sensitivities) > 0
+        # Check for expected sensitive fields
+        sens_names = [s["data_name"] for s in sensitivities]
+        assert "EMP-SSN" in sens_names
+        assert "EMP-SALARY" in sens_names
+
+    def test_map_bankacct(self, bankacct_cob, tmp_path):
+        out_dir = tmp_path / "report"
+        result = main(["map", str(bankacct_cob), "--output", str(out_dir)])
+        assert result == 0
+
+        md_file = out_dir / "software-map.md"
+        json_file = out_dir / "software-map.json"
+        assert md_file.exists()
+        assert json_file.exists()
+
+        data = json.loads(json_file.read_text())
+        assert data["program_id"] == "BANKACCT"
 
 
 class TestConfigOption:
