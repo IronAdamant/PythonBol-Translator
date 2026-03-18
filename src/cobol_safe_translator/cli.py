@@ -20,6 +20,7 @@ from .exporters import export_json, export_markdown
 from .mapper import generate_python
 from .parser import parse_cobol_file
 from .prompt_generator import generate_prompt
+from .validation import validate_generated_python
 
 
 # --- ANSI color helpers (no rich dependency) ---
@@ -66,11 +67,11 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
     print(bold(f"{label}: {source_path}"))
 
     # Collect copybook search paths (may be None or list of strings)
-    copybook_paths = getattr(args, "copybook_path", None) or None
+    copy_paths = getattr(args, "copybook_path", None) or None
 
     # Parse
     try:
-        program = parse_cobol_file(source_path, copybook_paths=copybook_paths)
+        program = parse_cobol_file(source_path, copy_paths=copy_paths)
     except OSError as e:
         print(red(f"Error: could not read file: {e}"), file=sys.stderr)
         return 1, None, None
@@ -102,10 +103,11 @@ def _to_python_filename(program_id: str) -> str:
 # --- Single-file workers ---
 
 def _translate_single(src: Path, out_dir: Path, config: str | None,
-                      copybook_path: list[str] | None = None) -> int:
+                      copy_paths: list[str] | None = None,
+                      validate: bool = False) -> int:
     """Translate one COBOL file to Python; write to out_dir."""
     args = argparse.Namespace(path=str(src), config=config,
-                              copybook_path=copybook_path or [])
+                              copybook_path=copy_paths or [])
     rc, program, smap = _parse_and_analyze(args, "Translating")
     if rc != 0 or program is None or smap is None:
         return rc
@@ -123,15 +125,24 @@ def _translate_single(src: Path, out_dir: Path, config: str | None,
         return 1
 
     print(green(f"  Output: {out_path}"))
+
+    if validate:
+        is_valid, err_msg = validate_generated_python(python_source, str(out_path))
+        if is_valid:
+            print(green("  Validation: passed (syntax + compile + import)"))
+        else:
+            print(red(f"  Validation FAILED: {err_msg}"), file=sys.stderr)
+            return 1
+
     print(bold(green("Done.")))
     return 0
 
 
 def _map_single(src: Path, out_dir: Path, config: str | None,
-                 copybook_path: list[str] | None = None) -> int:
+                 copy_paths: list[str] | None = None) -> int:
     """Generate analysis reports for one COBOL file; write to out_dir."""
     args = argparse.Namespace(path=str(src), config=config,
-                              copybook_path=copybook_path or [])
+                              copybook_path=copy_paths or [])
     rc, program, smap = _parse_and_analyze(args, "Mapping")
     if rc != 0 or program is None or smap is None:
         return rc
@@ -157,10 +168,10 @@ def _map_single(src: Path, out_dir: Path, config: str | None,
 
 
 def _prompt_single(src: Path, out_path: Path | None, config: str | None,
-                    copybook_path: list[str] | None = None) -> int:
+                    copy_paths: list[str] | None = None) -> int:
     """Generate LLM brief for one COBOL file; write to out_path or stdout."""
     args = argparse.Namespace(path=str(src), config=config,
-                              copybook_path=copybook_path or [])
+                              copybook_path=copy_paths or [])
     rc, program, smap = _parse_and_analyze(args, "Prompting")
     if rc != 0 or program is None or smap is None:
         return rc
@@ -189,43 +200,44 @@ def cmd_translate(args: argparse.Namespace) -> int:
     """Parse, analyze, and generate Python translation."""
     p = Path(args.path)
     config = args.config or None
-    copybook_path = getattr(args, "copybook_path", None) or None
+    copy_paths = getattr(args, "copybook_path", None) or None
     recursive = getattr(args, "recursive", False)
+    validate = getattr(args, "validate", False)
 
     if p.is_dir():
         base_out = Path(args.output)
 
         def process(src: Path, out_dir: Path) -> int:
-            return _translate_single(src, out_dir, config, copybook_path)
+            return _translate_single(src, out_dir, config, copy_paths, validate)
 
         return _batch.run_batch(p, base_out, recursive, process)
 
-    return _translate_single(p, Path(args.output), config, copybook_path)
+    return _translate_single(p, Path(args.output), config, copy_paths, validate)
 
 
 def cmd_map(args: argparse.Namespace) -> int:
     """Parse, analyze, and export reports."""
     p = Path(args.path)
     config = args.config or None
-    copybook_path = getattr(args, "copybook_path", None) or None
+    copy_paths = getattr(args, "copybook_path", None) or None
     recursive = getattr(args, "recursive", False)
 
     if p.is_dir():
         base_out = Path(args.output)
 
         def process(src: Path, out_dir: Path) -> int:
-            return _map_single(src, out_dir, config, copybook_path)
+            return _map_single(src, out_dir, config, copy_paths)
 
         return _batch.run_batch(p, base_out, recursive, process)
 
-    return _map_single(p, Path(args.output), config, copybook_path)
+    return _map_single(p, Path(args.output), config, copy_paths)
 
 
 def cmd_prompt(args: argparse.Namespace) -> int:
     """Generate an LLM translation brief (stdout or file)."""
     p = Path(args.path)
     config = args.config or None
-    copybook_path = getattr(args, "copybook_path", None) or None
+    copy_paths = getattr(args, "copybook_path", None) or None
     recursive = getattr(args, "recursive", False)
     output = getattr(args, "output", None)
 
@@ -237,12 +249,12 @@ def cmd_prompt(args: argparse.Namespace) -> int:
 
         def process(src: Path, out_dir: Path) -> int:
             brief_path = out_dir / f"{src.stem}_brief.md"
-            return _prompt_single(src, brief_path, config, copybook_path)
+            return _prompt_single(src, brief_path, config, copy_paths)
 
         return _batch.run_batch(p, base_out, recursive, process)
 
     out_path = Path(output) if output else None
-    return _prompt_single(p, out_path, config, copybook_path)
+    return _prompt_single(p, out_path, config, copy_paths)
 
 
 # --- Main CLI setup ---
@@ -284,6 +296,10 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument(
         "--ebcdic", action="store_true", default=False,
         help="Use EBCDIC (cp037) collation for string comparisons (mainframe dialect)",
+    )
+    tr.add_argument(
+        "--validate", action="store_true", default=False,
+        help="Run import validation on generated Python (syntax + compile + import)",
     )
 
     # map subcommand

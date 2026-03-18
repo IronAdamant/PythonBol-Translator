@@ -13,7 +13,13 @@ import re
 from pathlib import Path
 
 # Copybook file extensions to try when searching (in order)
-_COPYBOOK_EXTENSIONS = (".cpy", ".CPY", ".cbl", ".CBL")
+_COPYBOOK_EXTENSIONS = (
+    ".cpy", ".CPY",
+    ".cbl", ".CBL",
+    ".cob", ".COB",
+    ".cobol", ".COBOL",
+    ".copy", ".COPY",
+)
 
 # Regex for COPY statement start — captures copybook name (with optional quotes)
 # Matches: COPY copybook-name. | COPY 'copybook-name'. | COPY copybook-name REPLACING ...
@@ -282,16 +288,66 @@ def strip_exec_blocks(raw_text: str) -> str:
     return "\n".join(result)
 
 
+def _build_search_paths(
+    source_dir: Path | None,
+    copy_paths: list[Path] | None,
+) -> list[Path]:
+    """Build the ordered list of directories to search for copybooks.
+
+    Search order:
+      1. The source file's own directory (if known)
+      2. Each directory in *copy_paths*, in order
+      3. Immediate subdirectories of the source file's directory
+    """
+    paths: list[Path] = []
+    seen: set[str] = set()
+
+    def _add(p: Path) -> None:
+        key = str(p.resolve())
+        if key not in seen:
+            seen.add(key)
+            paths.append(p)
+
+    # 1. Source file's own directory
+    if source_dir is not None and source_dir.is_dir():
+        _add(source_dir)
+
+    # 2. User-specified copy_paths
+    if copy_paths:
+        for cp in copy_paths:
+            if cp.is_dir():
+                _add(cp)
+
+    # 3. Subdirectories of the source file's directory
+    if source_dir is not None and source_dir.is_dir():
+        try:
+            for child in sorted(source_dir.iterdir()):
+                if child.is_dir():
+                    _add(child)
+        except OSError:
+            pass
+
+    return paths
+
+
 def resolve_copies(
     raw_text: str,
     copybook_paths: list[str | Path] | None = None,
+    *,
+    source_dir: str | Path | None = None,
+    copy_paths: list[str | Path] | None = None,
 ) -> str:
     """Resolve COPY statements and strip EXEC blocks from raw COBOL source.
 
     Args:
         raw_text: Raw COBOL source text.
-        copybook_paths: Directories to search for copybook files.
-            If None or empty, COPY statements are left as-is (no resolution).
+        copybook_paths: Legacy directories to search for copybook files.
+            If None or empty, COPY statements are left as-is (no resolution)
+            unless *source_dir* or *copy_paths* provide search directories.
+        source_dir: Directory of the COBOL source file. Searched first,
+            and its subdirectories are searched last.
+        copy_paths: Additional directories to search for copybooks,
+            searched after *source_dir* and before its subdirectories.
 
     Returns:
         Preprocessed source text with COPY statements resolved and
@@ -299,12 +355,23 @@ def resolve_copies(
     """
     result = raw_text
 
-    # Resolve COPY statements if search paths are provided
-    # Loop to handle nested COPYs (copybooks that contain COPY statements)
+    # Merge legacy copybook_paths into copy_paths for backwards compat
+    merged_copy: list[Path] = []
+    if copy_paths:
+        merged_copy.extend(Path(p) for p in copy_paths)
     if copybook_paths:
-        paths = [Path(p) for p in copybook_paths]
+        merged_copy.extend(Path(p) for p in copybook_paths)
+
+    src_dir = Path(source_dir) if source_dir is not None else None
+
+    # Build ordered search paths (source_dir -> copy_paths -> subdirs)
+    search = _build_search_paths(src_dir, merged_copy or None)
+
+    # Resolve COPY statements if any search paths are available
+    # Loop to handle nested COPYs (copybooks that contain COPY statements)
+    if search:
         for _ in range(10):  # max 10 passes to prevent infinite cycles
-            resolved = _resolve_copy_statements(result, paths)
+            resolved = _resolve_copy_statements(result, search)
             if resolved == result:
                 break  # no more changes
             result = resolved

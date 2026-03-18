@@ -90,6 +90,178 @@ class TestResolveCopies:
         assert "WS-COPIED-VAR" in result
 
 
+class TestCopyPaths:
+    """Tests for user-specified copybook search paths (copy_paths)."""
+
+    def test_copybook_found_via_copy_paths(self, tmp_path: Path) -> None:
+        """Copybooks in a separate directory are found when copy_paths is specified."""
+        # Source file directory (no copybooks here)
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        # Separate copybook directory
+        cpy_dir = tmp_path / "copybooks"
+        cpy_dir.mkdir()
+        (cpy_dir / "SHARED.cpy").write_text(
+            "       01 WS-SHARED  PIC X(20).\n", encoding="utf-8"
+        )
+
+        source = "       COPY SHARED.\n"
+        result = resolve_copies(
+            source, source_dir=src_dir, copy_paths=[cpy_dir]
+        )
+        assert "WS-SHARED" in result
+        assert "COPY SHARED" not in result
+
+    def test_source_dir_searched_first(self, tmp_path: Path) -> None:
+        """Source file's directory is searched before copy_paths."""
+        # Both directories have a copybook with the same name but different content
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "DUPE.cpy").write_text(
+            "       01 WS-FROM-SRC  PIC X(5).\n", encoding="utf-8"
+        )
+
+        cpy_dir = tmp_path / "copybooks"
+        cpy_dir.mkdir()
+        (cpy_dir / "DUPE.cpy").write_text(
+            "       01 WS-FROM-CPY  PIC X(5).\n", encoding="utf-8"
+        )
+
+        source = "       COPY DUPE.\n"
+        result = resolve_copies(
+            source, source_dir=src_dir, copy_paths=[cpy_dir]
+        )
+        # Source dir wins — its copybook is used
+        assert "WS-FROM-SRC" in result
+        assert "WS-FROM-CPY" not in result
+
+    def test_missing_copybook_graceful_fallback(self, tmp_path: Path) -> None:
+        """Missing copybooks produce a NOT FOUND comment, no crash."""
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        cpy_dir = tmp_path / "copybooks"
+        cpy_dir.mkdir()
+
+        source = "       COPY NONEXISTENT.\n"
+        result = resolve_copies(
+            source, source_dir=src_dir, copy_paths=[cpy_dir]
+        )
+        assert "NOT FOUND" in result
+        assert "NONEXISTENT" in result
+
+    def test_multiple_copy_paths(self, tmp_path: Path) -> None:
+        """Multiple copy_paths are searched in order."""
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        dir_a = tmp_path / "lib_a"
+        dir_a.mkdir()
+        (dir_a / "BOOK-A.cpy").write_text(
+            "       01 WS-A  PIC X(3).\n", encoding="utf-8"
+        )
+
+        dir_b = tmp_path / "lib_b"
+        dir_b.mkdir()
+        (dir_b / "BOOK-B.cpy").write_text(
+            "       01 WS-B  PIC 9(4).\n", encoding="utf-8"
+        )
+
+        source = (
+            "       COPY BOOK-A.\n"
+            "       COPY BOOK-B.\n"
+        )
+        result = resolve_copies(
+            source, source_dir=src_dir, copy_paths=[dir_a, dir_b]
+        )
+        assert "WS-A" in result
+        assert "WS-B" in result
+
+    def test_copy_paths_order_among_themselves(self, tmp_path: Path) -> None:
+        """Earlier copy_paths directories take priority over later ones."""
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        dir_first = tmp_path / "first"
+        dir_first.mkdir()
+        (dir_first / "PRIO.cpy").write_text(
+            "       01 WS-FIRST  PIC X(1).\n", encoding="utf-8"
+        )
+
+        dir_second = tmp_path / "second"
+        dir_second.mkdir()
+        (dir_second / "PRIO.cpy").write_text(
+            "       01 WS-SECOND  PIC X(1).\n", encoding="utf-8"
+        )
+
+        source = "       COPY PRIO.\n"
+        result = resolve_copies(
+            source, source_dir=src_dir, copy_paths=[dir_first, dir_second]
+        )
+        assert "WS-FIRST" in result
+        assert "WS-SECOND" not in result
+
+    def test_subdirectories_searched_after_copy_paths(self, tmp_path: Path) -> None:
+        """Subdirectories of source_dir are searched after copy_paths."""
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        # Copybook in a subdirectory of source
+        sub = src_dir / "sub"
+        sub.mkdir()
+        (sub / "SUBBOOK.cpy").write_text(
+            "       01 WS-SUB  PIC X(2).\n", encoding="utf-8"
+        )
+
+        # Also put a different version in copy_paths
+        cpy_dir = tmp_path / "copybooks"
+        cpy_dir.mkdir()
+        (cpy_dir / "SUBBOOK.cpy").write_text(
+            "       01 WS-CPY  PIC X(2).\n", encoding="utf-8"
+        )
+
+        source = "       COPY SUBBOOK.\n"
+        result = resolve_copies(
+            source, source_dir=src_dir, copy_paths=[cpy_dir]
+        )
+        # copy_paths wins over subdirectory
+        assert "WS-CPY" in result
+        assert "WS-SUB" not in result
+
+    def test_subdirectories_found_without_copy_paths(self, tmp_path: Path) -> None:
+        """Subdirectories of source_dir are searched even without copy_paths."""
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        sub = src_dir / "includes"
+        sub.mkdir()
+        (sub / "INCL.cpy").write_text(
+            "       01 WS-INCL  PIC X(8).\n", encoding="utf-8"
+        )
+
+        source = "       COPY INCL.\n"
+        result = resolve_copies(source, source_dir=src_dir)
+        assert "WS-INCL" in result
+
+    def test_additional_extensions_found(self, tmp_path: Path) -> None:
+        """Copybooks with .cob, .cobol, and .copy extensions are found."""
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "COBBOOK.cob").write_text(
+            "       01 WS-COB  PIC X(3).\n", encoding="utf-8"
+        )
+        (src_dir / "COPYEXT.copy").write_text(
+            "       01 WS-COPY  PIC X(3).\n", encoding="utf-8"
+        )
+
+        source = (
+            "       COPY COBBOOK.\n"
+            "       COPY COPYEXT.\n"
+        )
+        result = resolve_copies(source, source_dir=src_dir)
+        assert "WS-COB" in result
+        assert "WS-COPY" in result
+
+
 class TestExecStripping:
     def test_exec_cics_single_line(self) -> None:
         source = "       EXEC CICS READ DATASET('ACCTFILE') END-EXEC\n"

@@ -582,6 +582,8 @@ def parse_cobol(
     source: str,
     source_path: str = "",
     copybook_paths: list[str | Path] | None = None,
+    *,
+    copy_paths: list[str | Path] | None = None,
 ) -> CobolProgram:
     """Parse COBOL source text into a CobolProgram AST.
 
@@ -591,14 +593,25 @@ def parse_cobol(
         copybook_paths: Directories to search for COPY copybooks.
             If provided, the preprocessor resolves COPY statements and
             strips EXEC CICS/SQL blocks before parsing.
+        copy_paths: Additional directories to search for copybooks
+            (searched after the source file's directory).
     """
-    from .preprocessor import strip_exec_blocks
-    # Always strip EXEC blocks (even without copybook resolution)
-    source = strip_exec_blocks(source)
+    from .preprocessor import resolve_copies, strip_exec_blocks
 
-    if copybook_paths is not None:
-        from .preprocessor import resolve_copies
-        source = resolve_copies(source, copybook_paths)
+    # Derive source directory from source_path when available
+    source_dir: Path | None = None
+    if source_path:
+        sp = Path(source_path)
+        if sp.parent.is_dir():
+            source_dir = sp.parent
+
+    # Always run preprocessor (handles both COPY resolution and EXEC stripping)
+    source = resolve_copies(
+        source,
+        copybook_paths,
+        source_dir=source_dir,
+        copy_paths=copy_paths,
+    )
 
     logical_lines = preprocess_lines(source)
     divisions = split_divisions(logical_lines)
@@ -624,13 +637,22 @@ def parse_cobol(
 def parse_cobol_file(
     path: str | Path,
     copybook_paths: list[str | Path] | None = None,
+    *,
+    copy_paths: list[str | Path] | None = None,
 ) -> CobolProgram:
     """Parse a COBOL file from disk.
 
     Args:
         path: Path to the COBOL source file.
         copybook_paths: Directories to search for COPY copybooks.
+        copy_paths: Additional directories to search for copybooks
+            (searched after the source file's directory).
     """
     p = Path(path)
     source = p.read_text(encoding="utf-8", errors="replace")
-    return parse_cobol(source, source_path=str(p), copybook_paths=copybook_paths)
+    return parse_cobol(
+        source,
+        source_path=str(p),
+        copybook_paths=copybook_paths,
+        copy_paths=copy_paths,
+    )
