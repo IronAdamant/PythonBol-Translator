@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import warnings
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation
+from functools import total_ordering
 
 
+@total_ordering
 class CobolDecimal:
     """Fixed-point decimal that mimics COBOL PIC 9/S9 with V (implied decimal).
 
@@ -135,27 +137,6 @@ class CobolDecimal:
             return self._value < Decimal(str(other))
         return NotImplemented
 
-    def __gt__(self, other: object) -> bool:
-        if isinstance(other, CobolDecimal):
-            return self._value > other._value
-        if isinstance(other, (int, float, Decimal)):
-            return self._value > Decimal(str(other))
-        return NotImplemented
-
-    def __le__(self, other: object) -> bool:
-        if isinstance(other, CobolDecimal):
-            return self._value <= other._value
-        if isinstance(other, (int, float, Decimal)):
-            return self._value <= Decimal(str(other))
-        return NotImplemented
-
-    def __ge__(self, other: object) -> bool:
-        if isinstance(other, CobolDecimal):
-            return self._value >= other._value
-        if isinstance(other, (int, float, Decimal)):
-            return self._value >= Decimal(str(other))
-        return NotImplemented
-
     def __float__(self) -> float:
         return float(self._value)
 
@@ -163,6 +144,7 @@ class CobolDecimal:
         return int(self._value)
 
 
+@total_ordering
 class CobolString:
     """Fixed-length string that mimics COBOL PIC X/A fields.
 
@@ -230,33 +212,6 @@ class CobolString:
             max_size = max(self.size, other.size)
             return self._cmp_key(self._value.ljust(max_size)) < self._cmp_key(val)
         return self._cmp_key(self._value) < self._cmp_key(val)
-
-    def __gt__(self, other: object) -> bool:
-        val = self._compare_value(other)
-        if val is None:
-            return NotImplemented
-        if isinstance(other, CobolString):
-            max_size = max(self.size, other.size)
-            return self._cmp_key(self._value.ljust(max_size)) > self._cmp_key(val)
-        return self._cmp_key(self._value) > self._cmp_key(val)
-
-    def __le__(self, other: object) -> bool:
-        val = self._compare_value(other)
-        if val is None:
-            return NotImplemented
-        if isinstance(other, CobolString):
-            max_size = max(self.size, other.size)
-            return self._cmp_key(self._value.ljust(max_size)) <= self._cmp_key(val)
-        return self._cmp_key(self._value) <= self._cmp_key(val)
-
-    def __ge__(self, other: object) -> bool:
-        val = self._compare_value(other)
-        if val is None:
-            return NotImplemented
-        if isinstance(other, CobolString):
-            max_size = max(self.size, other.size)
-            return self._cmp_key(self._value.ljust(max_size)) >= self._cmp_key(val)
-        return self._cmp_key(self._value) >= self._cmp_key(val)
 
     def __str__(self) -> str:
         return self._value

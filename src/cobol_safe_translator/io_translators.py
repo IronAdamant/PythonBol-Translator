@@ -6,7 +6,7 @@ Handles: ACCEPT, REWRITE, ON SIZE ERROR wrapping.
 
 from __future__ import annotations
 
-from .utils import _to_python_name
+from .utils import _to_python_name, _upper_ops
 
 
 def translate_accept(ops: list[str], raw: str) -> list[str]:
@@ -22,7 +22,7 @@ def translate_accept(ops: list[str], raw: str) -> list[str]:
         return [f"# ACCEPT: no target: {raw}"]
 
     target = _to_python_name(ops[0])
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
 
     if "FROM" in upper_ops:
         from_idx = upper_ops.index("FROM")
@@ -84,7 +84,7 @@ def translate_rewrite(ops: list[str]) -> list[str]:
 
     record_name = ops[0]
     py_record = _to_python_name(record_name)
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
 
     # Determine file name from record name
     file_hint = py_record.replace("_record", "").replace("_rec", "")
@@ -116,7 +116,7 @@ def wrap_on_size_error(
     Detects ON SIZE ERROR ... NOT ON SIZE ERROR ... END-xxx patterns
     in the operand list and wraps the arithmetic with try/except.
     """
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
 
     # Find ON SIZE ERROR position
     on_size_idx = None

@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Callable
 
 from .models import CobolStatement
-from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _sanitize_numeric, _to_method_name, _to_python_name
+from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _sanitize_numeric, _to_method_name, _to_python_name, _upper_ops
 
 # Re-export from io_translators (split for LOC compliance)
 from .io_translators import translate_accept, translate_rewrite, wrap_on_size_error  # noqa: F401
@@ -86,7 +86,7 @@ def translate_move(ops: list[str]) -> list[str]:
                 )
             return results
         return [f"# MOVE ALL: could not parse: {' '.join(ops)}"]
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
     if "TO" not in upper_ops:
         return [f"# MOVE: could not parse operands: {' '.join(ops)}"]
     to_idx = upper_ops.index("TO")
@@ -121,14 +121,14 @@ def translate_add(
     """Translate ADD verb."""
     if not ops:
         return ["# ADD: no operands"]
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
     if "GIVING" in upper_ops:
         giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
         giving_targets = ops[giving_idx + 1:]
         if not giving_targets:
             return [f"# ADD GIVING: missing target operand: {' '.join(ops)}"]
         pre_giving = ops[:giving_idx]
-        if "TO" in [o.upper() for o in pre_giving]:
+        if "TO" in _upper_ops(pre_giving):
             to_idx = next(i for i, o in enumerate(pre_giving) if o.upper() == "TO")
             all_sources = pre_giving[:to_idx] + pre_giving[to_idx + 1:]
         else:
@@ -166,14 +166,14 @@ def translate_subtract(
     """Translate SUBTRACT verb."""
     if not ops:
         return ["# SUBTRACT: no operands"]
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
     if "GIVING" in upper_ops:
         giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
         giving_targets = ops[giving_idx + 1:]
         if not giving_targets:
             return [f"# SUBTRACT GIVING: missing target operand: {' '.join(ops)}"]
         pre_giving = ops[:giving_idx]
-        if "FROM" in [o.upper() for o in pre_giving]:
+        if "FROM" in _upper_ops(pre_giving):
             from_idx = next(i for i, o in enumerate(pre_giving) if o.upper() == "FROM")
             sources = pre_giving[:from_idx]
             base = pre_giving[from_idx + 1] if from_idx + 1 < len(pre_giving) else "0"
@@ -211,7 +211,7 @@ def translate_multiply(
     resolve: Callable[[str], str],
 ) -> list[str]:
     """Translate MULTIPLY verb."""
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
     if "BY" in upper_ops:
         by_idx = next(i for i, o in enumerate(upper_ops) if o == "BY")
         if by_idx == 0:
@@ -277,7 +277,7 @@ def translate_divide(
     resolve: Callable[[str], str],
 ) -> list[str]:
     """Translate DIVIDE verb."""
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
     if "INTO" in upper_ops:
         into_idx = next(i for i, o in enumerate(upper_ops) if o == "INTO")
         if into_idx == 0:
@@ -473,7 +473,7 @@ def _parse_varying_clause(
     parse failure.  *end_idx* is the index of the first token after this
     clause (the next AFTER, or len(ops)).
     """
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
     n = len(ops)
 
     # Skip optional VARYING after AFTER
@@ -531,7 +531,7 @@ def _translate_perform_varying(
 
     Supports single-variable and multi-VARYING (AFTER) nested loops.
     """
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
 
     # Locate the first VARYING keyword
     try:
@@ -625,7 +625,7 @@ def translate_perform(
         return ["# PERFORM with no target"]
 
     target = _to_method_name(ops[0])
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
 
     if "THRU" in upper_ops or "THROUGH" in upper_ops:
         thru_idx = next(
@@ -635,7 +635,7 @@ def translate_perform(
         if end_para and get_paragraph_range:
             para_names = get_paragraph_range(ops[0], end_para)
             # Check for UNTIL after the THRU clause
-            remaining_upper = [o.upper() for o in ops[thru_idx + 2:]]
+            remaining_upper = _upper_ops(ops[thru_idx + 2:])
             if "UNTIL" in remaining_upper:
                 until_offset = remaining_upper.index("UNTIL")
                 cond_parts = ops[thru_idx + 2 + until_offset + 1:]
@@ -729,7 +729,7 @@ def translate_write(ops: list[str]) -> list[str]:
         return ["# WRITE: no record specified"]
     record_name = ops[0]
     py_record = _to_python_name(record_name)
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
 
     # Determine file name from record name (convention: remove -RECORD/-REC suffix)
     file_hint = py_record.replace("_record", "").replace("_rec", "")
@@ -763,7 +763,7 @@ def translate_read(ops: list[str], raw: str) -> list[str]:
     """Translate READ verb."""
     if ops:
         file_name = _to_python_name(ops[0])
-        upper_ops = [o.upper() for o in ops]
+        upper_ops = _upper_ops(ops)
         at_end_action = ""
         if "AT" in upper_ops and "END" in upper_ops:
             end_idx = upper_ops.index("END")

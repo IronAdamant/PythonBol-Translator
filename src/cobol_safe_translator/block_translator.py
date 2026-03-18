@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Callable
 
 from .models import CobolStatement
-from .utils import resolve_operand as _fallback_resolve, _to_python_name
+from .utils import resolve_operand as _fallback_resolve, _to_python_name, _upper_ops
 
 # Verbs that indicate an inline IF/EVALUATE (body packed into operands)
 _KNOWN_BODY_VERBS = frozenset({
@@ -255,7 +255,7 @@ def translate_evaluate_block(
     eval_stmt = stmts[start_idx]
     subject_ops = eval_stmt.operands
 
-    upper_ops = [o.upper() for o in subject_ops]
+    upper_ops = _upper_ops(subject_ops)
 
     # Multi-subject EVALUATE: EVALUATE subj1 ALSO subj2 ...
     if "ALSO" in upper_ops:
@@ -509,7 +509,7 @@ def _parse_search_operands(operands: list[str]) -> tuple[str, bool, bool]:
     is_all = False
     has_at_end = False
     table_name = ""
-    upper_ops = [o.upper() for o in operands]
+    upper_ops = _upper_ops(operands)
     for idx, upper in enumerate(upper_ops):
         if upper == "ALL":
             is_all = True

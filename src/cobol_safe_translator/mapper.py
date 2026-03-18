@@ -38,8 +38,21 @@ from .utils import (
     _sanitize_numeric,
     _to_method_name,
     _to_python_name,
+    _upper_ops,
     resolve_operand as _resolve_operand_base,
 )
+
+
+_ARITHMETIC_VERBS = frozenset({"ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE"})
+_ORPHAN_SCOPE_VERBS = frozenset({
+    "END-IF", "END-EVALUATE", "END-PERFORM", "END-READ",
+    "END-WRITE", "END-CALL", "END-STRING",
+})
+_SCOPE_TERMINATORS = frozenset({
+    "END-SEARCH", "END-DELETE", "END-START",
+    "END-RETURN", "END-SORT", "END-MERGE",
+})
+_TODO_VERBS = frozenset({"SEARCH", "DELETE", "START"})
 
 
 class PythonMapper:
@@ -59,6 +72,34 @@ class PythonMapper:
                            software_map.program.file_section,
                            software_map.program.linkage_section]:
             self._build_condition_lookup(items_list)
+        self._verb_handlers = {
+            "DISPLAY": lambda s: st.translate_display(s, self._resolve_operand),
+            "MOVE": lambda s: self._translate_move(s.operands),
+            "PERFORM": lambda s: self._translate_perform(s.operands, s.raw_text),
+            "OPEN": lambda s: st.translate_open(s.operands),
+            "CLOSE": lambda s: st.translate_close(s.operands),
+            "READ": lambda s: st.translate_read(s.operands, s.raw_text),
+            "WRITE": lambda s: st.translate_write(s.operands),
+            "CALL": lambda s: st.translate_call(s.operands),
+            "STOP": lambda _: ["return"],
+            "GOBACK": lambda _: ["return"],
+            "NEXT": lambda _: ["pass  # NEXT SENTENCE"],
+            "CONTINUE": lambda _: ["pass  # CONTINUE"],
+            "ACCEPT": lambda s: st.translate_accept(s.operands, s.raw_text),
+            "REWRITE": lambda s: st.translate_rewrite(s.operands),
+            "SET": lambda s: strt.translate_set(s.operands, self._resolve_operand, self._condition_lookup),
+            "STRING": lambda s: strt.translate_string(s.operands, self._resolve_operand),
+            "UNSTRING": lambda s: strt.translate_unstring(s.operands, self._resolve_operand),
+            "INSPECT": lambda s: strt.translate_inspect(s.operands, self._resolve_operand),
+            "INITIALIZE": lambda s: st.translate_initialize(s.operands),
+            "SORT": lambda s: sort_t.translate_sort(s.operands, self._resolve_operand),
+            "MERGE": lambda s: sort_t.translate_merge(s.operands, self._resolve_operand),
+            "RELEASE": lambda s: sort_t.translate_release(s.operands),
+            "RETURN": lambda s: sort_t.translate_return_verb(s.operands, s.raw_text),
+            "INITIATE": lambda s: rpt_t.translate_initiate(s.operands, self.program.report_section),
+            "GENERATE": lambda s: rpt_t.translate_generate(s.operands, self.program.report_section),
+            "TERMINATE": lambda s: rpt_t.translate_terminate(s.operands, self.program.report_section),
+        }
 
     def _build_condition_lookup(self, items: list[DataItem]) -> None:
         """Recursively walk DataItems, mapping 88-level condition names to (parent, value)."""
@@ -355,67 +396,26 @@ class PythonMapper:
     def _translate_statement(self, stmt: CobolStatement) -> list[str]:
         """Translate a single COBOL statement to Python line(s)."""
         verb = stmt.verb
-        ops = stmt.operands
 
-        if verb == "DISPLAY":
-            return st.translate_display(stmt, self._resolve_operand)
-        elif verb == "MOVE":
-            return self._translate_move(ops)
-        elif verb in ("ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE"):
-            return self._translate_arithmetic(verb, ops)
-        elif verb == "PERFORM":
-            return self._translate_perform(ops, stmt.raw_text)
-        elif verb == "IF":
-            return [
-                f"# IF statement (manual review recommended):",
-                f"# {stmt.raw_text}",
-                f"# TODO(high): translate IF condition and branches",
-            ]
-        elif verb == "EVALUATE":
-            return [
-                f"# EVALUATE statement (translates to if/elif):",
-                f"# {stmt.raw_text}",
-                f"# TODO(high): translate EVALUATE branches to if/elif",
-            ]
-        elif verb in ("END-IF", "END-EVALUATE", "END-PERFORM", "END-READ",
-                       "END-WRITE", "END-CALL", "END-STRING"):
-            return [f"# {verb} (orphaned — normally consumed by block translator)"]
-        elif verb == "ELSE":
-            return [f"# else (orphaned — normally consumed by block translator)"]
-        elif verb == "WHEN":
-            return [f"# WHEN (orphaned — normally consumed by block translator): {stmt.raw_text}"]
-        elif verb == "OPEN":
-            return st.translate_open(ops)
-        elif verb == "CLOSE":
-            return st.translate_close(ops)
-        elif verb == "READ":
-            return st.translate_read(ops, stmt.raw_text)
-        elif verb == "WRITE":
-            return st.translate_write(ops)
-        elif verb == "CALL":
-            return st.translate_call(ops)
-        elif verb == "STOP":
-            return ["return"]
-        elif verb == "GOBACK":
-            return ["return"]
-        elif verb == "EXIT":
-            if ops and ops[0].upper() == "PROGRAM":
+        # Fast-path: dispatch dict for simple 1:1 verb mappings
+        handler = self._verb_handlers.get(verb)
+        if handler:
+            return handler(stmt)
+
+        # Arithmetic group (needs special ON SIZE ERROR wrapping)
+        if verb in _ARITHMETIC_VERBS:
+            return self._translate_arithmetic(verb, stmt.operands)
+
+        # EXIT has sub-verb logic
+        if verb == "EXIT":
+            if stmt.operands and stmt.operands[0].upper() == "PROGRAM":
                 return ["return"]
-            elif ops and ops[0].upper() == "PERFORM":
+            if stmt.operands and stmt.operands[0].upper() == "PERFORM":
                 return ["break  # EXIT PERFORM"]
             return ["pass  # EXIT"]
-        elif verb == "NEXT":
-            # NEXT SENTENCE — skip to the next sentence (period-terminated)
-            return ["pass  # NEXT SENTENCE"]
-        elif verb == "CONTINUE":
-            return ["pass  # CONTINUE"]
-        elif verb == "ACCEPT":
-            return st.translate_accept(ops, stmt.raw_text)
-        elif verb == "REWRITE":
-            return st.translate_rewrite(ops)
-        elif verb == "SET":
-            return strt.translate_set(ops, self._resolve_operand, self._condition_lookup)
-        elif verb == "GO":
+
+        # GO TO — requires escape-safe string
+        if verb == "GO":
             safe_text = (
                 stmt.raw_text
                 .replace("\\", "\\\\")
@@ -429,42 +429,39 @@ class PythonMapper:
                 f"raise NotImplementedError('GO TO not supported: {safe_text}')",
                 f"# TODO(high): GO TO requires manual restructuring",
             ]
-        elif verb == "STRING":
-            return strt.translate_string(ops, self._resolve_operand)
-        elif verb == "UNSTRING":
-            return strt.translate_unstring(ops, self._resolve_operand)
-        elif verb == "INSPECT":
-            return strt.translate_inspect(ops, self._resolve_operand)
-        elif verb == "INITIALIZE":
-            return st.translate_initialize(ops)
-        elif verb == "SORT":
-            return sort_t.translate_sort(ops, self._resolve_operand)
-        elif verb == "MERGE":
-            return sort_t.translate_merge(ops, self._resolve_operand)
-        elif verb == "RELEASE":
-            return sort_t.translate_release(ops)
-        elif verb == "RETURN":
-            return sort_t.translate_return_verb(ops, stmt.raw_text)
-        elif verb == "INITIATE":
-            return rpt_t.translate_initiate(ops, self.program.report_section)
-        elif verb == "GENERATE":
-            return rpt_t.translate_generate(ops, self.program.report_section)
-        elif verb == "TERMINATE":
-            return rpt_t.translate_terminate(ops, self.program.report_section)
-        elif verb in ("SEARCH", "DELETE", "START"):
+
+        # Fallback IF/EVALUATE (when block translator can't handle them)
+        if verb == "IF":
             return [
-                f"# TODO(high): {verb} requires manual translation",
+                f"# IF statement (manual review recommended):",
                 f"# {stmt.raw_text}",
+                f"# TODO(high): translate IF condition and branches",
             ]
-        elif verb in ("END-SEARCH", "END-DELETE", "END-START",
-                       "END-RETURN", "END-SORT", "END-MERGE"):
+        if verb == "EVALUATE":
+            return [
+                f"# EVALUATE statement (translates to if/elif):",
+                f"# {stmt.raw_text}",
+                f"# TODO(high): translate EVALUATE branches to if/elif",
+            ]
+
+        # Block structure orphans (not consumed by block translator)
+        if verb in _ORPHAN_SCOPE_VERBS:
+            return [f"# {verb} (orphaned — normally consumed by block translator)"]
+        if verb == "ELSE":
+            return [f"# else (orphaned — normally consumed by block translator)"]
+        if verb == "WHEN":
+            return [f"# WHEN (orphaned — normally consumed by block translator): {stmt.raw_text}"]
+
+        # Stub verbs and scope terminators
+        if verb in _TODO_VERBS:
+            return [f"# TODO(high): {verb} requires manual translation", f"# {stmt.raw_text}"]
+        if verb in _SCOPE_TERMINATORS:
             return [f"# {verb} (scope terminator)"]
-        elif verb in ("NOT", "AT"):
+        if verb in ("NOT", "AT"):
             return [f"# {stmt.raw_text}"]
-        elif verb.startswith("END-"):
+        if verb.startswith("END-"):
             return []  # scope terminators — silently consumed
-        else:
-            return [f"# TODO(high): unsupported verb {verb}", f"# {stmt.raw_text}"]
+        return [f"# TODO(high): unsupported verb {verb}", f"# {stmt.raw_text}"]
 
     def _translate_move(self, ops: list[str]) -> list[str]:
         if ops and ops[0].upper() in ("CORRESPONDING", "CORR"):
@@ -473,7 +470,7 @@ class PythonMapper:
 
     def _translate_move_corresponding(self, ops: list[str]) -> list[str]:
         """Translate MOVE CORRESPONDING source TO target."""
-        upper_ops = [o.upper() for o in ops]
+        upper_ops = _upper_ops(ops)
         if "TO" not in upper_ops:
             return [f"# MOVE CORRESPONDING: missing TO: {' '.join(ops)}"]
         to_idx = upper_ops.index("TO")
@@ -522,7 +519,7 @@ class PythonMapper:
     def _translate_arithmetic(self, verb: str, ops: list[str]) -> list[str]:
         """Route arithmetic verb and wrap with ON SIZE ERROR if present."""
         # Strip ON SIZE ERROR ... from operands for the core translator
-        upper_ops = [o.upper() for o in ops]
+        upper_ops = _upper_ops(ops)
         has_size_error = False
         size_idx = None
         for i in range(len(upper_ops) - 2):

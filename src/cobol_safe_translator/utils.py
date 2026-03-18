@@ -11,6 +11,11 @@ import keyword
 import re
 
 
+def _upper_ops(ops: list[str]) -> list[str]:
+    """Uppercase operand list for case-insensitive keyword matching."""
+    return [o.upper() for o in ops]
+
+
 def _is_numeric_literal(s: str) -> bool:
     """Check if a string is a numeric literal (integer or decimal)."""
     if not s:

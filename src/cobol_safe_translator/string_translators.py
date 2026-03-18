@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .utils import _to_python_name
+from .utils import _to_python_name, _upper_ops
 
 
 def translate_string(
@@ -30,7 +30,7 @@ def translate_string(
     if not ops:
         return ["# STRING: no operands"]
 
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
 
     # Check for WITH POINTER — emit TODO
     has_pointer = "POINTER" in upper_ops
@@ -114,7 +114,7 @@ def translate_unstring(
     if not ops:
         return ["# UNSTRING: no operands"]
 
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
 
     if "INTO" not in upper_ops:
         return [f"# UNSTRING: missing INTO clause: {' '.join(ops)}",
@@ -194,7 +194,7 @@ def translate_inspect(
     if not ops:
         return ["# INSPECT: no operands"]
 
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
     field = ops[0]
     py_field = _to_python_name(field)
     field_expr = f"self.data.{py_field}"
@@ -284,7 +284,7 @@ def translate_set(
     if not ops:
         return ["# SET: no operands"]
 
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
 
     # SET idx UP BY n
     if "UP" in upper_ops and "BY" in upper_ops:

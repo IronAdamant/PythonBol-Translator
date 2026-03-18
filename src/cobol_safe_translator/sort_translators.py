@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .utils import _to_method_name, _to_python_name
+from .utils import _to_method_name, _to_python_name, _upper_ops
 
 # Clause keywords that terminate field-name collection in KEY clauses
 _CLAUSE_STOPS = frozenset((
@@ -55,7 +55,7 @@ def _parse_sort_merge_clauses(ops: list[str]) -> dict[str, object]:
         return result
 
     result["sort_file"] = ops[0]
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
     keys: list[tuple[str, list[str]]] = []
     i = 1
 
@@ -322,7 +322,7 @@ def translate_release(ops: list[str]) -> list[str]:
 
     record = ops[0]
     py_rec = _to_python_name(record)
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
 
     # Derive sort work file name from record name
     hint = py_rec.replace("_record", "").replace("_rec", "")
@@ -353,7 +353,7 @@ def translate_return_verb(ops: list[str], raw: str) -> list[str]:
         return [f"# RETURN: no operands: {raw}"]
 
     sf = _to_python_name(ops[0])
-    upper_ops = [o.upper() for o in ops]
+    upper_ops = _upper_ops(ops)
 
     into_target = None
     if "INTO" in upper_ops:
