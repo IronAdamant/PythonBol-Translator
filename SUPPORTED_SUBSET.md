@@ -5,20 +5,16 @@ This document lists every COBOL construct handled by cobol-safe-translator, with
 > [!IMPORTANT]
 > **This tool translates COBOL language constructs to Python.** It does not translate or provide runtime infrastructure such as CICS transaction processing, DB2/SQL database access, IMS/DLI, MQ messaging, VSAM file systems, or JCL job control. These are stripped from the source and replaced with `TODO(high)` hints indicating what Python libraries or services are needed as replacements.
 >
-> The generated code is a **migration accelerator** — it handles the heavy lifting of converting COBOL syntax, data structures, and procedure logic to Python, but the middleware and platform integrations must be implemented separately using appropriate Python libraries (e.g. SQLAlchemy for DB2, Flask/FastAPI for CICS, ibm_mq for MQ).
->
 > **All untranslated constructs are marked with `TODO(high)`.** Review every marker before production use.
-
-> **Known parser limitation:** Statements that span multiple physical COBOL lines (without a column-7 continuation `-`) are not joined by the parser. Each physical line is treated as a separate statement. As a result, a DIVIDE or MULTIPLY whose `GIVING` clause is on the next line will produce two separate statements instead of one complete translation. Write all statement clauses on a single line (or use the column-7 `-` continuation character) to get the best translation results.
 
 ## Source Format
 
 | Format | Support | Notes |
 |--------|---------|-------|
-| Fixed-format (cols 1-6, 7, 8-72) | Full | Auto-detected; standard mainframe layout |
-| Free-format (GnuCOBOL, Micro Focus) | Supported | Auto-detected; `*>` comments, no column limits |
+| Fixed-format (cols 1-6, 7, 8-72, 73-80) | Full | Auto-detected; sequence numbers and identification area stripped |
+| Free-format (GnuCOBOL, Micro Focus) | Full | Auto-detected; `*>` comments, no column limits, `>>` directives handled |
 
-The parser auto-detects whether source uses fixed-format or free-format COBOL by examining the first 80 lines. Free-format files use `*>` for comments (anywhere on line), have no sequence numbers in columns 1-6, and have no column 72 limit.
+The parser auto-detects format by examining the first 80 lines. Ambiguous files (no sequence numbers, no col-7 indicators) default to free-format to avoid stripping code past column 72.
 
 ## Divisions
 
@@ -26,8 +22,8 @@ The parser auto-detects whether source uses fixed-format or free-format COBOL by
 |----------|---------|-------|
 | IDENTIFICATION | Full | PROGRAM-ID, AUTHOR extracted |
 | ENVIRONMENT | Partial | SELECT/ASSIGN parsed; other clauses ignored |
-| DATA | Partial | FILE SECTION, WORKING-STORAGE SECTION, LINKAGE SECTION (parsed and stored) |
-| PROCEDURE | Partial | See verb table below |
+| DATA | Full | WORKING-STORAGE, FILE SECTION, LINKAGE SECTION, REPORT SECTION |
+| PROCEDURE | Full | See verb table below |
 
 ## Data Division
 
@@ -35,10 +31,10 @@ The parser auto-detects whether source uses fixed-format or free-format COBOL by
 
 | Level | Support | Notes |
 |-------|---------|-------|
-| 01-49 | Supported | Full hierarchy building |
+| 01-49 | Full | Full hierarchy building with group/elementary detection |
 | 66 | Not supported | RENAMES ignored |
-| 77 | Parsed | Root-level standalone item (never nested under groups) |
-| 88 | Supported | Condition names parsed; used in SET TO TRUE and condition translation |
+| 77 | Full | Root-level standalone item |
+| 88 | Full | Condition names parsed; used in SET TO TRUE, IF conditions, EVALUATE |
 
 ### PIC Clauses
 
@@ -49,17 +45,30 @@ The parser auto-detects whether source uses fixed-format or free-format COBOL by
 | `A(n)` | `PIC A(10)` | ALPHABETIC | Yes |
 | `S9(n)` | `PIC S9(7)` | SIGNED NUMERIC | Yes |
 | `9(n)V9(n)` | `PIC 9(5)V99` | NUMERIC w/ implied decimal | Yes |
-| `Z(n)9` | `PIC ZZZ,ZZ9.99` | EDITED | Yes (classified, not fully modeled) |
-
-**Expansion:** `9(5)` is expanded to `99999`. Mixed patterns like `S9(7)V99` are fully expanded.
+| `Z(n)9` | `PIC ZZZ,ZZ9.99` | EDITED | Yes |
 
 ### Other Data Clauses
 
 | Clause | Support | Notes |
 |--------|---------|-------|
-| VALUE | Supported | Initial value extracted |
-| OCCURS | Partial | Fixed count extracted; DEPENDING ON clauses ignored |
-| REDEFINES | Parsed | Name stored but no logic applied |
+| VALUE | Full | Initial value extracted, figurative constants resolved |
+| OCCURS | Full | Fixed count; multi-dimensional subscripts with chained `[i][j]` indexing |
+| OCCURS DEPENDING ON | Partial | Fixed count extracted; variable-length not modeled |
+| REDEFINES | Parsed | Name stored but no memory overlay modeled |
+
+### REPORT SECTION
+
+| Clause | Support | Notes |
+|--------|---------|-------|
+| RD (Report Description) | Full | CONTROLS, PAGE LIMIT, HEADING, FIRST/LAST DETAIL, FOOTING |
+| TYPE IS | Full | REPORT HEADING, PAGE HEADING, DETAIL, CONTROL HEADING/FOOTING, PAGE/REPORT FOOTING |
+| LINE NUMBER | Full | Absolute and PLUS (relative) |
+| COLUMN NUMBER | Full | Column positioning for formatted output |
+| SOURCE | Full | Data field reference for detail lines |
+| SUM | Full | Accumulator fields with automatic summation during GENERATE |
+| VALUE | Full | Literal text in report lines |
+| GROUP INDICATE | Parsed | Flagged in report structure |
+| NEXT GROUP | Parsed | Flagged in report structure |
 
 ## Procedure Division
 
@@ -68,110 +77,126 @@ The parser auto-detects whether source uses fixed-format or free-format COBOL by
 | COBOL Verb | Python Translation | Notes |
 |------------|-------------------|-------|
 | `MOVE x TO y` | `self.data.y.set(x)` | Literal, field-to-field, figurative constants |
-| `MOVE ALL "X" TO y` | `self.data.y.set("X" * self.data.y.size)` | Character fill with repeated character |
-| `MOVE CORRESPONDING` | Field-matched `.set()` calls | Finds common child names between source and target groups |
+| `MOVE ALL "X" TO y` | `self.data.y.set("X" * size)` | Character fill |
+| `MOVE CORRESPONDING` | Field-matched `.set()` calls | Finds common child names between groups |
 | `ADD x TO y` | `self.data.y.add(x)` | Supports GIVING clause |
 | `SUBTRACT x FROM y` | `self.data.y.subtract(x)` | Supports GIVING clause |
 | `MULTIPLY x BY y` | `self.data.y.multiply(x)` | Supports GIVING clause |
-| `DIVIDE x INTO y` | `self.data.y.divide(x)` | Supports GIVING; REMAINDER emits TODO |
-| `DIVIDE x BY y GIVING z` | `self.data.z.set(x / y)` | BY form (x is dividend) |
-| `COMPUTE y = expr` | `self.data.y.set(expr)` | Expression needs manual review; LENGTH OF translated to `len()` |
-| `DISPLAY items` | `print(items)` | `WITH NO ADVANCING` -> `end=''` |
+| `DIVIDE x INTO y` | `self.data.y.divide(x)` | Supports GIVING and REMAINDER |
+| `COMPUTE y = expr` | `self.data.y.set(expr)` | Full expression translation with FUNCTION intrinsics |
+| `DISPLAY items` | `print(items)` | `WITH NO ADVANCING` → `end=''`; UPON filtered |
 | `PERFORM para` | `self.para()` | Simple perform |
 | `PERFORM para N TIMES` | `for _ in range(N): self.para()` | Literal or variable count |
-| `PERFORM para UNTIL cond` | `while not (cond): self.para()` | Best-effort condition translation |
-| `PERFORM para THRU end` | Sequential calls to each paragraph in range | Paragraph range resolved from AST; UNTIL after THRU also supported |
-| `PERFORM para VARYING` | `while not (cond): self.para()` | Single-variable FROM/BY/UNTIL translated; multi-VARYING falls back to TODO |
-| `INITIALIZE x` | Commented-out `.set(0)` | Numeric/alphanumeric reset |
-| `IF condition` | `if cond:` / `else:` | Multi-line: full block translation; inline: condition, body, and ELSE translated |
-| `EVALUATE TRUE` | `if`/`elif`/`else` chain | WHEN conditions translated; WHEN OTHER -> else; fall-through merged as OR |
-| `EVALUATE variable` | `if subj == val:` chain | Equality comparisons; WHEN OTHER -> else; WHEN x OR y supported |
-| `EVALUATE ALSO` | `if cond1 and cond2:` chain | Multi-subject EVALUATE with per-subject conditions; ANY matches all |
-| `STRING` | `target.set(src1 + src2)` | DELIMITED BY SIZE and literal delimiters; WITH POINTER emits TODO |
-| `UNSTRING` | `str.split()` into targets | Single and multiple delimiters (re.split for multi); TALLYING emits TODO |
-| `INSPECT` | `str.count()` / `str.replace()` | TALLYING (ALL/LEADING/CHARACTERS), REPLACING (ALL/LEADING/FIRST); CONVERTING emits TODO |
-| `SET flag TO TRUE` | `self.data.parent.set(val)` | 88-level condition lookup sets parent field to first value |
-| `SET idx UP/DOWN BY n` | `self.data.idx.add(n)` / `.subtract(n)` | Index increment/decrement |
-| `SET idx TO value` | `self.data.idx.set(value)` | Index assignment |
-| `ACCEPT var` | `self.data.var.set(input())` | Plain user input |
-| `ACCEPT var FROM DATE` | `datetime.now().strftime(...)` | DATE, DAY, TIME formats translated |
-| `ACCEPT var FROM ENVIRONMENT` | `os.environ.get(...)` | ENVIRONMENT-NAME/VALUE supported |
-| `ACCEPT var FROM COMMAND-LINE` | `sys.argv[1:]` | ARGUMENT-NUMBER/VALUE also supported |
-| `REWRITE record` | `self.file.write(str(record))` | Approximated as write; FROM clause supported |
-| `OPEN INPUT file` | `self.file.open_input()` | |
-| `OPEN OUTPUT file` | `self.file.open_output()` | Translated to `open_output()` call |
-| `OPEN EXTEND file` | `self.file.open_extend()` | Translated to `open_extend()` call |
-| `OPEN I-O file` | `self.file.open_io()` | Translated to `open_io()` call |
-| `CLOSE file` | `self.file.close()` | WITH LOCK/NO REWIND keywords filtered |
-| `READ file` | `self.file.read()` | With EOF detection |
-| `WRITE record` | `self.file.write(str(record))` | FROM clause supported; file name inferred from record name |
-| `CALL "prog"` | TODO comment | External dependency flagged with USING args |
-| `STOP RUN` | `return` | |
-| `GOBACK` | `return` | Returns from current program |
-| `EXIT PROGRAM` | `return` | Returns from called program |
-| `EXIT PERFORM` | `break` | Exits current PERFORM loop |
-| `CONTINUE` | `pass` | |
+| `PERFORM para UNTIL cond` | `while not (cond): self.para()` | Full condition translation |
+| `PERFORM para THRU end` | Sequential calls to each paragraph in range | Range resolved from AST |
+| `PERFORM VARYING` | `while not (cond):` with init/step | Single-variable FROM/BY/UNTIL |
+| `PERFORM VARYING ... AFTER` | Nested `while` loops | Multi-level (2-3 levels) with correct nesting |
+| `SEARCH table` | `for _idx in range(...):` with break | Serial search with AT END and WHEN clauses |
+| `SEARCH ALL table` | Linear scan (approximated) | Binary search approximated as linear with comment |
+| `SORT file ON KEY` | `list.sort(key=...)` | USING/GIVING, INPUT/OUTPUT PROCEDURE |
+| `MERGE file ON KEY` | `heapq.merge(...)` | Multiple USING files, GIVING or OUTPUT PROCEDURE |
+| `RELEASE record` | `work_list.append(...)` | Within INPUT PROCEDURE |
+| `RETURN file` | `sorted_list.pop(0)` | Within OUTPUT PROCEDURE, with AT END |
+| `INITIATE report` | Buffer setup + heading output | REPORT WRITER verb |
+| `GENERATE detail` | SUM accumulation + formatted detail line | REPORT WRITER verb |
+| `TERMINATE report` | Control footings + report footing + write | REPORT WRITER verb |
+| `STRING` | `target.set(src1 + src2)` | DELIMITED BY SIZE and literal delimiters |
+| `UNSTRING` | `str.split()` into targets | Single and multiple delimiters |
+| `INSPECT TALLYING` | `str.count()` | ALL, LEADING, CHARACTERS |
+| `INSPECT REPLACING` | `str.replace()` | ALL, LEADING, FIRST |
+| `SET flag TO TRUE` | `self.data.parent.set(val)` | 88-level condition lookup |
+| `SET idx UP/DOWN BY` | `self.data.idx.add/subtract(n)` | Index increment/decrement |
+| `ACCEPT var` | `input()` | Plain user input |
+| `ACCEPT FROM DATE/TIME` | `datetime.now().strftime(...)` | DATE, DAY, TIME formats |
+| `ACCEPT FROM ENVIRONMENT` | `os.environ.get(...)` | ENVIRONMENT-NAME/VALUE |
+| `ACCEPT FROM COMMAND-LINE` | `sys.argv[1:]` | ARGUMENT-NUMBER/VALUE |
+| `OPEN INPUT/OUTPUT/EXTEND/I-O` | `self.file.open_*()` | All four modes |
+| `CLOSE file` | `self.file.close()` | WITH LOCK/NO REWIND filtered |
+| `READ file` | `self.file.read()` | With AT END/EOF detection |
+| `WRITE record` | `self.file.write(...)` | FROM clause supported |
+| `REWRITE record` | `self.file.write(...)` | Approximated as write |
+| `DELETE file` | TODO stub | File record deletion |
+| `START file` | TODO stub | File positioning |
+| `CALL "prog"` | TODO comment | External dependency flagged |
+| `STOP RUN` / `GOBACK` | `return` | |
+| `EXIT PROGRAM/PERFORM` | `return` / `break` | |
 | `GO TO` | `raise NotImplementedError` | Requires manual restructuring |
+
+### COMPUTE FUNCTION Intrinsics (30+)
+
+| COBOL Function | Python | Notes |
+|---------------|--------|-------|
+| `FUNCTION LENGTH(x)` | `len(str(x))` | |
+| `FUNCTION NUMVAL(x)` | `float(x)` | |
+| `FUNCTION NUMVAL-C(x, "$")` | `float(x.replace(',','').replace('$',''))` | Currency stripping |
+| `FUNCTION UPPER-CASE(x)` | `str(x).upper()` | |
+| `FUNCTION LOWER-CASE(x)` | `str(x).lower()` | |
+| `FUNCTION REVERSE(x)` | `str(x)[::-1]` | |
+| `FUNCTION TRIM(x)` | `str(x).strip()` | LEADING/TRAILING supported |
+| `FUNCTION MAX(a, b, c)` | `max(a, b, c)` | Variadic, comma-separated args |
+| `FUNCTION MIN(a, b, c)` | `min(a, b, c)` | Variadic |
+| `FUNCTION MOD(a, b)` | `a % b` | |
+| `FUNCTION ABS(x)` | `abs(x)` | |
+| `FUNCTION SQRT(x)` | `x ** 0.5` | |
+| `FUNCTION INTEGER(x)` | `int(x)` | |
+| `FUNCTION LOG(x)` / `LOG10(x)` | `math.log(x)` / `math.log10(x)` | |
+| `FUNCTION SIN/COS/TAN(x)` | `math.sin/cos/tan(x)` | Also ASIN, ACOS, ATAN |
+| `FUNCTION CURRENT-DATE` | `datetime.now().strftime(...)` | 21-char format |
+| `FUNCTION RANDOM` | `random.random()` | |
+| `FUNCTION ANNUITY(r, n)` | Annuity formula | |
+| `FUNCTION MEAN/MEDIAN(...)` | `statistics.mean/median(...)` | Variadic |
+| `FUNCTION ORD/CHAR(x)` | `ord(x)` / `chr(x)` | |
+
+Expression arguments are fully supported, including nested `FUNCTION` calls, comma-separated args, and arithmetic inside function arguments.
+
+### Bitwise Operators (in COMPUTE)
+
+| COBOL | Python |
+|-------|--------|
+| `B-AND` | `&` |
+| `B-OR` | `\|` |
+| `B-XOR` | `^` |
+| `B-NOT` | `~` |
+| `B-SHIFT-L` | `<<` |
+| `B-SHIFT-R` | `>>` |
 
 ### Arithmetic ON SIZE ERROR
 
-All arithmetic verbs (ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE) support `ON SIZE ERROR` / `NOT ON SIZE ERROR` clauses. The arithmetic is wrapped in a `try`/`except (OverflowError, ZeroDivisionError)` block with the error/success actions noted as comments.
-
-### Unsupported Verbs
-
-These emit `# TODO(high)` comments in generated code:
-
-- `SORT` / `MERGE` -- file sorting
-- `SEARCH` -- table searching
-- `FUNCTION` -- intrinsic functions (emits TODO in MOVE FUNCTION and COMPUTE FUNCTION)
+All arithmetic verbs support `ON SIZE ERROR` / `NOT ON SIZE ERROR`. The arithmetic is wrapped in `try`/`except (OverflowError, ZeroDivisionError)`.
 
 ## Copybook Handling
 
-- `COPY` statements are resolved by the preprocessor (recursive, up to 10 passes)
-- `COPY ... REPLACING` is supported with token substitution
-- Copybook search paths are configurable via `--copybook-path`
-- `EXEC CICS/SQL/DLI` blocks are stripped with Python-equivalent hint comments (25 patterns)
+| Feature | Support |
+|---------|---------|
+| `COPY copybook` | Full — recursive resolution, up to 10 passes |
+| `COPY ... REPLACING` | Full — pseudo-text and token substitution |
+| `--copybook-path` | Full — multiple search directories |
+| Search order | Source dir → `--copybook-path` dirs → subdirectories |
+| Extensions searched | `.cpy`, `.cbl`, `.cob`, `.cobol`, `.copy` (+ uppercase) |
+| EXEC CICS/SQL/DLI | Stripped with 25 Python-equivalent hint comments |
 
-## File Handling
+## Condition Translation
 
-- `SELECT/ASSIGN` is parsed and file controls are recorded
-- `OPEN INPUT` creates a read-only `FileAdapter`
-- `OPEN OUTPUT` creates a write `FileAdapter` via `open_output()`
-- `OPEN EXTEND` opens for append via `open_extend()`
-- `OPEN I-O` opens for read/write via `open_io()`
-- `WRITE` translates to `file.write()` with FROM clause support
-- `REWRITE` approximated as `file.write()` (in-place update semantics not modeled)
-- `CLOSE` is translated directly
-- `READ` with AT END is translated with EOF detection
-
-## Sensitivity Detection
-
-Default patterns (configurable via `protected.json`):
-
-| Pattern | Level | Reason |
-|---------|-------|--------|
-| SSN, SOCIAL-SEC | HIGH | Social Security Number |
-| TAX-ID | HIGH | Tax Identifier |
-| DOB, BIRTH | HIGH | Date of Birth |
-| PASSWORD, PIN | HIGH | Credentials |
-| ACCOUNT | MEDIUM | Account number |
-| BALANCE | MEDIUM | Financial balance |
-| SALARY, WAGE | MEDIUM | Compensation data |
-| CREDIT, PAYMENT | MEDIUM | Financial data |
-| CUST-, EMP- | LOW | Customer/Employee prefix |
-| ADDR, PHONE, EMAIL | LOW | Contact information |
+The two-pass condition translator handles:
+- Basic comparisons (=, >, <, >=, <=, NOT)
+- Multi-word phrases (NOT GREATER THAN OR EQUAL TO, etc.)
+- Compound conditions (AND, OR with implied subjects)
+- Abbreviated combined relations (AND NOT =, OR >)
+- Class conditions (NUMERIC, ALPHABETIC)
+- Sign conditions (POSITIVE, NEGATIVE, ZERO)
+- 88-level condition names (single values and THRU ranges)
+- Figurative constants (SPACES, ZEROS, HIGH-VALUES, LOW-VALUES)
+- Arithmetic in conditions (X + Y > Z)
+- Parenthesized groups
+- Safety valve: invalid conditions compile-checked and fall back to `True`
 
 ## Known Limitations
 
-1. **No GO TO translation** -- Emits `raise NotImplementedError`; requires manual restructuring
-2. **Inline EVALUATE** -- Single-line EVALUATE (all packed in one statement) emits TODO
-3. **No nested programs** -- Only single-program files supported
-4. **No REDEFINES logic** -- Field name stored but no memory overlay modeled
-5. **OCCURS DEPENDING ON** -- Fixed count only; variable-length arrays not supported
-6. **Inline PERFORM** -- `PERFORM ... END-PERFORM` blocks may not be fully captured
-7. **Multi-statement lines** -- Complex lines with multiple statements may be parsed as one
-8. **Free-format edge cases** -- Auto-detected and supported, but complex free-format patterns (hex literals like `X"0A"`, inline PERFORM with multi-line conditions) may produce invalid Python
-9. **Multi-VARYING** -- Nested VARYING loops (multiple loop variables) fall back to TODO
-10. **INSPECT CONVERTING** -- Emits TODO; TALLYING and REPLACING are translated
-11. **EVALUATE WHEN THRU/THROUGH** -- Range comparisons in WHEN clauses emit TODO
-12. **SET TO FALSE** -- Non-standard extension; emits TODO
+1. **GO TO** — Emits `raise NotImplementedError`; requires manual restructuring
+2. **Nested programs** — Only single-program files supported
+3. **REDEFINES logic** — Field name stored but no memory overlay modeled
+4. **OCCURS DEPENDING ON** — Fixed count only; variable-length arrays not supported
+5. **INSPECT CONVERTING** — Emits TODO; TALLYING and REPLACING are translated
+6. **EVALUATE WHEN THRU/THROUGH** — Range comparisons emit placeholder `if True:`
+7. **SET TO FALSE** — Non-standard extension; emits TODO
+8. **Nested OCCURS data initialization** — Multi-dimensional tables generate TODO for nested list structures; subscript translation works correctly
