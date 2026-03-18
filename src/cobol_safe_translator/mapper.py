@@ -358,7 +358,7 @@ class PythonMapper:
         ops = stmt.operands
 
         if verb == "DISPLAY":
-            return self._translate_display(stmt)
+            return st.translate_display(stmt, self._resolve_operand)
         elif verb == "MOVE":
             return self._translate_move(ops)
         elif verb in ("ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE"):
@@ -366,9 +366,17 @@ class PythonMapper:
         elif verb == "PERFORM":
             return self._translate_perform(ops, stmt.raw_text)
         elif verb == "IF":
-            return self._translate_if(stmt.raw_text)
+            return [
+                f"# IF statement (manual review recommended):",
+                f"# {stmt.raw_text}",
+                f"# TODO(high): translate IF condition and branches",
+            ]
         elif verb == "EVALUATE":
-            return self._translate_evaluate(stmt.raw_text)
+            return [
+                f"# EVALUATE statement (translates to if/elif):",
+                f"# {stmt.raw_text}",
+                f"# TODO(high): translate EVALUATE branches to if/elif",
+            ]
         elif verb in ("END-IF", "END-EVALUATE", "END-PERFORM", "END-READ",
                        "END-WRITE", "END-CALL", "END-STRING"):
             return [f"# {verb} (orphaned — normally consumed by block translator)"]
@@ -377,15 +385,15 @@ class PythonMapper:
         elif verb == "WHEN":
             return [f"# WHEN (orphaned — normally consumed by block translator): {stmt.raw_text}"]
         elif verb == "OPEN":
-            return self._translate_open(ops)
+            return st.translate_open(ops)
         elif verb == "CLOSE":
-            return self._translate_close(ops)
+            return st.translate_close(ops)
         elif verb == "READ":
-            return self._translate_read(ops, stmt.raw_text)
+            return st.translate_read(ops, stmt.raw_text)
         elif verb == "WRITE":
             return st.translate_write(ops)
         elif verb == "CALL":
-            return self._translate_call(ops)
+            return st.translate_call(ops)
         elif verb == "STOP":
             return ["return"]
         elif verb == "GOBACK":
@@ -428,7 +436,7 @@ class PythonMapper:
         elif verb == "INSPECT":
             return strt.translate_inspect(ops, self._resolve_operand)
         elif verb == "INITIALIZE":
-            return self._translate_initialize(ops)
+            return st.translate_initialize(ops)
         elif verb == "SORT":
             return sort_t.translate_sort(ops, self._resolve_operand)
         elif verb == "MERGE":
@@ -457,9 +465,6 @@ class PythonMapper:
             return []  # scope terminators — silently consumed
         else:
             return [f"# TODO(high): unsupported verb {verb}", f"# {stmt.raw_text}"]
-
-    def _translate_display(self, stmt: CobolStatement) -> list[str]:
-        return st.translate_display(stmt, self._resolve_operand)
 
     def _translate_move(self, ops: list[str]) -> list[str]:
         if ops and ops[0].upper() in ("CORRESPONDING", "CORR"):
@@ -570,37 +575,6 @@ class PythonMapper:
         Delegates to condition_translator module, passing the 88-level lookup.
         """
         return _translate_condition_impl(cond, self._condition_lookup)
-
-    def _translate_if(self, raw: str) -> list[str]:
-        """Fallback IF translation (used when block translator can't handle it)."""
-        return [
-            f"# IF statement (manual review recommended):",
-            f"# {raw}",
-            f"# TODO(high): translate IF condition and branches",
-        ]
-
-    def _translate_evaluate(self, raw: str) -> list[str]:
-        """Fallback EVALUATE translation (used when block translator can't handle it)."""
-        return [
-            f"# EVALUATE statement (translates to if/elif):",
-            f"# {raw}",
-            f"# TODO(high): translate EVALUATE branches to if/elif",
-        ]
-
-    def _translate_open(self, ops: list[str]) -> list[str]:
-        return st.translate_open(ops)
-
-    def _translate_close(self, ops: list[str]) -> list[str]:
-        return st.translate_close(ops)
-
-    def _translate_read(self, ops: list[str], raw: str) -> list[str]:
-        return st.translate_read(ops, raw)
-
-    def _translate_call(self, ops: list[str]) -> list[str]:
-        return st.translate_call(ops)
-
-    def _translate_initialize(self, ops: list[str]) -> list[str]:
-        return st.translate_initialize(ops)
 
     def _main_block(self) -> str:
         return (

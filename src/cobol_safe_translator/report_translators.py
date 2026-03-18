@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from .models import ReportDescription, ReportGroup
+from .models import ReportDescription, ReportField, ReportGroup
 from .utils import _to_python_name
 
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+from .utils import _is_numeric_literal
+
 
 # No-arg intrinsics (FUNCTION CURRENT-DATE, FUNCTION WHEN-COMPILED)
 _FUNCTION_INTRINSICS_0: dict[str, str] = {
@@ -69,20 +71,6 @@ _FUNCTION_INTRINSICS_VAR: dict[str, str] = {
 
 _EXPR_OPERATORS = frozenset({'+', '-', '*', '/', '**', '(', ')'})
 
-
-def _is_numeric_token(s: str) -> bool:
-    """Check if a string looks like a numeric literal."""
-    if not s:
-        return False
-    check = s[1:] if s[0] in ('-', '+') and len(s) > 1 else s
-    parts = check.split('.')
-    if len(parts) == 1:
-        return parts[0].isdigit()
-    if len(parts) == 2:
-        return (parts[0].isdigit() or parts[0] == '') and (
-            parts[1].isdigit() or parts[1] == ''
-        )
-    return False
 
 
 def _split_args_by_comma(raw_args: str) -> list[str] | None:
@@ -260,7 +248,7 @@ def _resolve_expr(expr: str, resolve: Callable[[str], str]) -> str:
                 translated = translate_function_intrinsic(func_name, '', resolve)
                 result.append(translated if translated is not None else '0')
                 i += 2
-        elif _is_numeric_token(tok):
+        elif _is_numeric_literal(tok):
             result.append(tok)
             i += 1
         elif tok.startswith('"') or tok.startswith("'"):

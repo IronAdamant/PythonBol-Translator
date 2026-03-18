@@ -86,9 +86,10 @@ def translate_move(ops: list[str]) -> list[str]:
                 )
             return results
         return [f"# MOVE ALL: could not parse: {' '.join(ops)}"]
-    if "TO" not in [o.upper() for o in ops]:
+    upper_ops = [o.upper() for o in ops]
+    if "TO" not in upper_ops:
         return [f"# MOVE: could not parse operands: {' '.join(ops)}"]
-    to_idx = next(i for i, o in enumerate(ops) if o.upper() == "TO")
+    to_idx = upper_ops.index("TO")
     source = ops[0]
     targets = ops[to_idx + 1:]
     if not targets:
@@ -673,7 +674,7 @@ def translate_perform(
             f"    self.{target}()",
         ]
 
-    if "TIMES" in [o.upper() for o in ops]:
+    if "TIMES" in upper_ops:
         times_idx = next(i for i, o in enumerate(ops) if o.upper() == "TIMES")
         if times_idx >= 2:
             times_op = ops[times_idx - 1]
