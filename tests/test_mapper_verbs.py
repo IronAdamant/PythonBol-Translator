@@ -134,27 +134,26 @@ class TestPerformVarying:
 
 
 class TestPerformThru:
-    def test_perform_thru_emits_todo(self):
+    def test_perform_thru_generates_calls(self):
+        """PERFORM THRU should call all paragraphs in range."""
         src = make_cobol(["PERFORM MAIN-PARA THRU MAIN-PARA."])
         program = parse_cobol(src)
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "TODO(high)" in source
+        assert "self.main_para()" in source
         assert "THRU" in source
 
 
 class TestPerformThruMethodCall:
-    def test_perform_thru_calls_first_paragraph(self):
-        """PERFORM THRU should call the first paragraph in addition to TODO."""
+    def test_perform_thru_calls_paragraph(self):
+        """PERFORM THRU should call the paragraph(s) in range."""
         src = make_cobol(["PERFORM MAIN-PARA THRU MAIN-PARA."])
         program = parse_cobol(src)
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "TODO(high)" in source
         assert "self.main_para()" in source
-        assert "only first paragraph" in source
 
 
 class TestPerformTimesVariable:
@@ -382,8 +381,8 @@ class TestOpenStatement:
         ast.parse(source)
         assert ".open_input()" in source
 
-    def test_open_output_generates_safety_comment(self):
-        """OPEN OUTPUT should generate safety comment, not actual file write."""
+    def test_open_output_generates_open_output_call(self):
+        """OPEN OUTPUT should generate .open_output() call."""
         lines = [
             "       IDENTIFICATION DIVISION.",
             "       PROGRAM-ID. TEST-PROG.",
@@ -406,9 +405,7 @@ class TestOpenStatement:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "not supported" in source.lower() or "TODO(high)" in source
-        # Must NOT generate .open_output() — safety guarantee
-        assert "open_output()" not in source
+        assert "open_output()" in source
 
 
 class TestReadStatement:

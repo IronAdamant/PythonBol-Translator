@@ -280,6 +280,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--copybook-path", "-I", action="append", default=[],
         help="Directory to search for COPY copybooks (can be repeated)",
     )
+    tr.add_argument(
+        "--ebcdic", action="store_true", default=False,
+        help="Use EBCDIC (cp037) collation for string comparisons (mainframe dialect)",
+    )
 
     # map subcommand
     mp = subparsers.add_parser(

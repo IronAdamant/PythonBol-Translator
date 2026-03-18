@@ -64,6 +64,30 @@ FIGURATIVE_RESOLVE: dict[str, str] = {
 
 _REFMOD_RE = re.compile(r'^([A-Za-z][\w-]*)\((\d+):(\d+)\)$')
 
+# Subscript access: TABLE(IDX) or TABLE(1) — no colon
+_SUBSCRIPT_RE = re.compile(r'^([A-Za-z][\w-]*)\(([^:]+)\)$')
+
+
+def _sanitize_numeric(s: str) -> str:
+    """Strip leading zeros from COBOL numeric literals for valid Python.
+
+    '01' -> '1', '007' -> '7', '0' -> '0', '3.14' -> '3.14',
+    '00.50' -> '0.50', '-01' -> '-1'.
+    """
+    if not s:
+        return s
+    sign = ""
+    val = s
+    if val[0] in ("-", "+") and len(val) > 1:
+        sign = val[0]
+        val = val[1:]
+    if "." in val:
+        int_part, dec_part = val.split(".", 1)
+        int_part = int_part.lstrip("0") or "0"
+        return f"{sign}{int_part}.{dec_part}"
+    val = val.lstrip("0") or "0"
+    return f"{sign}{val}"
+
 
 def resolve_operand(op: str) -> str:
     """Resolve a COBOL operand to a Python expression.
@@ -75,9 +99,9 @@ def resolve_operand(op: str) -> str:
     # Quoted string (strict: require matching open and close)
     if len(op) >= 2 and op[0] in ('"', "'") and op[-1] == op[0]:
         return op
-    # Numeric literal
+    # Numeric literal — sanitize leading zeros for Python 3
     if _is_numeric_literal(op):
-        return op
+        return _sanitize_numeric(op)
     upper = op.upper()
     # Figurative constant
     fig = FIGURATIVE_RESOLVE.get(upper)
@@ -92,6 +116,18 @@ def resolve_operand(op: str) -> str:
         name, start, length = rm.group(1), int(rm.group(2)), int(rm.group(3))
         py = _to_python_name(name)
         return f"str(self.data.{py}.value)[{start - 1}:{start - 1 + length}]"
+    # Subscript access: TABLE(IDX) or TABLE(1) — no colon
+    sm = _SUBSCRIPT_RE.match(op)
+    if sm:
+        name, idx_str = sm.group(1), sm.group(2).strip()
+        py = _to_python_name(name)
+        if _is_numeric_literal(idx_str):
+            # 1-based to 0-based
+            idx_val = int(idx_str) - 1
+            return f"self.data.{py}[{idx_val}].value"
+        # Variable subscript
+        py_idx = _to_python_name(idx_str)
+        return f"self.data.{py}[int(self.data.{py_idx}.value) - 1].value"
     # OF/IN qualification: FIELD OF GROUP → take field before OF
     if " OF " in upper or " IN " in upper:
         field = op.split()[0]

@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Callable
 
 from .models import CobolStatement
-from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _to_method_name, _to_python_name
+from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _sanitize_numeric, _to_method_name, _to_python_name
 
 
 # Keywords that should be filtered from arithmetic operand/target lists
@@ -72,7 +72,7 @@ def translate_move(ops: list[str]) -> list[str]:
     if source.startswith('"') or source.startswith("'"):
         src_expr = source
     elif _is_numeric_literal(source):
-        src_expr = source
+        src_expr = _sanitize_numeric(source)
     elif source.upper().startswith("FUNCTION"):
         return ["# TODO(high): MOVE FUNCTION — manual translation required"]
     else:
@@ -417,6 +417,7 @@ def translate_perform(
     ops: list[str],
     raw: str,
     translate_condition: Callable[[str], str],
+    get_paragraph_range: Callable[[str, str], list[str]] | None = None,
 ) -> list[str]:
     """Translate PERFORM verb."""
     if not ops:
@@ -426,10 +427,29 @@ def translate_perform(
     upper_ops = [o.upper() for o in ops]
 
     if "THRU" in upper_ops or "THROUGH" in upper_ops:
+        thru_idx = next(
+            i for i, o in enumerate(upper_ops) if o in ("THRU", "THROUGH")
+        )
+        end_para = ops[thru_idx + 1] if thru_idx + 1 < len(ops) else None
+        if end_para and get_paragraph_range:
+            para_names = get_paragraph_range(ops[0], end_para)
+            # Check for UNTIL after the THRU clause
+            remaining_upper = [o.upper() for o in ops[thru_idx + 2:]]
+            if "UNTIL" in remaining_upper:
+                until_offset = remaining_upper.index("UNTIL")
+                cond_parts = ops[thru_idx + 2 + until_offset + 1:]
+                if cond_parts:
+                    cond = " ".join(cond_parts)
+                    calls = [f"    self.{_to_method_name(p)}()" for p in para_names]
+                    return [
+                        f"# PERFORM {ops[0]} THRU {end_para} UNTIL {cond}",
+                        f"while not ({translate_condition(cond)}):",
+                    ] + calls
+            calls = [f"self.{_to_method_name(p)}()" for p in para_names]
+            return [f"# PERFORM {ops[0]} THRU {end_para}"] + calls
         return [
             f"# PERFORM THRU: {raw}",
-            f"# TODO(high): PERFORM THRU/THROUGH requires manual translation (paragraph range)",
-            f"self.{target}()  # only first paragraph — range endpoint missing",
+            f"self.{target}()  # TODO(high): THRU endpoint not resolved",
         ]
 
     if "VARYING" in upper_ops:
@@ -493,10 +513,38 @@ def translate_open(ops: list[str]) -> list[str]:
             if mode == "INPUT":
                 results.append(f"self.{py_name}.open_input()")
             elif mode == "OUTPUT":
-                results.append(f"# OPEN OUTPUT {fn} — write not supported (safety)")
-                results.append(f"# TODO(high): file output requires manual implementation")
+                results.append(f"self.{py_name}.open_output()")
+            elif mode == "EXTEND":
+                results.append(f"self.{py_name}.open_extend()")
+            elif mode in ("I-O", "IO"):
+                results.append(f"self.{py_name}.open_io()")
         return results if results else [f"# OPEN: could not parse: {' '.join(ops)}"]
     return [f"# OPEN: could not parse: {' '.join(ops)}"]
+
+
+def translate_write(ops: list[str]) -> list[str]:
+    """Translate WRITE verb."""
+    if not ops:
+        return ["# WRITE: no record specified"]
+    record_name = ops[0]
+    py_record = _to_python_name(record_name)
+    upper_ops = [o.upper() for o in ops]
+
+    # Determine file name from record name (convention: remove -RECORD/-REC suffix)
+    file_hint = py_record.replace("_record", "").replace("_rec", "")
+    if not file_hint or file_hint == py_record:
+        file_hint = py_record + "_file"
+
+    # Check for FROM clause: WRITE record FROM data-name
+    from_expr = None
+    if "FROM" in upper_ops:
+        from_idx = upper_ops.index("FROM")
+        if from_idx + 1 < len(ops):
+            from_expr = f"self.data.{_to_python_name(ops[from_idx + 1])}.value"
+
+    if from_expr:
+        return [f"self.{file_hint}.write(str({from_expr}))"]
+    return [f"self.{file_hint}.write(str(self.data.{py_record}.value))"]
 
 
 def translate_close(ops: list[str]) -> list[str]:

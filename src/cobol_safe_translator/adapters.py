@@ -168,10 +168,15 @@ class CobolString:
 
     Values are padded with spaces on the right and truncated on the right
     when they exceed the field size.
+
+    Args:
+        ebcdic: If True, comparisons use EBCDIC (cp037) collation order
+            instead of ASCII/Unicode.  Opt-in only.
     """
 
-    def __init__(self, size: int, initial: str = "") -> None:
+    def __init__(self, size: int, initial: str = "", ebcdic: bool = False) -> None:
         self.size = size
+        self._ebcdic = ebcdic
         self._value = self._coerce(initial)
 
     def _coerce(self, value: str) -> str:
@@ -195,12 +200,18 @@ class CobolString:
     def _compare_value(self, other: object) -> str | None:
         """Get the coerced value of other for comparison, or None if incompatible."""
         if isinstance(other, CobolString):
-            # Pad to the longer size for COBOL-style comparison
             max_size = max(self.size, other.size)
             return other._value.ljust(max_size)
         if isinstance(other, str):
             return self._coerce(other)
         return None
+
+    def _cmp_key(self, s: str) -> str | bytes:
+        """Return comparison key — EBCDIC bytes if enabled, else original string."""
+        if self._ebcdic:
+            from .ebcdic import ebcdic_key
+            return ebcdic_key(s)
+        return s
 
     def __eq__(self, other: object) -> bool:
         val = self._compare_value(other)
@@ -217,8 +228,8 @@ class CobolString:
             return NotImplemented
         if isinstance(other, CobolString):
             max_size = max(self.size, other.size)
-            return self._value.ljust(max_size) < val
-        return self._value < val
+            return self._cmp_key(self._value.ljust(max_size)) < self._cmp_key(val)
+        return self._cmp_key(self._value) < self._cmp_key(val)
 
     def __gt__(self, other: object) -> bool:
         val = self._compare_value(other)
@@ -226,8 +237,8 @@ class CobolString:
             return NotImplemented
         if isinstance(other, CobolString):
             max_size = max(self.size, other.size)
-            return self._value.ljust(max_size) > val
-        return self._value > val
+            return self._cmp_key(self._value.ljust(max_size)) > self._cmp_key(val)
+        return self._cmp_key(self._value) > self._cmp_key(val)
 
     def __le__(self, other: object) -> bool:
         val = self._compare_value(other)
@@ -235,8 +246,8 @@ class CobolString:
             return NotImplemented
         if isinstance(other, CobolString):
             max_size = max(self.size, other.size)
-            return self._value.ljust(max_size) <= val
-        return self._value <= val
+            return self._cmp_key(self._value.ljust(max_size)) <= self._cmp_key(val)
+        return self._cmp_key(self._value) <= self._cmp_key(val)
 
     def __ge__(self, other: object) -> bool:
         val = self._compare_value(other)
@@ -244,18 +255,18 @@ class CobolString:
             return NotImplemented
         if isinstance(other, CobolString):
             max_size = max(self.size, other.size)
-            return self._value.ljust(max_size) >= val
-        return self._value >= val
+            return self._cmp_key(self._value.ljust(max_size)) >= self._cmp_key(val)
+        return self._cmp_key(self._value) >= self._cmp_key(val)
 
     def __str__(self) -> str:
         return self._value
 
 
 class FileAdapter:
-    """Read-only file adapter for generated code.
+    """File adapter for generated code with read and write support.
 
-    By design, this adapter has NO write methods — this is a core safety
-    guarantee of the translator. It provides sequential read access only.
+    Supports OPEN INPUT (read), OPEN OUTPUT (write/create),
+    OPEN EXTEND (append), and OPEN I-O (read+write).
     """
 
     def __init__(self, path: str, encoding: str = "utf-8") -> None:
@@ -263,17 +274,43 @@ class FileAdapter:
         self.encoding = encoding
         self._file = None
         self._eof = False
+        self._mode: str | None = None
 
     @property
     def eof(self) -> bool:
         return self._eof
 
     def open_input(self) -> None:
-        """OPEN INPUT equivalent."""
+        """OPEN INPUT equivalent — sequential read."""
         if self._file is not None:
             self.close()
         self._file = open(self.path, "r", encoding=self.encoding)
         self._eof = False
+        self._mode = "INPUT"
+
+    def open_output(self) -> None:
+        """OPEN OUTPUT equivalent — create/truncate for writing."""
+        if self._file is not None:
+            self.close()
+        self._file = open(self.path, "w", encoding=self.encoding)
+        self._eof = False
+        self._mode = "OUTPUT"
+
+    def open_extend(self) -> None:
+        """OPEN EXTEND equivalent — append to existing file."""
+        if self._file is not None:
+            self.close()
+        self._file = open(self.path, "a", encoding=self.encoding)
+        self._eof = False
+        self._mode = "EXTEND"
+
+    def open_io(self) -> None:
+        """OPEN I-O equivalent — read and write."""
+        if self._file is not None:
+            self.close()
+        self._file = open(self.path, "r+", encoding=self.encoding)
+        self._eof = False
+        self._mode = "I-O"
 
     def read(self) -> str | None:
         """READ equivalent. Returns next line or None at EOF."""
@@ -285,11 +322,20 @@ class FileAdapter:
             return None
         return line.rstrip("\r\n")
 
+    def write(self, record: str) -> None:
+        """WRITE equivalent. Writes a record (line) to the file."""
+        if self._file is None:
+            raise RuntimeError("File not opened")
+        if self._mode == "INPUT":
+            raise RuntimeError("Cannot write to file opened for INPUT")
+        self._file.write(record + "\n")
+
     def close(self) -> None:
         """CLOSE equivalent."""
         if self._file:
             self._file.close()
             self._file = None
+            self._mode = None
 
     def __enter__(self) -> FileAdapter:
         self.open_input()

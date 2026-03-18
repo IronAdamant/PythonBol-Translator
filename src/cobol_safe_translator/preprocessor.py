@@ -174,7 +174,52 @@ def _resolve_copy_statements(
     return "\n".join(result)
 
 
-def _strip_exec_blocks(raw_text: str) -> str:
+_EXEC_HINTS: dict[tuple[str, str], str] = {
+    ("CICS", "SEND"): "UI output -> print() or template rendering",
+    ("CICS", "RECEIVE"): "UI input -> input() or request parsing",
+    ("CICS", "READ"): "VSAM read -> db cursor.execute('SELECT ...')",
+    ("CICS", "WRITE"): "VSAM write -> db cursor.execute('INSERT ...')",
+    ("CICS", "REWRITE"): "VSAM update -> db cursor.execute('UPDATE ...')",
+    ("CICS", "DELETE"): "VSAM delete -> db cursor.execute('DELETE ...')",
+    ("CICS", "RETURN"): "return control -> return or sys.exit()",
+    ("CICS", "XCTL"): "transfer control -> function call or import",
+    ("CICS", "LINK"): "call subprogram -> function call",
+    ("CICS", "START"): "start transaction -> async task / queue",
+    ("CICS", "SYNCPOINT"): "commit -> db connection.commit()",
+    ("SQL", "SELECT"): "cursor.execute('SELECT ...')",
+    ("SQL", "INSERT"): "cursor.execute('INSERT ...')",
+    ("SQL", "UPDATE"): "cursor.execute('UPDATE ...')",
+    ("SQL", "DELETE"): "cursor.execute('DELETE ...')",
+    ("SQL", "OPEN"): "cursor = connection.cursor()",
+    ("SQL", "CLOSE"): "cursor.close()",
+    ("SQL", "FETCH"): "row = cursor.fetchone()",
+    ("SQL", "COMMIT"): "connection.commit()",
+    ("SQL", "ROLLBACK"): "connection.rollback()",
+    ("SQL", "DECLARE"): "cursor declaration (prepare SQL)",
+    ("DLI", "GU"): "DL/I Get Unique -> db query by key",
+    ("DLI", "GN"): "DL/I Get Next -> cursor.fetchone()",
+    ("DLI", "ISRT"): "DL/I Insert -> cursor.execute('INSERT ...')",
+    ("DLI", "REPL"): "DL/I Replace -> cursor.execute('UPDATE ...')",
+    ("DLI", "DLET"): "DL/I Delete -> cursor.execute('DELETE ...')",
+}
+
+# Regex to find the first verb/keyword after EXEC TYPE
+_EXEC_VERB_RE = re.compile(
+    r"EXEC\s+\w+\s+(\w+)", re.IGNORECASE,
+)
+
+
+def _exec_hint(exec_type: str, original_text: str) -> str:
+    """Return a Python-equivalent hint for an EXEC block, or empty string."""
+    m = _EXEC_VERB_RE.search(original_text)
+    if not m:
+        return ""
+    verb = m.group(1).upper()
+    hint = _EXEC_HINTS.get((exec_type, verb), "")
+    return hint
+
+
+def strip_exec_blocks(raw_text: str) -> str:
     """Replace EXEC CICS/SQL ... END-EXEC blocks with TODO comments."""
     lines = raw_text.splitlines()
     result: list[str] = []
@@ -219,6 +264,7 @@ def _strip_exec_blocks(raw_text: str) -> str:
                 original_parts.append(part)
         original_text = " ".join(original_parts)
 
+        hint = _exec_hint(exec_type, original_text)
         result.append(
             f"      * TODO(high): EXEC {exec_type} block "
             f"— requires manual translation"
@@ -226,6 +272,8 @@ def _strip_exec_blocks(raw_text: str) -> str:
         result.append(
             f"      * Original: {original_text}"
         )
+        if hint:
+            result.append(f"      * Hint: {hint}")
 
     return "\n".join(result)
 
@@ -248,11 +296,16 @@ def resolve_copies(
     result = raw_text
 
     # Resolve COPY statements if search paths are provided
+    # Loop to handle nested COPYs (copybooks that contain COPY statements)
     if copybook_paths:
         paths = [Path(p) for p in copybook_paths]
-        result = _resolve_copy_statements(result, paths)
+        for _ in range(10):  # max 10 passes to prevent infinite cycles
+            resolved = _resolve_copy_statements(result, paths)
+            if resolved == result:
+                break  # no more changes
+            result = resolved
 
     # Always strip EXEC blocks
-    result = _strip_exec_blocks(result)
+    result = strip_exec_blocks(result)
 
     return result

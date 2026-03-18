@@ -459,6 +459,10 @@ def parse_cobol(
             If provided, the preprocessor resolves COPY statements and
             strips EXEC CICS/SQL blocks before parsing.
     """
+    from .preprocessor import strip_exec_blocks
+    # Always strip EXEC blocks (even without copybook resolution)
+    source = strip_exec_blocks(source)
+
     if copybook_paths is not None:
         from .preprocessor import resolve_copies
         source = resolve_copies(source, copybook_paths)

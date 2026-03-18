@@ -154,10 +154,12 @@ class TestFileAdapter:
         assert fa.eof is True
         fa.close()
 
-    def test_no_write_method(self):
+    def test_write_methods_exist(self):
         fa = FileAdapter("dummy.dat")
-        assert not hasattr(fa, "write")
-        assert not hasattr(fa, "open_output")
+        assert hasattr(fa, "write")
+        assert hasattr(fa, "open_output")
+        assert hasattr(fa, "open_extend")
+        assert hasattr(fa, "open_io")
 
     def test_read_before_open_raises(self):
         fa = FileAdapter("dummy.dat")

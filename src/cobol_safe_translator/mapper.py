@@ -33,6 +33,7 @@ from . import string_translators as strt
 from .utils import (
     FIGURATIVE_RESOLVE,
     _is_numeric_literal,
+    _sanitize_numeric,
     _to_method_name,
     _to_python_name,
     resolve_operand as _resolve_operand_base,
@@ -64,12 +65,12 @@ class PythonMapper:
             for cond in item.conditions:
                 if cond.values:
                     val = cond.values[0]
-                    val = repr(val) if not _is_numeric_literal(val) else val
+                    val = repr(val) if not _is_numeric_literal(val) else _sanitize_numeric(val)
                     self._condition_lookup[cond.name.upper()] = (py_name, val)
                 elif cond.thru_ranges:
                     lo, hi = cond.thru_ranges[0]
-                    lo_val = repr(lo) if not _is_numeric_literal(lo) else lo
-                    hi_val = repr(hi) if not _is_numeric_literal(hi) else hi
+                    lo_val = repr(lo) if not _is_numeric_literal(lo) else _sanitize_numeric(lo)
+                    hi_val = repr(hi) if not _is_numeric_literal(hi) else _sanitize_numeric(hi)
                     self._condition_lookup[cond.name.upper()] = (py_name, f"({lo_val}, {hi_val})")
             for child in item.children:
                 self._build_condition_lookup([child])
@@ -340,7 +341,7 @@ class PythonMapper:
         elif verb == "READ":
             return self._translate_read(ops, stmt.raw_text)
         elif verb == "WRITE":
-            return [f"# TODO(high): WRITE — file writing not supported (safety)", f"# {stmt.raw_text}"]
+            return st.translate_write(ops)
         elif verb == "CALL":
             return self._translate_call(ops)
         elif verb == "STOP":
@@ -415,8 +416,23 @@ class PythonMapper:
     def _translate_compute(self, ops: list[str]) -> list[str]:
         return st.translate_compute(ops, self._resolve_operand)
 
+    def _get_paragraph_range(self, start: str, end: str) -> list[str]:
+        """Return paragraph names from start to end (inclusive), preserving order."""
+        names = [p.name.upper() for p in self.program.paragraphs]
+        s_upper, e_upper = start.upper(), end.upper()
+        if s_upper not in names or e_upper not in names:
+            return [start]  # fallback: can't find range
+        s_idx = names.index(s_upper)
+        e_idx = names.index(e_upper)
+        if e_idx < s_idx:
+            return [start]  # inverted range: fallback
+        return [self.program.paragraphs[i].name for i in range(s_idx, e_idx + 1)]
+
     def _translate_perform(self, ops: list[str], raw: str) -> list[str]:
-        return st.translate_perform(ops, raw, self._translate_condition)
+        return st.translate_perform(
+            ops, raw, self._translate_condition,
+            get_paragraph_range=self._get_paragraph_range,
+        )
 
     def _translate_condition(self, cond: str) -> str:
         """Two-pass COBOL condition to Python expression translator.
