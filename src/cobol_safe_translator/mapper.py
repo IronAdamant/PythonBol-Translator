@@ -388,6 +388,8 @@ class PythonMapper:
             return self._translate_initialize(ops)
         elif verb in ("NOT", "AT"):
             return [f"# {stmt.raw_text}"]
+        elif verb.startswith("END-"):
+            return []  # scope terminators — silently consumed
         else:
             return [f"# TODO(high): unsupported verb {verb}", f"# {stmt.raw_text}"]
 

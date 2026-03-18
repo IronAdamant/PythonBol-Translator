@@ -174,11 +174,9 @@ def _handle_conjunction(tokens: list[str], i: int, n: int, result: list[str],
         return i
     next_upper = _upper(tokens[i])
 
-    # NOT followed by 88-level or class condition — new sub-expression, no implied subject
-    if next_upper == 'NOT' and i + 1 < n:
-        peek = _upper(tokens[i + 1])
-        if peek in condition_lookup or peek in ('NUMERIC', 'ALPHABETIC'):
-            return i  # let _handle_not deal with it
+    # NOT starts a new sub-expression — never insert implied subject before it
+    if next_upper == 'NOT':
+        return i
 
     # Abbreviated: AND/OR followed by comparison op (no left operand)
     if next_upper in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL', 'NOT'):

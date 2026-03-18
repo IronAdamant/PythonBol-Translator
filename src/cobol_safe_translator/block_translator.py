@@ -252,10 +252,10 @@ def translate_evaluate_block(
             keyword = f"{prefix} {cond}:"
 
         lines.append(_indent_line(keyword, indent))
-        if not body:
-            lines.append(_indent_line("pass", indent + 1))
-        else:
-            lines.extend(body)
+        has_code = any(ln.strip() and not ln.strip().startswith("#") for ln in body)
+        if not has_code:
+            body.append(_indent_line("pass", indent + 1))
+        lines.extend(body)
 
     if not lines:
         lines.append(
