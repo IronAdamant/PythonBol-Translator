@@ -46,6 +46,8 @@ _COBOL_KEYWORDS = frozenset({
     'OF', 'IN',
 })
 
+_ARITH_OPS = frozenset({'+', '-', '*', '/'})
+
 _OP_KEYWORDS = frozenset({
     'AND', 'OR', 'NOT', '(', ')', 'NUMERIC', 'ALPHABETIC', 'POSITIVE', 'NEGATIVE',
 })
@@ -101,9 +103,13 @@ def tokenize_condition(cond: str) -> list[str]:
             else:
                 tokens.append(ch)
                 i += 1
+        elif ch in ('+', '*', '/'):
+            # Arithmetic operators in conditions (e.g., "X + Y > Z")
+            tokens.append(ch)
+            i += 1
         else:
             j = i
-            while j < n and cond[j] not in (' ', '\t', '(', ')', '=', '>', '<', '"', "'"):
+            while j < n and cond[j] not in (' ', '\t', '(', ')', '=', '>', '<', '"', "'", '+', '*', '/'):
                 j += 1
             tokens.append(cond[i:j])
             i = j
@@ -151,6 +157,24 @@ def _handle_not(tokens: list[str], i: int, n: int, result: list[str],
             else:
                 result.append(f"not (self.data.{parent}.value == {val})")
             return i + 2
+        # NOT followed by a value (no operator) → implied NOT EQUAL
+        # e.g., "IF X NOT 0" means "IF X NOT = 0"
+        # But only when there IS a preceding subject (result has a data reference).
+        # If NOT is at the start or after AND/OR, it's negating a condition name.
+        # Also, NOT before a subject with a comparison after it is standalone NOT.
+        if (nxt not in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL',
+                         'AND', 'OR', '(', ')')
+                and nxt not in _SIGN_WORDS and nxt not in _OP_KEYWORDS):
+            # Check there's a preceding subject (not at start, not after and/or)
+            has_subject = (result and result[-1] not in ('and', 'or', 'not', '('))
+            # Check if the token AFTER the value is a comparison → standalone NOT
+            peek_after_val = _upper(tokens[i + 2]) if i + 2 < n else ''
+            is_followed_by_cmp = peek_after_val in ('>', '<', '=', '>=', '<=',
+                                                      'GREATER', 'LESS', 'EQUAL',
+                                                      'NOT', '+', '-', '*', '/')
+            if has_subject and not is_followed_by_cmp:
+                result.append("!=")
+                return i + 1  # consume NOT, leave value for next iteration
     result.append("not")
     return i + 1
 
@@ -168,9 +192,15 @@ def _handle_conjunction(tokens: list[str], i: int, n: int, result: list[str],
         return i
 
     # Abbreviated: AND/OR followed by comparison op (no left operand)
+    # Also check for NOT followed by comparison (e.g., AND NOT = 'X')
     if next_upper in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL'):
         if last_subject:
             result.append(last_subject)
+    elif next_upper == 'NOT' and i + 1 < n:
+        peek_after_not = _upper(tokens[i + 1]) if i + 1 < n else ''
+        if peek_after_not in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL'):
+            if last_subject:
+                result.append(last_subject)
     else:
         # Implied subject: value without operator follows AND/OR
         is_value = (next_upper not in _OP_KEYWORDS
@@ -279,6 +309,10 @@ def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) ->
             op = _SINGLE_OPS[t]
             result.append(op)
             last_op = op
+            i += 1
+            continue
+        if t in _ARITH_OPS:
+            result.append(t)
             i += 1
             continue
         if t in condition_lookup:

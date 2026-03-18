@@ -378,6 +378,9 @@ class PythonMapper:
             elif ops and ops[0].upper() == "PERFORM":
                 return ["break  # EXIT PERFORM"]
             return ["pass  # EXIT"]
+        elif verb == "NEXT":
+            # NEXT SENTENCE — skip to the next sentence (period-terminated)
+            return ["pass  # NEXT SENTENCE"]
         elif verb == "CONTINUE":
             return ["pass  # CONTINUE"]
         elif verb == "ACCEPT":
