@@ -8,7 +8,6 @@ to preserve COBOL semantics.
 
 from __future__ import annotations
 
-import keyword
 import re
 import textwrap
 from datetime import datetime
@@ -31,49 +30,12 @@ from .models import (
     SoftwareMap,
 )
 from . import statement_translators as st
-
-
-def _is_numeric_literal(s: str) -> bool:
-    """Check if a string is a numeric literal (integer or decimal)."""
-    if not s:
-        return False
-    # Handle sign prefix
-    check = s[1:] if s[0] in ("-", "+") and len(s) > 1 else s
-    # Must have at least one digit and only digits/one decimal point
-    parts = check.split(".")
-    if len(parts) == 1:
-        return parts[0].isdigit()
-    if len(parts) == 2:
-        return (parts[0].isdigit() or parts[0] == "") and (parts[1].isdigit() or parts[1] == "")
-    return False
-
-
-def _to_python_name(cobol_name: str) -> str:
-    """Convert COBOL data name to a valid Python identifier.
-
-    Handles: hyphens -> underscores, digit-leading names, Python keyword collisions.
-    """
-    name = cobol_name.lower().replace("-", "_")
-    # Prefix with underscore if name starts with a digit
-    if name and name[0].isdigit():
-        name = f"f_{name}"
-    # Suffix with underscore if name collides with a Python keyword
-    if keyword.iskeyword(name):
-        name = f"{name}_"
-    # Remove any remaining invalid characters
-    name = re.sub(r"[^\w]", "_", name)
-    return name or "_unnamed"
-
-
-_RESERVED_METHOD_NAMES = frozenset({"run", "__init__", "data"})
-
-
-def _to_method_name(para_name: str) -> str:
-    """Convert COBOL paragraph name to Python method name."""
-    name = _to_python_name(para_name)
-    if name in _RESERVED_METHOD_NAMES:
-        name = f"para_{name}"
-    return name
+from .utils import (
+    FIGURATIVE_RESOLVE,
+    _is_numeric_literal,
+    _to_method_name,
+    _to_python_name,
+)
 
 
 def _indent(text: str, level: int = 1) -> str:
@@ -413,15 +375,9 @@ class PythonMapper:
             return op
         if _is_numeric_literal(op):
             return op
-        upper = op.upper()
-        if upper in ("ZEROS", "ZEROES", "ZERO"):
-            return "0"
-        if upper in ("SPACES", "SPACE"):
-            return "' '"
-        if upper in ("HIGH-VALUES", "HIGH-VALUE"):
-            return "'\\xff'"
-        if upper in ("LOW-VALUES", "LOW-VALUE"):
-            return "'\\x00'"
+        fig = FIGURATIVE_RESOLVE.get(op.upper())
+        if fig is not None:
+            return fig
         return f"self.data.{_to_python_name(op)}.value"
 
     def _translate_add(self, ops: list[str]) -> list[str]:
@@ -537,14 +493,8 @@ class PythonMapper:
                     result.append("True  # TODO(high): IS NOT ALPHABETIC — no subject found")
             elif _is_numeric_literal(t):
                 result.append(t)
-            elif t.upper() in ("ZERO", "ZEROS", "ZEROES"):
-                result.append("0")
-            elif t.upper() in ("SPACE", "SPACES"):
-                result.append("' '")
-            elif t.upper() in ("HIGH-VALUE", "HIGH-VALUES"):
-                result.append("'\\xff'")
-            elif t.upper() in ("LOW-VALUE", "LOW-VALUES"):
-                result.append("'\\x00'")
+            elif t.upper() in FIGURATIVE_RESOLVE:
+                result.append(FIGURATIVE_RESOLVE[t.upper()])
             else:
                 result.append(f"self.data.{_to_python_name(t)}.value")
         # Post-process: wrap "not X op Y" into "not (X op Y)" to fix

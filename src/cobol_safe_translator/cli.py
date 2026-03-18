@@ -9,7 +9,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import copy
 import sys
 from pathlib import Path
 
@@ -51,10 +50,6 @@ def red(text: str) -> str:
 
 def bold(text: str) -> str:
     return _c("1", text)
-
-
-def cyan(text: str) -> str:
-    return _c("36", text)
 
 
 # --- Shared helpers ---

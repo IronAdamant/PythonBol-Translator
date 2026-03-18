@@ -12,58 +12,16 @@ and the return value is a list of Python source lines.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
 from .models import CobolStatement
-
-if TYPE_CHECKING:
-    pass
-
-
-def _to_python_name(cobol_name: str) -> str:
-    """Convert COBOL data name to a valid Python identifier.
-
-    Re-exported here to avoid circular imports. The canonical version
-    lives in mapper.py.
-    """
-    import keyword
-    import re
-
-    name = cobol_name.lower().replace("-", "_")
-    if name and name[0].isdigit():
-        name = f"f_{name}"
-    if keyword.iskeyword(name):
-        name = f"{name}_"
-    name = re.sub(r"[^\w]", "_", name)
-    return name or "_unnamed"
-
-
-def _is_numeric_literal(s: str) -> bool:
-    """Check if a string is a numeric literal."""
-    if not s:
-        return False
-    check = s[1:] if s[0] in ("-", "+") and len(s) > 1 else s
-    parts = check.split(".")
-    if len(parts) == 1:
-        return parts[0].isdigit()
-    if len(parts) == 2:
-        return (parts[0].isdigit() or parts[0] == "") and (parts[1].isdigit() or parts[1] == "")
-    return False
+from .utils import _is_numeric_literal, _to_method_name, _to_python_name
 
 
 # Keywords that should be filtered from arithmetic operand/target lists
 _ARITHMETIC_KEYWORDS = frozenset({
     "ROUNDED", "ON", "SIZE", "ERROR", "NOT",
 })
-
-
-def _to_method_name(para_name: str) -> str:
-    """Convert COBOL paragraph name to Python method name."""
-    _RESERVED = frozenset({"run", "__init__", "data"})
-    name = _to_python_name(para_name)
-    if name in _RESERVED:
-        name = f"para_{name}"
-    return name
 
 
 def translate_display(
@@ -111,16 +69,10 @@ def translate_move(ops: list[str]) -> list[str]:
         src_expr = source
     elif source.upper().startswith("FUNCTION"):
         return ["# TODO(high): MOVE FUNCTION — manual translation required"]
-    elif source.upper() in ("ZEROS", "ZEROES", "ZERO"):
-        src_expr = "0"
-    elif source.upper() in ("SPACES", "SPACE"):
-        src_expr = "' '"
-    elif source.upper() in ("HIGH-VALUES", "HIGH-VALUE"):
-        src_expr = "'\\xff'"
-    elif source.upper() in ("LOW-VALUES", "LOW-VALUE"):
-        src_expr = "'\\x00'"
     else:
-        src_expr = f"self.data.{_to_python_name(source)}.value"
+        from .utils import FIGURATIVE_RESOLVE
+        fig = FIGURATIVE_RESOLVE.get(source.upper())
+        src_expr = fig if fig is not None else f"self.data.{_to_python_name(source)}.value"
 
     results: list[str] = []
     for t in targets:
@@ -255,6 +207,38 @@ def translate_multiply(
     return [f"# MULTIPLY: could not parse operands: {' '.join(ops)}"]
 
 
+def _divide_giving_results(
+    ops: list[str], giving_idx: int, dividend: str, divisor: str,
+) -> list[str]:
+    """Parse GIVING targets and optional REMAINDER, returning translated lines."""
+    giving_targets: list[str] = []
+    has_remainder = False
+    remainder_target = None
+    i = giving_idx + 1
+    while i < len(ops):
+        upper_op = ops[i].upper()
+        if upper_op == "REMAINDER":
+            has_remainder = True
+            if i + 1 < len(ops):
+                remainder_target = ops[i + 1]
+                i += 2
+            else:
+                i += 1
+            continue
+        if upper_op in _ARITHMETIC_KEYWORDS:
+            break
+        if upper_op != "ROUNDED":
+            giving_targets.append(ops[i])
+        i += 1
+    results = ["# TODO: verify divisor is non-zero before division (COBOL EC-SIZE-ZERO-DIVIDE)"]
+    for t in giving_targets:
+        results.append(f"self.data.{_to_python_name(t)}.set({dividend} / {divisor})")
+    if has_remainder and remainder_target:
+        results.append(f"# TODO(high): REMAINDER {remainder_target} — compute modulo manually")
+        results.append(f"# self.data.{_to_python_name(remainder_target)}.set({dividend} % {divisor})")
+    return results
+
+
 def translate_divide(
     ops: list[str],
     resolve: Callable[[str], str],
@@ -269,38 +253,12 @@ def translate_divide(
         if "GIVING" in upper_ops:
             giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
             dividend = resolve(ops[into_idx + 1]) if into_idx + 1 < len(ops) and into_idx + 1 < giving_idx else "0"
-            giving_targets = []
-            has_remainder = False
-            remainder_target = None
-            i = giving_idx + 1
-            while i < len(ops):
-                upper_op = ops[i].upper()
-                if upper_op == "REMAINDER":
-                    has_remainder = True
-                    if i + 1 < len(ops):
-                        remainder_target = ops[i + 1]
-                        i += 2
-                    else:
-                        i += 1
-                    continue
-                if upper_op in _ARITHMETIC_KEYWORDS:
-                    break
-                if upper_op != "ROUNDED":
-                    giving_targets.append(ops[i])
-                i += 1
-            results: list[str] = []
-            results.append("# TODO: verify divisor is non-zero before division (COBOL EC-SIZE-ZERO-DIVIDE)")
-            for t in giving_targets:
-                results.append(f"self.data.{_to_python_name(t)}.set({dividend} / {divisor})")
-            if has_remainder and remainder_target:
-                results.append(f"# TODO(high): REMAINDER {remainder_target} — compute modulo manually")
-                results.append(f"# self.data.{_to_python_name(remainder_target)}.set({dividend} % {divisor})")
-            return results
+            return _divide_giving_results(ops, giving_idx, dividend, divisor)
         raw_targets = ops[into_idx + 1:]
         targets = [t for t in raw_targets if t.upper() not in _ARITHMETIC_KEYWORDS and t.upper() != "ROUNDED"]
         if not targets:
             return [f"# DIVIDE: missing target operand: {' '.join(ops)}"]
-        results = []
+        results: list[str] = []
         for t in targets:
             results.append(f"self.data.{_to_python_name(t)}.divide({divisor})")
         return results
@@ -312,33 +270,7 @@ def translate_divide(
         if "GIVING" in upper_ops:
             giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
             divisor = resolve(ops[by_idx + 1]) if by_idx + 1 < len(ops) and by_idx + 1 < giving_idx else "1"
-            giving_targets = []
-            has_remainder = False
-            remainder_target = None
-            i = giving_idx + 1
-            while i < len(ops):
-                upper_op = ops[i].upper()
-                if upper_op == "REMAINDER":
-                    has_remainder = True
-                    if i + 1 < len(ops):
-                        remainder_target = ops[i + 1]
-                        i += 2
-                    else:
-                        i += 1
-                    continue
-                if upper_op in _ARITHMETIC_KEYWORDS:
-                    break
-                if upper_op != "ROUNDED":
-                    giving_targets.append(ops[i])
-                i += 1
-            results = []
-            results.append("# TODO: verify divisor is non-zero before division (COBOL EC-SIZE-ZERO-DIVIDE)")
-            for t in giving_targets:
-                results.append(f"self.data.{_to_python_name(t)}.set({dividend} / {divisor})")
-            if has_remainder and remainder_target:
-                results.append(f"# TODO(high): REMAINDER {remainder_target} — compute modulo manually")
-                results.append(f"# self.data.{_to_python_name(remainder_target)}.set({dividend} % {divisor})")
-            return results
+            return _divide_giving_results(ops, giving_idx, dividend, divisor)
         if by_idx + 1 >= len(ops):
             return [f"# DIVIDE BY: missing divisor: {' '.join(ops)}"]
         divisor = resolve(ops[by_idx + 1])

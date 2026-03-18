@@ -8,11 +8,10 @@ Pipeline position: Called by mapper.py during paragraph method generation.
 
 from __future__ import annotations
 
-import keyword
-import re
 from typing import Callable
 
 from .models import CobolStatement
+from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _to_python_name
 
 _BLOCK_OPENERS = frozenset({"IF", "EVALUATE"})
 
@@ -270,36 +269,12 @@ def _fallback_resolve(op: str) -> str:
     """
     if (op.startswith('"') and op.endswith('"')) or (op.startswith("'") and op.endswith("'")):
         return op
-    # Numeric literal check
-    check = op
-    if check and check[0] in ("-", "+") and len(check) > 1:
-        check = check[1:]
-    parts = check.split(".")
-    is_numeric = False
-    if len(parts) == 1 and parts[0].isdigit():
-        is_numeric = True
-    elif len(parts) == 2 and (parts[0].isdigit() or parts[0] == "") and (parts[1].isdigit() or parts[1] == ""):
-        is_numeric = True
-    if is_numeric:
+    if _is_numeric_literal(op):
         return op
-    upper = op.upper()
-    if upper in ("ZEROS", "ZEROES", "ZERO"):
-        return "0"
-    if upper in ("SPACES", "SPACE"):
-        return "' '"
-    if upper in ("HIGH-VALUES", "HIGH-VALUE"):
-        return "'\\xff'"
-    if upper in ("LOW-VALUES", "LOW-VALUE"):
-        return "'\\x00'"
-    # Convert to Python name
-    name = op.lower().replace("-", "_")
-    if name and name[0].isdigit():
-        name = f"f_{name}"
-    if keyword.iskeyword(name):
-        name = f"{name}_"
-    name = re.sub(r"[^\w]", "_", name)
-    name = name or "_unnamed"
-    return f"self.data.{name}.value"
+    fig = FIGURATIVE_RESOLVE.get(op.upper())
+    if fig is not None:
+        return fig
+    return f"self.data.{_to_python_name(op)}.value"
 
 
 def is_inline_if(stmt: CobolStatement) -> bool:
