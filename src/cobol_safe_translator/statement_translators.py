@@ -346,7 +346,8 @@ def _merge_spaced_subscripts(tokens: list[str]) -> list[str]:
                     depth -= 1
                     if depth == 0:
                         break
-                inner_tokens.append(tokens[j])
+                if tokens[j] != ",":  # skip standalone commas
+                    inner_tokens.append(tokens[j])
                 j += 1
             # Merge: attach (inner) to the identifier
             inner = " ".join(inner_tokens)
@@ -456,6 +457,70 @@ def translate_compute(
     return [f"# COMPUTE: could not parse operands: {' '.join(ops)}"]
 
 
+def _parse_varying_clause(
+    ops: list[str],
+    start_idx: int,
+) -> tuple[str, str, str, list[str], int] | None:
+    """Parse a single VARYING/AFTER clause starting at *start_idx*.
+
+    Expected token sequence (starting after VARYING or AFTER [VARYING]):
+        variable FROM start BY step UNTIL cond-tokens...
+
+    The condition tokens extend until the next AFTER keyword or end of *ops*.
+
+    Returns (variable, from_val, by_val, cond_parts, end_idx) or None on
+    parse failure.  *end_idx* is the index of the first token after this
+    clause (the next AFTER, or len(ops)).
+    """
+    upper_ops = [o.upper() for o in ops]
+    n = len(ops)
+
+    # Skip optional VARYING after AFTER
+    idx = start_idx
+    if idx < n and upper_ops[idx] == "VARYING":
+        idx += 1
+
+    # variable
+    if idx >= n:
+        return None
+    variable = ops[idx]
+    idx += 1
+
+    # FROM
+    if idx >= n or upper_ops[idx] != "FROM":
+        return None
+    idx += 1
+    if idx >= n:
+        return None
+    from_val = ops[idx]
+    idx += 1
+
+    # BY
+    if idx >= n or upper_ops[idx] != "BY":
+        return None
+    idx += 1
+    if idx >= n:
+        return None
+    by_val = ops[idx]
+    idx += 1
+
+    # UNTIL
+    if idx >= n or upper_ops[idx] != "UNTIL":
+        return None
+    idx += 1
+
+    # Condition tokens: everything until next AFTER or end
+    cond_parts: list[str] = []
+    while idx < n and upper_ops[idx] != "AFTER":
+        cond_parts.append(ops[idx])
+        idx += 1
+
+    if not cond_parts:
+        return None
+
+    return (variable, from_val, by_val, cond_parts, idx)
+
+
 def _translate_perform_varying(
     ops: list[str],
     raw: str,
@@ -463,32 +528,14 @@ def _translate_perform_varying(
 ) -> list[str]:
     """Translate PERFORM [para] VARYING var FROM start BY step UNTIL cond.
 
-    Supports single-variable VARYING only.  Multi-VARYING (nested loops) and
-    any missing/out-of-order keyword fall back to TODO(high).
+    Supports single-variable and multi-VARYING (AFTER) nested loops.
     """
     upper_ops = [o.upper() for o in ops]
 
-    # Reject multi-VARYING (nested loops not supported)
-    if upper_ops.count("VARYING") > 1:
-        return [
-            f"# PERFORM VARYING (multi): {raw}",
-            f"# TODO(high): multi-VARYING nested loops require manual translation",
-        ]
-
-    # Locate required keywords
+    # Locate the first VARYING keyword
     try:
         varying_idx = upper_ops.index("VARYING")
-        from_idx = upper_ops.index("FROM")
-        by_idx = upper_ops.index("BY")
-        until_idx = upper_ops.index("UNTIL")
     except ValueError:
-        return [
-            f"# PERFORM VARYING: {raw}",
-            f"# TODO(high): PERFORM VARYING requires manual translation (FROM/BY/UNTIL clauses)",
-        ]
-
-    # Validate keyword order
-    if not (varying_idx < from_idx < by_idx < until_idx):
         return [
             f"# PERFORM VARYING: {raw}",
             f"# TODO(high): PERFORM VARYING requires manual translation (FROM/BY/UNTIL clauses)",
@@ -501,40 +548,68 @@ def _translate_perform_varying(
     else:
         para_call = f"self.{_to_method_name(ops[0])}()"
 
-    # Extract loop components
-    loop_var = ops[varying_idx + 1] if varying_idx + 1 < from_idx else None
-    start_val = ops[from_idx + 1] if from_idx + 1 < by_idx else None
-    step_val = ops[by_idx + 1] if by_idx + 1 < until_idx else None
-    cond_parts = ops[until_idx + 1:]
+    # ---- Parse all VARYING / AFTER clauses ----
+    clauses: list[tuple[str, str, str, list[str]]] = []
 
-    if not loop_var or not start_val or not step_val or not cond_parts:
+    # First clause starts at the VARYING keyword
+    parsed = _parse_varying_clause(ops, varying_idx)
+    if parsed is None:
         return [
             f"# PERFORM VARYING: {raw}",
             f"# TODO(high): PERFORM VARYING requires manual translation (FROM/BY/UNTIL clauses)",
         ]
+    variable, from_val, by_val, cond_parts, next_idx = parsed
+    clauses.append((variable, from_val, by_val, cond_parts))
 
-    if _is_numeric_literal(step_val) and float(step_val) == 0:
-        return [
-            f"# PERFORM VARYING: {raw}",
-            f"# TODO(high): PERFORM VARYING with zero step would generate infinite loop — manual translation required",
-        ]
+    # Subsequent AFTER clauses
+    while next_idx < len(ops) and upper_ops[next_idx] == "AFTER":
+        parsed = _parse_varying_clause(ops, next_idx + 1)
+        if parsed is None:
+            return [
+                f"# PERFORM VARYING: {raw}",
+                f"# TODO(high): PERFORM VARYING AFTER requires manual translation",
+            ]
+        variable, from_val, by_val, cond_parts, next_idx = parsed
+        clauses.append((variable, from_val, by_val, cond_parts))
 
-    py_var = _to_python_name(loop_var)
-    start_expr = start_val if _is_numeric_literal(start_val) else f"self.data.{_to_python_name(start_val)}.value"
-    step_expr = step_val if _is_numeric_literal(step_val) else f"self.data.{_to_python_name(step_val)}.value"
-    cond = " ".join(cond_parts)
-    translated_cond = translate_condition(cond)
+    # ---- Validate: reject zero step in any clause ----
+    for variable, from_val, by_val, cond_parts in clauses:
+        if _is_numeric_literal(by_val) and float(by_val) == 0:
+            return [
+                f"# PERFORM VARYING: {raw}",
+                f"# TODO(high): PERFORM VARYING with zero step would generate infinite loop — manual translation required",
+            ]
 
-    lines = [
-        f"# PERFORM VARYING {loop_var} FROM {start_val} BY {step_val} UNTIL {cond}",
-        f"self.data.{py_var}.set({start_expr})",
-        f"while not ({translated_cond}):",
-    ]
+    # ---- Generate nested loop code ----
+    lines: list[str] = [f"# {raw}"]
+    depth = len(clauses)
+
+    # Emit initialisation + while-not for each level
+    for level, (variable, from_val, by_val, cond_parts) in enumerate(clauses):
+        indent = "    " * level
+        py_var = _to_python_name(variable)
+        start_expr = from_val if _is_numeric_literal(from_val) else f"self.data.{_to_python_name(from_val)}.value"
+        cond = " ".join(cond_parts)
+        translated_cond = translate_condition(cond)
+
+        lines.append(f"{indent}self.data.{py_var}.set({start_expr})")
+        lines.append(f"{indent}while not ({translated_cond}):")
+
+    # Emit the body (paragraph call or inline TODO) at innermost depth
+    inner_indent = "    " * depth
     if para_call:
-        lines.append(f"    {para_call}")
+        lines.append(f"{inner_indent}{para_call}")
     else:
-        lines.append(f"    pass  # TODO(high): inline PERFORM VARYING — statements should be moved here")
-    lines.append(f"    self.data.{py_var}.add({step_expr})")
+        lines.append(f"{inner_indent}pass  # TODO(high): inline PERFORM VARYING — statements should be moved here")
+
+    # Emit step increments from innermost to outermost
+    for level in range(depth - 1, -1, -1):
+        variable, from_val, by_val, cond_parts = clauses[level]
+        step_indent = "    " * (level + 1)
+        py_var = _to_python_name(variable)
+        step_expr = by_val if _is_numeric_literal(by_val) else f"self.data.{_to_python_name(by_val)}.value"
+        lines.append(f"{step_indent}self.data.{py_var}.add({step_expr})")
+
     return lines
 
 

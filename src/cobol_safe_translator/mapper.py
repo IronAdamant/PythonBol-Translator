@@ -214,6 +214,16 @@ class PythonMapper:
         if item.children:
             # Group item — add a comment
             lines.append(f"{prefix}# Group: {item.name} (level {item.level:02d})")
+            # TODO(high): nested OCCURS — when a group with OCCURS contains children
+            # that also have OCCURS, the generated dataclass fields should produce
+            # nested list structures (lists of lists) for proper multi-dimensional
+            # table access.  Currently each OCCURS level is generated independently.
+            if item.occurs and any(c.occurs for c in item.children):
+                lines.append(
+                    f"{prefix}# TODO(high): nested OCCURS detected — "
+                    f"{item.name} OCCURS {item.occurs} with child OCCURS; "
+                    f"manual nested-list initialisation required"
+                )
             for child in item.children:
                 lines.extend(self._data_item_fields(child, indent))
         elif item.pic:

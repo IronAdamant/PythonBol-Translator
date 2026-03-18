@@ -130,7 +130,7 @@ class TestPerformVarying:
         source = generate_python(smap)
         ast.parse(source)
         assert "while not" in source
-        assert "PERFORM VARYING" in source
+        assert "VARYING" in source
 
 
 class TestPerformThru:
@@ -205,8 +205,29 @@ class TestPerformVaryingLoop:
         assert "while not" in source
         assert "TODO(high)" in source  # inline body needs manual fill
 
-    def test_varying_multi_fallback(self):
-        """Multi-VARYING (nested loops) falls back to TODO(high)."""
+    def test_varying_multi_two_level(self):
+        """Multi-VARYING (VARYING + AFTER) generates nested while loops."""
+        src = make_cobol([
+            "PERFORM MAIN-PARA VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 3",
+            "    AFTER WS-B FROM 1 BY 1 UNTIL WS-B > 5.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # Outer loop: WS-A
+        assert "ws_a.set(1)" in source
+        assert "ws_a.add(1)" in source
+        # Inner loop: WS-B
+        assert "ws_b.set(1)" in source
+        assert "ws_b.add(1)" in source
+        # Two nested while loops
+        assert source.count("while not") >= 2
+        # Paragraph call in innermost loop
+        assert "self.main_para()" in source
+
+    def test_varying_multi_after_varying_syntax(self):
+        """AFTER VARYING (with optional VARYING keyword) also generates nested loops."""
         src = make_cobol([
             "PERFORM MAIN-PARA VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 3",
             "    AFTER VARYING WS-B FROM 1 BY 1 UNTIL WS-B > 3.",
@@ -215,7 +236,48 @@ class TestPerformVaryingLoop:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "TODO(high)" in source
+        assert source.count("while not") >= 2
+        assert "ws_a.set(" in source
+        assert "ws_b.set(" in source
+
+    def test_varying_multi_three_level(self):
+        """Three-level VARYING (VARYING + AFTER + AFTER) generates 3 nested loops."""
+        src = make_cobol([
+            "PERFORM MAIN-PARA VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 3",
+            "    AFTER WS-B FROM 1 BY 1 UNTIL WS-B > 5",
+            "    AFTER WS-C FROM 1 BY 1 UNTIL WS-C > 2.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # Three nested while loops
+        assert source.count("while not") >= 3
+        # All three vars initialised and incremented
+        assert "ws_a.set(1)" in source
+        assert "ws_b.set(1)" in source
+        assert "ws_c.set(1)" in source
+        assert "ws_a.add(1)" in source
+        assert "ws_b.add(1)" in source
+        assert "ws_c.add(1)" in source
+
+    def test_varying_multi_inline(self):
+        """Multi-VARYING inline (no paragraph) generates nested loops with TODO."""
+        src = make_cobol([
+            "PERFORM VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 3",
+            "    AFTER WS-B FROM 1 BY 1 UNTIL WS-B > 5.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert source.count("while not") >= 2
+        assert "TODO(high)" in source  # inline body needs manual fill
+        # Inside the while loop body there should be pass+TODO, not a paragraph call
+        # (self.main_para() exists in run() but not inside the loops)
+        loop_lines = [l.strip() for l in source.split("\n")
+                      if "while not" in l or "pass" in l]
+        assert any("pass" in l for l in loop_lines)
 
     def test_varying_missing_keyword_fallback(self):
         """PERFORM VARYING without UNTIL falls back to TODO(high)."""

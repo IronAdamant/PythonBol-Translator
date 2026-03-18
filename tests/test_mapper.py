@@ -395,3 +395,120 @@ class TestHeaderTripleQuoteEscape:
         smap = SoftwareMap(program=program)
         source = generate_python(smap)
         ast.parse(source)  # must not raise SyntaxError
+
+
+class TestMultiDimSubscripts:
+    """Multi-dimensional OCCURS table subscript resolution."""
+
+    def test_single_numeric_subscript(self):
+        """TABLE(1) should produce table[0].value (unchanged behaviour)."""
+        from cobol_safe_translator.utils import resolve_operand
+        result = resolve_operand("TABLE(1)")
+        assert result == "self.data.table[0].value"
+
+    def test_single_variable_subscript(self):
+        """TABLE(IDX) should produce table[int(self.data.idx.value) - 1].value."""
+        from cobol_safe_translator.utils import resolve_operand
+        result = resolve_operand("TABLE(IDX)")
+        assert result == "self.data.table[int(self.data.idx.value) - 1].value"
+
+    def test_two_numeric_subscripts_space_separated(self):
+        """TABLE(1 2) should produce table[0][1].value (chained indexing)."""
+        from cobol_safe_translator.utils import resolve_operand
+        result = resolve_operand("TABLE(1 2)")
+        assert result == "self.data.table[0][1].value"
+
+    def test_two_numeric_subscripts_comma_separated(self):
+        """TABLE(1, 2) should produce table[0][1].value."""
+        from cobol_safe_translator.utils import resolve_operand
+        result = resolve_operand("TABLE(1, 2)")
+        assert result == "self.data.table[0][1].value"
+
+    def test_three_numeric_subscripts(self):
+        """TABLE(2 3 4) should produce table[1][2][3].value."""
+        from cobol_safe_translator.utils import resolve_operand
+        result = resolve_operand("TABLE(2 3 4)")
+        assert result == "self.data.table[1][2][3].value"
+
+    def test_two_variable_subscripts(self):
+        """TABLE(I J) should produce chained variable indexing."""
+        from cobol_safe_translator.utils import resolve_operand
+        result = resolve_operand("TABLE(I J)")
+        assert result == (
+            "self.data.table"
+            "[int(self.data.i.value) - 1]"
+            "[int(self.data.j.value) - 1]"
+            ".value"
+        )
+
+    def test_mixed_subscripts_numeric_then_variable(self):
+        """TABLE(1 J) should use literal 0 for first, variable for second."""
+        from cobol_safe_translator.utils import resolve_operand
+        result = resolve_operand("TABLE(1 J)")
+        assert result == (
+            "self.data.table[0]"
+            "[int(self.data.j.value) - 1]"
+            ".value"
+        )
+
+    def test_mixed_subscripts_variable_then_numeric(self):
+        """TABLE(I 2) should use variable for first, literal 1 for second."""
+        from cobol_safe_translator.utils import resolve_operand
+        result = resolve_operand("TABLE(I 2)")
+        assert result == (
+            "self.data.table"
+            "[int(self.data.i.value) - 1]"
+            "[1]"
+            ".value"
+        )
+
+    def test_comma_separated_variables(self):
+        """TABLE(I, J) should produce the same as TABLE(I J)."""
+        from cobol_safe_translator.utils import resolve_operand
+        result = resolve_operand("TABLE(I, J)")
+        assert result == (
+            "self.data.table"
+            "[int(self.data.i.value) - 1]"
+            "[int(self.data.j.value) - 1]"
+            ".value"
+        )
+
+    def test_hyphenated_name_subscript(self):
+        """WS-TABLE(WS-IDX) should handle hyphens in both name and subscript."""
+        from cobol_safe_translator.utils import resolve_operand
+        result = resolve_operand("WS-TABLE(WS-IDX)")
+        assert result == "self.data.ws_table[int(self.data.ws_idx.value) - 1].value"
+
+    def test_three_comma_separated_subscripts(self):
+        """TABLE(1, 2, 3) should produce table[0][1][2].value."""
+        from cobol_safe_translator.utils import resolve_operand
+        result = resolve_operand("TABLE(1, 2, 3)")
+        assert result == "self.data.table[0][1][2].value"
+
+    def test_multidim_in_generated_python(self):
+        """Multi-dim subscript in a DISPLAY should produce valid Python."""
+        src = _make_cobol(
+            procedure_lines=["DISPLAY WS-TABLE(1 2)."],
+            data_lines=[
+                "       01 WS-TABLE PIC 9(5) OCCURS 3.",
+            ],
+        )
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ws_table[0][1].value" in source
+
+    def test_merge_spaced_subscripts_with_commas(self):
+        """_merge_spaced_subscripts should handle comma tokens inside parens."""
+        from cobol_safe_translator.statement_translators import _merge_spaced_subscripts
+        tokens = ["TABLE", "(", "1", ",", "2", ")"]
+        result = _merge_spaced_subscripts(tokens)
+        assert result == ["TABLE(1 2)"]
+
+    def test_merge_spaced_subscripts_comma_attached(self):
+        """_merge_spaced_subscripts should handle comma attached to token (1, 2)."""
+        from cobol_safe_translator.statement_translators import _merge_spaced_subscripts
+        tokens = ["TABLE", "(", "1,", "2", ")"]
+        result = _merge_spaced_subscripts(tokens)
+        assert result == ["TABLE(1, 2)"]

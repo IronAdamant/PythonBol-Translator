@@ -138,28 +138,18 @@ def resolve_operand(op: str) -> str:
     if sm:
         name, idx_str = sm.group(1), sm.group(2).strip()
         py = _to_python_name(name)
-        if _is_numeric_literal(idx_str):
-            # 1-based to 0-based
-            idx_val = int(idx_str) - 1
-            return f"self.data.{py}[{idx_val}].value"
-        # Multi-dimensional subscript: TABLE(1 2) or TABLE(IDX1 IDX2)
-        # Split on whitespace and check if all parts are numeric or identifiers
-        sub_parts = idx_str.split()
-        if len(sub_parts) > 1 and all(_is_numeric_literal(p) for p in sub_parts):
-            # All-numeric multi-dim: use last subscript (innermost) for 0-based
-            last_idx = int(sub_parts[-1]) - 1
-            return f"self.data.{py}[{last_idx}].value"
-        if len(sub_parts) > 1:
-            # Variable multi-dim subscript: use last subscript
-            last_sub = sub_parts[-1]
-            if _is_numeric_literal(last_sub):
-                last_idx = int(last_sub) - 1
-                return f"self.data.{py}[{last_idx}].value"
-            py_idx = _to_python_name(last_sub)
-            return f"self.data.{py}[int(self.data.{py_idx}.value) - 1].value"
-        # Variable subscript
-        py_idx = _to_python_name(idx_str)
-        return f"self.data.{py}[int(self.data.{py_idx}.value) - 1].value"
+        # Normalise subscript separators: commas → spaces, then split
+        normalised = idx_str.replace(",", " ")
+        sub_parts = normalised.split()
+        # Build chained [] indexing for each subscript dimension
+        indices: list[str] = []
+        for part in sub_parts:
+            if _is_numeric_literal(part):
+                indices.append(f"[{int(part) - 1}]")
+            else:
+                py_idx = _to_python_name(part)
+                indices.append(f"[int(self.data.{py_idx}.value) - 1]")
+        return f"self.data.{py}{''.join(indices)}.value"
     # OF/IN qualification: FIELD OF GROUP → take field before OF
     if " OF " in upper or " IN " in upper:
         field = op.split()[0]
