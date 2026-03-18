@@ -164,7 +164,11 @@ def _split_operands(text: str) -> list[str]:
                     tokens.append(current)
                     current = ""
         elif ch == "(":
-            if current and (current[-1].isalnum() or current[-1] in ("-", "_")):
+            if paren_depth > 0:
+                # Already inside attached parens — keep nested ( as part of token
+                current += ch
+                paren_depth += 1
+            elif current and (current[-1].isalnum() or current[-1] in ("-", "_")):
                 # Paren directly after an identifier — reference mod or subscript
                 current += ch
                 paren_depth += 1
