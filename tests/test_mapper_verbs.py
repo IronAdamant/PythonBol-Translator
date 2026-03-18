@@ -295,15 +295,15 @@ class TestMoveCorresponding:
 
 
 class TestMoveAll:
-    def test_move_all_emits_todo(self):
-        """MOVE ALL should emit TODO for character fill."""
+    def test_move_all_generates_fill(self):
+        """MOVE ALL should generate character fill code."""
         src = make_cobol(['MOVE ALL "X" TO WS-A.'])
         program = parse_cobol(src)
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "TODO(high)" in source
-        assert "MOVE ALL" in source
+        assert ".set(" in source
+        assert "'X'" in source
 
 
 class TestMoveFunction:
@@ -508,14 +508,14 @@ class TestRewriteSkeleton:
         assert "REWRITE" in source
         assert "rewrite" in source or "FileAdapter" in source
 
-    def test_rewrite_has_todo_high(self):
-        """REWRITE always emits TODO(high)."""
+    def test_rewrite_generates_write_call(self):
+        """REWRITE should generate a write call."""
         src = make_cobol(["REWRITE CUSTOMER-RECORD."])
         program = parse_cobol(src)
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "TODO(high)" in source
+        assert ".write(" in source
 
 
 class TestGoToNewlineEscape:

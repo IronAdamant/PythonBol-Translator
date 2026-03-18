@@ -109,6 +109,119 @@ def translate_if_block(
     return lines, i
 
 
+def _split_on_also(tokens: list[str]) -> list[list[str]]:
+    """Split a token list on ALSO keyword into sub-lists."""
+    groups: list[list[str]] = [[]]
+    for t in tokens:
+        if t.upper() == "ALSO":
+            groups.append([])
+        else:
+            groups[-1].append(t)
+    return groups
+
+
+def _translate_evaluate_also(
+    stmts: list[CobolStatement],
+    start_idx: int,
+    translate_stmt_fn: Callable[[CobolStatement], list[str]],
+    translate_cond_fn: Callable[[str], str],
+    resolve_operand_fn: Callable[[str], str],
+    indent: int = 0,
+) -> tuple[list[str], int]:
+    """Translate EVALUATE subj1 ALSO subj2 ... with multi-subject WHEN clauses."""
+    eval_stmt = stmts[start_idx]
+    subjects = _split_on_also(eval_stmt.operands)
+
+    # Resolve each subject
+    subject_exprs: list[str | None] = []
+    is_true: list[bool] = []
+    for subj in subjects:
+        subj_text = " ".join(subj).strip().upper()
+        if subj_text == "TRUE":
+            subject_exprs.append(None)
+            is_true.append(True)
+        else:
+            subject_exprs.append(resolve_operand_fn(subj[0]) if subj else "True")
+            is_true.append(False)
+
+    # Collect WHEN clauses
+    when_clauses: list[tuple[list[str], list[str]]] = []
+    current_when_ops: list[str] | None = None
+    current_body: list[str] = []
+    i = start_idx + 1
+
+    while i < len(stmts):
+        stmt = stmts[i]
+        if stmt.verb == "END-EVALUATE":
+            if current_when_ops is not None:
+                when_clauses.append((current_when_ops, current_body))
+            i += 1
+            break
+        if stmt.verb == "WHEN":
+            if current_when_ops is not None:
+                when_clauses.append((current_when_ops, current_body))
+            current_when_ops = list(stmt.operands)
+            current_body = []
+            i += 1
+            continue
+        if current_when_ops is not None:
+            if stmt.verb == "IF":
+                nested, i = translate_if_block(
+                    stmts, i, translate_stmt_fn, translate_cond_fn, indent + 1,
+                )
+                current_body.extend(nested)
+                continue
+            translated = translate_stmt_fn(stmt)
+            for tl in translated:
+                current_body.append(_indent_line(tl, indent + 1))
+        i += 1
+    else:
+        if current_when_ops is not None:
+            when_clauses.append((current_when_ops, current_body))
+
+    # Generate if/elif/else chain
+    lines: list[str] = []
+    for clause_idx, (when_ops, body) in enumerate(when_clauses):
+        # Split WHEN values on ALSO to match subject count
+        when_parts = _split_on_also(when_ops)
+        is_other = all(
+            len(p) == 1 and p[0].upper() == "OTHER" for p in when_parts
+        )
+
+        if is_other:
+            keyword = "else:" if clause_idx > 0 else "if True:  # WHEN OTHER"
+        else:
+            cond_parts: list[str] = []
+            for j, part in enumerate(when_parts):
+                part_text = " ".join(part).strip()
+                if part_text.upper() == "ANY":
+                    continue  # ANY matches everything — no condition needed
+                if part_text.upper() == "OTHER":
+                    continue
+                if j < len(is_true) and is_true[j]:
+                    cond_parts.append(translate_cond_fn(part_text))
+                elif j < len(subject_exprs) and subject_exprs[j]:
+                    cond_parts.append(
+                        f"{subject_exprs[j]} == {resolve_operand_fn(part[0])}"
+                    )
+                else:
+                    cond_parts.append(translate_cond_fn(part_text))
+
+            cond = " and ".join(cond_parts) if cond_parts else "True"
+            prefix = "if" if clause_idx == 0 else "elif"
+            keyword = f"{prefix} {cond}:"
+
+        lines.append(_indent_line(keyword, indent))
+        if not _has_code(body):
+            body.append(_indent_line("pass", indent + 1))
+        lines.extend(body)
+
+    if not lines:
+        lines.append(_indent_line("pass  # TODO(high): empty EVALUATE ALSO", indent))
+
+    return lines, i
+
+
 def translate_evaluate_block(
     stmts: list[CobolStatement],
     start_idx: int,
@@ -121,27 +234,14 @@ def translate_evaluate_block(
     eval_stmt = stmts[start_idx]
     subject_ops = eval_stmt.operands
 
-    # Detect ALSO — emit TODO (not in scope)
     upper_ops = [o.upper() for o in subject_ops]
+
+    # Multi-subject EVALUATE: EVALUATE subj1 ALSO subj2 ...
     if "ALSO" in upper_ops:
-        lines = [
-            _indent_line(f"# EVALUATE ALSO — too complex for auto-translation", indent),
-            _indent_line(f"# {eval_stmt.raw_text}", indent),
-            _indent_line(f"# TODO(high): translate EVALUATE ALSO manually", indent),
-        ]
-        # Skip to END-EVALUATE
-        i = start_idx + 1
-        depth = 1
-        while i < len(stmts):
-            if stmts[i].verb in _BLOCK_OPENERS:
-                depth += 1
-            elif stmts[i].verb in ("END-IF", "END-EVALUATE"):
-                depth -= 1
-                if depth == 0:
-                    i += 1
-                    break
-            i += 1
-        return lines, i
+        return _translate_evaluate_also(
+            stmts, start_idx, translate_stmt_fn, translate_cond_fn,
+            resolve_operand_fn, indent,
+        )
 
     # Determine subject type: TRUE means conditions in WHEN, else equality
     is_true_subject = (

@@ -29,6 +29,7 @@ from .models import (
     SoftwareMap,
 )
 from . import statement_translators as st
+from .io_translators import wrap_on_size_error
 from . import string_translators as strt
 from .utils import (
     FIGURATIVE_RESOLVE,
@@ -311,16 +312,8 @@ class PythonMapper:
             return self._translate_display(stmt)
         elif verb == "MOVE":
             return self._translate_move(ops)
-        elif verb == "ADD":
-            return self._translate_add(ops)
-        elif verb == "SUBTRACT":
-            return self._translate_subtract(ops)
-        elif verb == "MULTIPLY":
-            return self._translate_multiply(ops)
-        elif verb == "DIVIDE":
-            return self._translate_divide(ops)
-        elif verb == "COMPUTE":
-            return self._translate_compute(ops)
+        elif verb in ("ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE"):
+            return self._translate_arithmetic(verb, ops)
         elif verb == "PERFORM":
             return self._translate_perform(ops, stmt.raw_text)
         elif verb == "IF":
@@ -349,17 +342,9 @@ class PythonMapper:
         elif verb == "CONTINUE":
             return ["pass  # CONTINUE"]
         elif verb == "ACCEPT":
-            return [f"# ACCEPT: {stmt.raw_text}", f"# TODO(high): ACCEPT — user input requires manual implementation"]
+            return st.translate_accept(ops, stmt.raw_text)
         elif verb == "REWRITE":
-            record_name = ops[0] if ops else "RECORD"
-            py_record = _to_python_name(record_name)
-            file_hint = py_record.replace("_record", "_file").replace("_rec", "_file")
-            return [
-                f"# REWRITE {record_name}",
-                f"# TODO(high): REWRITE — FileAdapter is read-only by design (safety guarantee)",
-                f"# To implement: open file in write mode, seek to record, write updated data",
-                f"# self.{file_hint}.rewrite(self.data.{py_record})",
-            ]
+            return st.translate_rewrite(ops)
         elif verb == "SET":
             return strt.translate_set(ops, self._resolve_operand, self._condition_lookup)
         elif verb == "GO":
@@ -395,26 +380,89 @@ class PythonMapper:
         return st.translate_display(stmt, self._resolve_operand)
 
     def _translate_move(self, ops: list[str]) -> list[str]:
+        if ops and ops[0].upper() in ("CORRESPONDING", "CORR"):
+            return self._translate_move_corresponding(ops)
         return st.translate_move(ops)
+
+    def _translate_move_corresponding(self, ops: list[str]) -> list[str]:
+        """Translate MOVE CORRESPONDING source TO target."""
+        upper_ops = [o.upper() for o in ops]
+        if "TO" not in upper_ops:
+            return [f"# MOVE CORRESPONDING: missing TO: {' '.join(ops)}"]
+        to_idx = upper_ops.index("TO")
+        src_name = ops[1] if len(ops) > 1 else "SOURCE"
+        tgt_name = ops[to_idx + 1] if to_idx + 1 < len(ops) else "TARGET"
+        src_items = self._find_group_children(src_name.upper())
+        tgt_items = self._find_group_children(tgt_name.upper())
+        if not src_items or not tgt_items:
+            return [
+                f"# MOVE CORRESPONDING {src_name} TO {tgt_name}",
+                f"# TODO(high): group items not found — manual field matching required",
+            ]
+        common = set(src_items) & set(tgt_items)
+        if not common:
+            return [f"# MOVE CORRESPONDING: no common field names between {src_name} and {tgt_name}"]
+        results = [f"# MOVE CORRESPONDING {src_name} TO {tgt_name}"]
+        for name in sorted(common):
+            py = _to_python_name(name)
+            results.append(f"self.data.{py}.set(self.data.{py}.value)")
+        return results
+
+    def _find_group_children(self, group_name: str) -> list[str]:
+        """Find child field names for a group-level data item."""
+        for items_list in [self.program.working_storage,
+                           self.program.file_section,
+                           self.program.linkage_section]:
+            result = self._search_group(items_list, group_name)
+            if result is not None:
+                return result
+        return []
+
+    def _search_group(self, items: list[DataItem], name: str) -> list[str] | None:
+        for item in items:
+            if item.name.upper() == name and item.children:
+                return [c.name.upper() for c in item.children]
+            if item.children:
+                result = self._search_group(item.children, name)
+                if result is not None:
+                    return result
+        return None
 
     def _resolve_operand(self, op: str) -> str:
         """Resolve a COBOL operand to a Python expression."""
         return _resolve_operand_base(op)
 
-    def _translate_add(self, ops: list[str]) -> list[str]:
-        return st.translate_add(ops, self._resolve_operand)
+    def _translate_arithmetic(self, verb: str, ops: list[str]) -> list[str]:
+        """Route arithmetic verb and wrap with ON SIZE ERROR if present."""
+        # Strip ON SIZE ERROR ... from operands for the core translator
+        upper_ops = [o.upper() for o in ops]
+        has_size_error = False
+        size_idx = None
+        for i in range(len(upper_ops) - 2):
+            if upper_ops[i] == "ON" and upper_ops[i + 1] == "SIZE" and upper_ops[i + 2] == "ERROR":
+                has_size_error = True
+                size_idx = i
+                break
 
-    def _translate_subtract(self, ops: list[str]) -> list[str]:
-        return st.translate_subtract(ops, self._resolve_operand)
+        core_ops = ops[:size_idx] if has_size_error else ops
+        resolve = self._resolve_operand
 
-    def _translate_multiply(self, ops: list[str]) -> list[str]:
-        return st.translate_multiply(ops, self._resolve_operand)
+        if verb == "ADD":
+            result = st.translate_add(core_ops, resolve)
+        elif verb == "SUBTRACT":
+            result = st.translate_subtract(core_ops, resolve)
+        elif verb == "MULTIPLY":
+            result = st.translate_multiply(core_ops, resolve)
+        elif verb == "DIVIDE":
+            result = st.translate_divide(core_ops, resolve)
+        elif verb == "COMPUTE":
+            result = st.translate_compute(core_ops, resolve)
+        else:
+            result = [f"# unsupported arithmetic verb: {verb}"]
 
-    def _translate_divide(self, ops: list[str]) -> list[str]:
-        return st.translate_divide(ops, self._resolve_operand)
-
-    def _translate_compute(self, ops: list[str]) -> list[str]:
-        return st.translate_compute(ops, self._resolve_operand)
+        if has_size_error:
+            return wrap_on_size_error(result, ops)
+        return result
 
     def _get_paragraph_range(self, start: str, end: str) -> list[str]:
         """Return paragraph names from start to end (inclusive), preserving order."""

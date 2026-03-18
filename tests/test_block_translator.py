@@ -265,7 +265,7 @@ class TestTranslateEvaluateBlock:
         assert next_i == 6
         assert any("==" in line for line in lines)
 
-    def test_evaluate_also_emits_todo(self):
+    def test_evaluate_also_generates_conditions(self):
         stmts = [
             _make("EVALUATE", "WS-A", "ALSO", "WS-B"),
             _make("WHEN", "1", "ALSO", "2"),
@@ -273,8 +273,9 @@ class TestTranslateEvaluateBlock:
             _make("END-EVALUATE"),
         ]
         lines, next_i = translate_evaluate_block(stmts, 0, _stmt_fn, _cond, _resolve, indent=0)
-        assert any("TODO(high)" in line for line in lines)
-        assert next_i == 4  # Should skip to after END-EVALUATE
+        combined = " ".join(lines)
+        assert "if" in combined  # Should generate if/elif chain
+        assert next_i == 4
 
     def test_when_thru_emits_todo(self):
         stmts = [
@@ -465,7 +466,7 @@ class TestEvaluateWhenOrValues:
 class TestEvaluateAlsoDetection:
     """EVALUATE ALSO should emit TODO and skip the block."""
 
-    def test_also_emits_todo(self):
+    def test_also_generates_and_conditions(self):
         stmts = [
             _make("EVALUATE", "WS-A", "ALSO", "WS-B"),
             _make("WHEN", "1", "ALSO", "2"),
@@ -474,9 +475,8 @@ class TestEvaluateAlsoDetection:
         ]
         lines, next_i = translate_evaluate_block(stmts, 0, _stmt_fn, _cond, _resolve, indent=0)
         combined = " ".join(lines)
-        assert "TODO" in combined
-        assert "ALSO" in combined
-        assert next_i == 4  # Should consume the whole block
+        assert "and" in combined  # Multi-subject generates AND conditions
+        assert next_i == 4
 
 
 class TestFallbackResolveQuotes:

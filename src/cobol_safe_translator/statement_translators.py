@@ -17,6 +17,9 @@ from typing import Callable
 from .models import CobolStatement
 from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _sanitize_numeric, _to_method_name, _to_python_name
 
+# Re-export from io_translators (split for LOC compliance)
+from .io_translators import translate_accept, translate_rewrite, wrap_on_size_error  # noqa: F401
+
 
 # Keywords that should be filtered from arithmetic operand/target lists
 _ARITHMETIC_KEYWORDS = frozenset({
@@ -57,10 +60,23 @@ def translate_display(
 
 def translate_move(ops: list[str]) -> list[str]:
     """Translate MOVE verb."""
-    if ops and ops[0].upper() == "CORRESPONDING":
-        return ["# TODO(high): MOVE CORRESPONDING — manual field matching required"]
+    if ops and ops[0].upper() in ("CORRESPONDING", "CORR"):
+        # Handled by mapper._translate_move_corresponding() which has AST access
+        return [f"# MOVE CORRESPONDING: routed to mapper (should not reach here)"]
     if ops and ops[0].upper() == "ALL":
-        return [f"# TODO(high): MOVE ALL — repeats value to fill target field: {' '.join(ops)}"]
+        # MOVE ALL "X" TO WS-FIELD — fill field with repeated character
+        if len(ops) >= 4 and ops[2].upper() == "TO":
+            fill_char = ops[1].strip('"').strip("'")
+            targets = ops[3:]
+            results: list[str] = []
+            for t in targets:
+                py = _to_python_name(t)
+                results.append(
+                    f"self.data.{py}.set({fill_char!r} * self.data.{py}.size "
+                    f"if hasattr(self.data.{py}, 'size') else {fill_char!r})"
+                )
+            return results
+        return [f"# MOVE ALL: could not parse: {' '.join(ops)}"]
     if "TO" not in [o.upper() for o in ops]:
         return [f"# MOVE: could not parse operands: {' '.join(ops)}"]
     to_idx = next(i for i, o in enumerate(ops) if o.upper() == "TO")
