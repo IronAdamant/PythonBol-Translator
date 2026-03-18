@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Callable
 
 from .models import CobolStatement
-from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _to_python_name
+from .utils import resolve_operand as _fallback_resolve
 
 _BLOCK_OPENERS = frozenset({"IF", "EVALUATE"})
 
@@ -26,6 +26,11 @@ _KNOWN_BODY_VERBS = frozenset({
 
 def _indent_line(line: str, indent: int) -> str:
     return ("    " * indent) + line
+
+
+def _has_code(body: list[str]) -> bool:
+    """Check if body has any non-comment executable lines."""
+    return any(ln.strip() and not ln.strip().startswith("#") for ln in body)
 
 
 def translate_if_block(
@@ -90,10 +95,6 @@ def translate_if_block(
             then_body.append(
                 _indent_line("pass  # TODO(high): missing END-IF", indent + 1)
             )
-
-    def _has_code(body: list[str]) -> bool:
-        """Check if body has any non-comment executable lines."""
-        return any(ln.strip() and not ln.strip().startswith("#") for ln in body)
 
     if not _has_code(then_body):
         then_body.append(_indent_line("pass", indent + 1))
@@ -252,8 +253,7 @@ def translate_evaluate_block(
             keyword = f"{prefix} {cond}:"
 
         lines.append(_indent_line(keyword, indent))
-        has_code = any(ln.strip() and not ln.strip().startswith("#") for ln in body)
-        if not has_code:
+        if not _has_code(body):
             body.append(_indent_line("pass", indent + 1))
         lines.extend(body)
 
@@ -263,22 +263,6 @@ def translate_evaluate_block(
         )
 
     return lines, i
-
-
-def _fallback_resolve(op: str) -> str:
-    """Fallback resolve_operand for nested blocks (when mapper's resolver is unavailable).
-
-    Handles: quoted strings, numeric literals, figurative constants, and data names.
-    Mirrors mapper._resolve_operand logic to avoid incorrect code generation.
-    """
-    if (op.startswith('"') and op.endswith('"')) or (op.startswith("'") and op.endswith("'")):
-        return op
-    if _is_numeric_literal(op):
-        return op
-    fig = FIGURATIVE_RESOLVE.get(op.upper())
-    if fig is not None:
-        return fig
-    return f"self.data.{_to_python_name(op)}.value"
 
 
 def is_inline_if(stmt: CobolStatement) -> bool:

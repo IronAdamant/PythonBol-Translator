@@ -1,12 +1,8 @@
 """Tests for the LLM prompt generator."""
 
-from pathlib import Path
-
-import pytest
-
 from cobol_safe_translator.analyzer import analyze
 from cobol_safe_translator.mapper import generate_python
-from cobol_safe_translator.parser import parse_cobol, parse_cobol_file
+from cobol_safe_translator.parser import parse_cobol
 from cobol_safe_translator.prompt_generator import generate_prompt, PromptGenerator
 from cobol_safe_translator.cli import main
 

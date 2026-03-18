@@ -3,9 +3,7 @@
 import ast
 from pathlib import Path
 
-import pytest
-
-from cobol_safe_translator.batch import discover_cobol_files, run_batch, COBOL_EXTENSIONS
+from cobol_safe_translator.batch import discover_cobol_files, run_batch
 from cobol_safe_translator.cli import main
 
 

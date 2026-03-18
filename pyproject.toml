@@ -22,3 +22,4 @@ packages = ["src/cobol_safe_translator"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]

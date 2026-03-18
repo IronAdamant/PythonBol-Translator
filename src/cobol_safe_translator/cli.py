@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re as _re
 import sys
 from pathlib import Path
 
@@ -76,7 +77,7 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
     print(green(f"  Parsed: {program.program_id} ({len(program.paragraphs)} paragraphs)"))
 
     # Analyze
-    config_path = args.config if hasattr(args, "config") and args.config else None
+    config_path = args.config if args.config else None
     smap = analyze(program, config_path=config_path)
 
     if smap.sensitivities:
@@ -93,7 +94,6 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
 
 def _to_python_filename(program_id: str) -> str:
     """Convert COBOL program ID to a safe Python filename."""
-    import re as _re
     name = program_id.lower().replace("-", "_")
     name = _re.sub(r"[^\w]", "_", name)
     return (name or "unnamed") + ".py"
@@ -101,9 +101,11 @@ def _to_python_filename(program_id: str) -> str:
 
 # --- Single-file workers ---
 
-def _translate_single(src: Path, out_dir: Path, config: str | None) -> int:
+def _translate_single(src: Path, out_dir: Path, config: str | None,
+                      copybook_path: list[str] | None = None) -> int:
     """Translate one COBOL file to Python; write to out_dir."""
-    args = argparse.Namespace(path=str(src), config=config)
+    args = argparse.Namespace(path=str(src), config=config,
+                              copybook_path=copybook_path or [])
     rc, program, smap = _parse_and_analyze(args, "Translating")
     if rc != 0 or program is None or smap is None:
         return rc
@@ -124,9 +126,11 @@ def _translate_single(src: Path, out_dir: Path, config: str | None) -> int:
     return 0
 
 
-def _map_single(src: Path, out_dir: Path, config: str | None) -> int:
+def _map_single(src: Path, out_dir: Path, config: str | None,
+                 copybook_path: list[str] | None = None) -> int:
     """Generate analysis reports for one COBOL file; write to out_dir."""
-    args = argparse.Namespace(path=str(src), config=config)
+    args = argparse.Namespace(path=str(src), config=config,
+                              copybook_path=copybook_path or [])
     rc, program, smap = _parse_and_analyze(args, "Mapping")
     if rc != 0 or program is None or smap is None:
         return rc
@@ -151,9 +155,11 @@ def _map_single(src: Path, out_dir: Path, config: str | None) -> int:
     return 0
 
 
-def _prompt_single(src: Path, out_path: Path | None, config: str | None) -> int:
+def _prompt_single(src: Path, out_path: Path | None, config: str | None,
+                    copybook_path: list[str] | None = None) -> int:
     """Generate LLM brief for one COBOL file; write to out_path or stdout."""
-    args = argparse.Namespace(path=str(src), config=config)
+    args = argparse.Namespace(path=str(src), config=config,
+                              copybook_path=copybook_path or [])
     rc, program, smap = _parse_and_analyze(args, "Prompting")
     if rc != 0 or program is None or smap is None:
         return rc
@@ -181,41 +187,44 @@ def _prompt_single(src: Path, out_path: Path | None, config: str | None) -> int:
 def cmd_translate(args: argparse.Namespace) -> int:
     """Parse, analyze, and generate Python translation."""
     p = Path(args.path)
-    config = args.config if hasattr(args, "config") else None
+    config = args.config or None
+    copybook_path = getattr(args, "copybook_path", None) or None
     recursive = getattr(args, "recursive", False)
 
     if p.is_dir():
         base_out = Path(args.output)
 
         def process(src: Path, out_dir: Path) -> int:
-            return _translate_single(src, out_dir, config)
+            return _translate_single(src, out_dir, config, copybook_path)
 
         return _batch.run_batch(p, base_out, recursive, process)
 
-    return _translate_single(p, Path(args.output), config)
+    return _translate_single(p, Path(args.output), config, copybook_path)
 
 
 def cmd_map(args: argparse.Namespace) -> int:
     """Parse, analyze, and export reports."""
     p = Path(args.path)
-    config = args.config if hasattr(args, "config") else None
+    config = args.config or None
+    copybook_path = getattr(args, "copybook_path", None) or None
     recursive = getattr(args, "recursive", False)
 
     if p.is_dir():
         base_out = Path(args.output)
 
         def process(src: Path, out_dir: Path) -> int:
-            return _map_single(src, out_dir, config)
+            return _map_single(src, out_dir, config, copybook_path)
 
         return _batch.run_batch(p, base_out, recursive, process)
 
-    return _map_single(p, Path(args.output), config)
+    return _map_single(p, Path(args.output), config, copybook_path)
 
 
 def cmd_prompt(args: argparse.Namespace) -> int:
     """Generate an LLM translation brief (stdout or file)."""
     p = Path(args.path)
-    config = args.config if hasattr(args, "config") else None
+    config = args.config or None
+    copybook_path = getattr(args, "copybook_path", None) or None
     recursive = getattr(args, "recursive", False)
     output = getattr(args, "output", None)
 
@@ -227,12 +236,12 @@ def cmd_prompt(args: argparse.Namespace) -> int:
 
         def process(src: Path, out_dir: Path) -> int:
             brief_path = out_dir / f"{src.stem}_brief.md"
-            return _prompt_single(src, brief_path, config)
+            return _prompt_single(src, brief_path, config, copybook_path)
 
         return _batch.run_batch(p, base_out, recursive, process)
 
     out_path = Path(output) if output else None
-    return _prompt_single(p, out_path, config)
+    return _prompt_single(p, out_path, config, copybook_path)
 
 
 # --- Main CLI setup ---

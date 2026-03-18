@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 
-from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _to_python_name
+from .utils import resolve_operand
 
 _CMP_OPS = frozenset({">", "<", "==", "!=", ">=", "<="})
 _SIGN_WORDS = {"POSITIVE": "> 0", "NEGATIVE": "< 0", "ZERO": "== 0"}
@@ -39,7 +39,7 @@ _CMP_PHRASES: list[tuple[list[str], str]] = [
 ]
 
 _COBOL_KEYWORDS = frozenset({
-    'AND', 'OR', 'NOT', 'IS', 'THAN', 'TO', 'GREATER', 'LESS',
+    'AND', 'OR', 'NOT', 'IS', 'THEN', 'THAN', 'TO', 'GREATER', 'LESS',
     'EQUAL', 'NUMERIC', 'ALPHABETIC', 'POSITIVE', 'NEGATIVE',
     'ZERO', 'ZEROS', 'ZEROES', 'SPACE', 'SPACES',
     'HIGH-VALUE', 'HIGH-VALUES', 'LOW-VALUE', 'LOW-VALUES',
@@ -49,6 +49,12 @@ _COBOL_KEYWORDS = frozenset({
 _OP_KEYWORDS = frozenset({
     'AND', 'OR', 'NOT', '(', ')', 'NUMERIC', 'ALPHABETIC', 'POSITIVE', 'NEGATIVE',
 })
+
+# Single-token comparison operators → Python equivalents
+_SINGLE_OPS: dict[str, str] = {
+    '=': '==', 'EQUAL': '==', 'GREATER': '>', 'LESS': '<',
+    '>': '>', '<': '<', '>=': '>=', '<=': '<=',
+}
 
 
 def _is_quoted(tok: str) -> bool:
@@ -102,23 +108,6 @@ def tokenize_condition(cond: str) -> list[str]:
             tokens.append(cond[i:j])
             i = j
     return tokens
-
-
-def resolve_operand(tok: str) -> str:
-    """Resolve a single operand token to a Python expression."""
-    if _is_quoted(tok):
-        return tok
-    if _is_numeric_literal(tok):
-        return tok
-    upper = tok.upper()
-    if upper in FIGURATIVE_RESOLVE:
-        return FIGURATIVE_RESOLVE[upper]
-    rm = re.match(r'^([A-Za-z][\w-]*)\((\d+):(\d+)\)$', tok)
-    if rm:
-        name, start, length = rm.group(1), int(rm.group(2)), int(rm.group(3))
-        py = _to_python_name(name)
-        return f"str(self.data.{py}.value)[{start - 1}:{start - 1 + length}]"
-    return f"self.data.{_to_python_name(tok)}.value"
 
 
 def translate_condition(cond: str, condition_lookup: dict[str, tuple[str, str]]) -> str:
@@ -179,7 +168,7 @@ def _handle_conjunction(tokens: list[str], i: int, n: int, result: list[str],
         return i
 
     # Abbreviated: AND/OR followed by comparison op (no left operand)
-    if next_upper in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL', 'NOT'):
+    if next_upper in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL'):
         if last_subject:
             result.append(last_subject)
     else:
@@ -286,29 +275,10 @@ def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) ->
             i = _handle_conjunction(tokens, i, n, result, last_subject, last_op,
                                      condition_lookup)
             continue
-        if t in ('>', '<', '>=', '<='):
-            result.append(t)
-            last_op = t
-            i += 1
-            continue
-        if t == '=':
-            result.append('==')
-            last_op = '=='
-            i += 1
-            continue
-        if t == 'EQUAL':
-            result.append('==')
-            last_op = '=='
-            i += 1
-            continue
-        if t == 'GREATER':
-            result.append('>')
-            last_op = '>'
-            i += 1
-            continue
-        if t == 'LESS':
-            result.append('<')
-            last_op = '<'
+        if t in _SINGLE_OPS:
+            op = _SINGLE_OPS[t]
+            result.append(op)
+            last_op = op
             i += 1
             continue
         if t in condition_lookup:

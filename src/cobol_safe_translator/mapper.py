@@ -8,9 +8,9 @@ to preserve COBOL semantics.
 
 from __future__ import annotations
 
-import textwrap
 from datetime import datetime
 
+from .condition_translator import translate_condition as _translate_condition_impl
 from .block_translator import (
     is_inline_evaluate,
     is_inline_if,
@@ -35,12 +35,8 @@ from .utils import (
     _is_numeric_literal,
     _to_method_name,
     _to_python_name,
+    resolve_operand as _resolve_operand_base,
 )
-
-
-def _indent(text: str, level: int = 1) -> str:
-    """Indent text by the given number of 4-space levels."""
-    return textwrap.indent(text, "    " * level)
 
 
 class PythonMapper:
@@ -84,6 +80,7 @@ class PythonMapper:
             self._program_id = "UNNAMED"
         else:
             self._program_id = self.program.program_id
+        self._class_name = _to_python_name(self._program_id).title().replace("_", "")
         parts: list[str] = []
         parts.append(self._header())
         parts.append(self._imports())
@@ -124,7 +121,7 @@ class PythonMapper:
     def _data_class(self) -> str:
         """Generate @dataclass for WORKING-STORAGE, FILE SECTION, and LINKAGE data items."""
         all_items = self.program.working_storage + self.program.file_section + self.program.linkage_section
-        class_name = _to_python_name(self._program_id).title().replace('_', '') + "Data"
+        class_name = self._class_name + "Data"
 
         if not all_items:
             # Emit an empty dataclass so the program class can reference it
@@ -208,7 +205,7 @@ class PythonMapper:
 
     def _program_class(self) -> str:
         """Generate the main program class with paragraph methods."""
-        class_name = _to_python_name(self._program_id).title().replace("_", "")
+        class_name = self._class_name
         data_class = f"{class_name}Data"
 
         lines = [f"class {class_name}Program:"]
@@ -401,22 +398,7 @@ class PythonMapper:
 
     def _resolve_operand(self, op: str) -> str:
         """Resolve a COBOL operand to a Python expression."""
-        if op.startswith('"') or op.startswith("'"):
-            return op
-        if _is_numeric_literal(op):
-            return op
-        upper = op.upper()
-        fig = FIGURATIVE_RESOLVE.get(upper)
-        if fig is not None:
-            return fig
-        # COBOL intrinsic function — can't auto-translate
-        if upper == "FUNCTION":
-            return "0"
-        # Skip OF/IN qualifiers (take the field before OF)
-        if " OF " in op.upper() or " IN " in op.upper():
-            field = op.split()[0]
-            return f"self.data.{_to_python_name(field)}.value"
-        return f"self.data.{_to_python_name(op)}.value"
+        return _resolve_operand_base(op)
 
     def _translate_add(self, ops: list[str]) -> list[str]:
         return st.translate_add(ops, self._resolve_operand)
@@ -441,8 +423,7 @@ class PythonMapper:
 
         Delegates to condition_translator module, passing the 88-level lookup.
         """
-        from .condition_translator import translate_condition
-        return translate_condition(cond, self._condition_lookup)
+        return _translate_condition_impl(cond, self._condition_lookup)
 
     def _translate_if(self, raw: str) -> list[str]:
         """Fallback IF translation (used when block translator can't handle it)."""
@@ -476,10 +457,9 @@ class PythonMapper:
         return st.translate_initialize(ops)
 
     def _main_block(self) -> str:
-        class_name = _to_python_name(self._program_id).title().replace("_", "")
         return (
             f'if __name__ == "__main__":\n'
-            f"    program = {class_name}Program()\n"
+            f"    program = {self._class_name}Program()\n"
             f"    program.run()\n"
         )
 

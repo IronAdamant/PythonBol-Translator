@@ -1,7 +1,6 @@
 """Tests for the block_translator module — IF/EVALUATE block reconstruction."""
 
 from cobol_safe_translator.block_translator import (
-    _fallback_resolve,
     _indent_line,
     is_inline_evaluate,
     is_inline_if,
@@ -11,6 +10,7 @@ from cobol_safe_translator.block_translator import (
     translate_inline_if,
 )
 from cobol_safe_translator.models import CobolStatement
+from cobol_safe_translator.utils import resolve_operand as _fallback_resolve
 
 
 # --- Helpers ---
@@ -480,25 +480,21 @@ class TestEvaluateAlsoDetection:
 
 
 class TestFallbackResolveQuotes:
-    """_fallback_resolve must require matching closing quote."""
+    """resolve_operand must require matching closing quote."""
 
     def test_full_double_quoted_string_returned_as_is(self):
-        from cobol_safe_translator.block_translator import _fallback_resolve
         assert _fallback_resolve('"HELLO"') == '"HELLO"'
 
     def test_unmatched_double_quote_treated_as_data_name(self):
-        from cobol_safe_translator.block_translator import _fallback_resolve
         # Missing closing quote — should not be returned as a raw string literal
         result = _fallback_resolve('"HELLO')
         assert result != '"HELLO'  # must not return bare unclosed literal
 
     def test_full_single_quoted_string_returned_as_is(self):
-        from cobol_safe_translator.block_translator import _fallback_resolve
         assert _fallback_resolve("'HELLO'") == "'HELLO'"
 
     def test_trailing_dot_numeric_is_numeric(self):
         """123. (trailing dot) should resolve to numeric, not a data name."""
-        from cobol_safe_translator.block_translator import _fallback_resolve
         result = _fallback_resolve("123.")
         assert result == "123."
         assert "self.data" not in result

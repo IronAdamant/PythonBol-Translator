@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _to_python_name
+from .utils import _to_python_name
 
 
 def translate_string(
@@ -288,7 +288,6 @@ def translate_set(
 
     # SET idx UP BY n
     if "UP" in upper_ops and "BY" in upper_ops:
-        up_idx = upper_ops.index("UP")
         by_idx = upper_ops.index("BY")
         target = ops[0]
         py_target = _to_python_name(target)
@@ -299,7 +298,6 @@ def translate_set(
 
     # SET idx DOWN BY n
     if "DOWN" in upper_ops and "BY" in upper_ops:
-        down_idx = upper_ops.index("DOWN")
         by_idx = upper_ops.index("BY")
         target = ops[0]
         py_target = _to_python_name(target)

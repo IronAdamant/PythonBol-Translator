@@ -50,3 +50,33 @@ def bankacct_source(bankacct_cob: Path) -> str:
 @pytest.fixture
 def samples_dir() -> Path:
     return SAMPLES_DIR
+
+
+def make_cobol(
+    procedure_lines: list[str],
+    data_lines: list[str] | None = None,
+) -> str:
+    """Build minimal COBOL source with given DATA and PROCEDURE lines.
+
+    Args:
+        procedure_lines: Lines for PROCEDURE DIVISION (indented automatically).
+        data_lines: Optional custom WORKING-STORAGE lines. Defaults to WS-A/B/C PIC 9(5).
+    """
+    if data_lines is None:
+        data_lines = [
+            "       01 WS-A PIC 9(5).",
+            "       01 WS-B PIC 9(5).",
+            "       01 WS-C PIC 9(5).",
+        ]
+    lines = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. TEST-PROG.",
+        "       DATA DIVISION.",
+        "       WORKING-STORAGE SECTION.",
+        *data_lines,
+        "       PROCEDURE DIVISION.",
+        "       MAIN-PARA.",
+    ]
+    for pl in procedure_lines:
+        lines.append(f"           {pl}")
+    return "\n".join(lines) + "\n"

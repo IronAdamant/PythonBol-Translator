@@ -68,20 +68,14 @@ def compute_pic_size(expanded: str) -> tuple[int, int, bool]:
         decimals = sum(1 for c in after_v if c in ("9",))
 
     # Handle CR/DB as 2-position editing symbols before char loop
-    cr_db_extra = clean.upper().count("CR") + clean.upper().count("DB")
+    cr_db_extra = clean.count("CR") + clean.count("DB")
     # Remove CR and DB for per-character counting to avoid double-counting
-    count_clean = clean.upper().replace("CR", "").replace("DB", "")
+    count_clean = clean.replace("CR", "").replace("DB", "")
 
     size = cr_db_extra * 2  # Each CR/DB occupies 2 display positions
     for c in count_clean:
-        if c in ("9", "X", "A", "Z", "*"):
+        if c != "V":  # V is implied decimal, no display position
             size += 1
-        elif c in (".", ",", "B", "+", "-", "$", "/"):
-            size += 1
-        elif c == "P":
-            size += 1
-        elif c == "V":
-            pass  # implied decimal, no display position
     return size, decimals, signed
 
 

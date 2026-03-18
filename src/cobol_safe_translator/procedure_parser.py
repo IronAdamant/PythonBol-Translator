@@ -14,7 +14,6 @@ from .models import CobolStatement, Paragraph
 
 _PARAGRAPH_RE = re.compile(r"^([\w-]+)\s*\.\s*$")
 _SECTION_RE = re.compile(r"^([\w-]+)\s+SECTION\s*\.\s*$", re.IGNORECASE)
-_VERB_RE = re.compile(r"^([\w-]+)")
 
 # Verbs we explicitly recognize
 KNOWN_VERBS = frozenset({
@@ -26,7 +25,7 @@ KNOWN_VERBS = frozenset({
     "END-IF", "END-EVALUATE", "END-PERFORM", "END-READ",
     "END-COMPUTE", "END-SUBTRACT", "END-ADD", "END-MULTIPLY",
     "END-DIVIDE", "END-UNSTRING",
-    "NOT", "END-WRITE", "END-CALL", "END-STRING",
+    "END-WRITE", "END-CALL", "END-STRING",
 })
 
 # Tokens that look like verbs but are actually operands/clauses
@@ -35,7 +34,7 @@ _OPERAND_VERBS = frozenset({
     "UNTIL", "VARYING", "THRU", "THROUGH", "TIMES",
     "THAN", "OR", "AND", "NOT", "EQUAL", "GREATER",
     "LESS", "ROUNDED", "REMAINDER", "ALSO", "OTHER",
-    "WHEN", "THEN", "TRUE", "FALSE", "AT", "END",
+    "THEN", "TRUE", "FALSE", "AT", "END",
     "WITH", "NO", "ADVANCING", "UPON", "INPUT", "OUTPUT",
     "EXTEND", "I-O", "DELIMITED", "SIZE", "POINTER",
     "TALLYING", "REPLACING", "LEADING", "TRAILING",

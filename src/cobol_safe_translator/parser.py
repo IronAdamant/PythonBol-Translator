@@ -25,7 +25,6 @@ from .models import (
 
 # Re-export PIC utilities so existing imports from .parser still work
 from .pic_parser import (  # noqa: F401
-    _PIC_REPEAT,
     classify_pic,
     compute_pic_size,
     expand_pic,
@@ -35,9 +34,6 @@ from .pic_parser import (  # noqa: F401
 # Re-export procedure parser so existing imports from .parser still work
 from .procedure_parser import (  # noqa: F401
     KNOWN_VERBS,
-    _join_sentences,
-    _parse_statements,
-    _split_operands,
     parse_procedure,
 )
 
@@ -185,7 +181,8 @@ def _extract_value(line: str, keyword: str) -> str:
         return ""
     rest = line[idx + len(keyword):].strip().lstrip(".").strip().rstrip(".")
     # Take only the first token — PROGRAM-ID, AUTHOR etc. must be single identifiers
-    first = rest.split()[0] if rest.split() else ""
+    parts = rest.split()
+    first = parts[0] if parts else ""
     return first
 
 
@@ -242,7 +239,9 @@ _VALUES_RE = re.compile(r'VALUE(?:S)?\s+(?:IS\s+|ARE\s+)?(.*?)(?:\.\s*$|$)', re.
 _OCCURS_RE = re.compile(r"OCCURS\s+(\d+)", re.IGNORECASE)
 _REDEFINES_RE = re.compile(r"REDEFINES\s+([\w-]+)", re.IGNORECASE)
 _USAGE_RE = re.compile(
-    r"(?:USAGE\s+(?:IS\s+)?)?(COMP(?:UTATIONAL)?(?:-[0-9])?|BINARY|PACKED-DECIMAL|DISPLAY)\b",
+    r"(?:USAGE\s+(?:IS\s+)?|(?<![A-Za-z0-9\"-]))"
+    r"(COMP(?:UTATIONAL)?(?:-[0-9])?|BINARY|PACKED-DECIMAL|DISPLAY)"
+    r"(?=\s|\.|$)",
     re.IGNORECASE,
 )
 
@@ -375,10 +374,6 @@ def _parse_data_item(line: str) -> DataItem | None:
     level = int(level_m.group(1))
     name = level_m.group(2).upper()
 
-    # 88-levels are parsed separately by _parse_88_condition
-    if level == 88:
-        return None
-
     pic: PicClause | None = None
     pic_m = _PIC_RE.search(stripped)
     if pic_m:
@@ -387,12 +382,7 @@ def _parse_data_item(line: str) -> DataItem | None:
     value: str | None = None
     value_m = _VALUE_RE.search(stripped)
     if value_m:
-        raw_val = value_m.group(1).strip()
-        if (raw_val.startswith('"') and raw_val.endswith('"')) or \
-           (raw_val.startswith("'") and raw_val.endswith("'")):
-            value = raw_val[1:-1]
-        else:
-            value = raw_val
+        value = _strip_quotes(value_m.group(1).strip())
 
     occurs: int | None = None
     occurs_m = _OCCURS_RE.search(stripped)

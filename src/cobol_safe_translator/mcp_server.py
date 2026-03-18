@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import sys
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 
 from .analyzer import analyze
@@ -208,10 +209,16 @@ def _validate_dir(path_str: str) -> Path:
     return p
 
 
-def _handle_translate_cobol(params: dict) -> str:
+def _parse_and_analyze_file(params: dict) -> tuple:
+    """Parse and analyze a COBOL file from tool params. Returns (path, program, smap)."""
     p = _validate_file(params["path"])
     program = parse_cobol_file(p)
     smap = analyze(program)
+    return p, program, smap
+
+
+def _handle_translate_cobol(params: dict) -> str:
+    _, program, smap = _parse_and_analyze_file(params)
     python_source = generate_python(smap)
 
     output_path = params.get("output_path")
@@ -224,9 +231,7 @@ def _handle_translate_cobol(params: dict) -> str:
 
 
 def _handle_analyze_cobol(params: dict) -> str:
-    p = _validate_file(params["path"])
-    program = parse_cobol_file(p)
-    smap = analyze(program)
+    _, program, smap = _parse_and_analyze_file(params)
 
     fmt = params.get("format", "markdown")
     if fmt == "json":
@@ -235,17 +240,13 @@ def _handle_analyze_cobol(params: dict) -> str:
 
 
 def _handle_generate_brief(params: dict) -> str:
-    p = _validate_file(params["path"])
-    program = parse_cobol_file(p)
-    smap = analyze(program)
+    _, program, smap = _parse_and_analyze_file(params)
     python_source = generate_python(smap)
     return generate_prompt(smap, python_source)
 
 
 def _handle_list_sensitivities(params: dict) -> str:
-    p = _validate_file(params["path"])
-    program = parse_cobol_file(p)
-    smap = analyze(program)
+    _, program, smap = _parse_and_analyze_file(params)
 
     result = [
         {
@@ -306,7 +307,7 @@ def _handle_translate_directory(params: dict) -> str:
     return json.dumps(result, indent=2)
 
 
-_TOOL_HANDLERS: dict[str, callable] = {
+_TOOL_HANDLERS: dict[str, Callable] = {
     "translate_cobol": _handle_translate_cobol,
     "analyze_cobol": _handle_analyze_cobol,
     "generate_brief": _handle_generate_brief,

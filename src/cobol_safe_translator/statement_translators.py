@@ -15,13 +15,19 @@ from __future__ import annotations
 from typing import Callable
 
 from .models import CobolStatement
-from .utils import _is_numeric_literal, _to_method_name, _to_python_name
+from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _to_method_name, _to_python_name
 
 
 # Keywords that should be filtered from arithmetic operand/target lists
 _ARITHMETIC_KEYWORDS = frozenset({
     "ROUNDED", "ON", "SIZE", "ERROR", "NOT",
 })
+
+# Keywords that should be filtered from CLOSE operand lists
+_CLOSE_KEYWORDS = frozenset({"WITH", "LOCK", "NO", "REWIND"})
+
+# Valid operators inside COMPUTE expressions
+_COMPUTE_OPERATORS = frozenset({"+", "-", "*", "/", "(", ")", "**"})
 
 
 def translate_display(
@@ -70,7 +76,6 @@ def translate_move(ops: list[str]) -> list[str]:
     elif source.upper().startswith("FUNCTION"):
         return ["# TODO(high): MOVE FUNCTION — manual translation required"]
     else:
-        from .utils import FIGURATIVE_RESOLVE
         fig = FIGURATIVE_RESOLVE.get(source.upper())
         src_expr = fig if fig is not None else f"self.data.{_to_python_name(source)}.value"
 
@@ -284,7 +289,6 @@ def translate_compute(
     resolve: Callable[[str], str],
 ) -> list[str]:
     """Translate COMPUTE verb."""
-    _COMPUTE_OPERATORS = {"+", "-", "*", "/", "(", ")", "**"}
     if "=" in ops:
         eq_idx = ops.index("=")
         targets = [t for t in ops[:eq_idx] if t.upper() != "ROUNDED"]
@@ -497,7 +501,6 @@ def translate_open(ops: list[str]) -> list[str]:
 
 def translate_close(ops: list[str]) -> list[str]:
     """Translate CLOSE verb."""
-    _CLOSE_KEYWORDS = {"WITH", "LOCK", "NO", "REWIND"}
     results: list[str] = []
     for op in ops:
         if op.upper() in _CLOSE_KEYWORDS:
