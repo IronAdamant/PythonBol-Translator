@@ -8,7 +8,6 @@ to preserve COBOL semantics.
 
 from __future__ import annotations
 
-import re
 import textwrap
 from datetime import datetime
 
@@ -30,6 +29,7 @@ from .models import (
     SoftwareMap,
 )
 from . import statement_translators as st
+from . import string_translators as strt
 from .utils import (
     FIGURATIVE_RESOLVE,
     _is_numeric_literal,
@@ -55,6 +55,28 @@ class PythonMapper:
         self._sensitivity_lookup: dict[str, SensitivityFlag] = {
             f.data_name.upper(): f for f in software_map.sensitivities
         }
+        self._condition_lookup: dict[str, tuple[str, str]] = {}
+        for items_list in [software_map.program.working_storage,
+                           software_map.program.file_section,
+                           software_map.program.linkage_section]:
+            self._build_condition_lookup(items_list)
+
+    def _build_condition_lookup(self, items: list[DataItem]) -> None:
+        """Recursively walk DataItems, mapping 88-level condition names to (parent, value)."""
+        for item in items:
+            py_name = _to_python_name(item.name)
+            for cond in item.conditions:
+                if cond.values:
+                    val = cond.values[0]
+                    val = repr(val) if not _is_numeric_literal(val) else val
+                    self._condition_lookup[cond.name.upper()] = (py_name, val)
+                elif cond.thru_ranges:
+                    lo, hi = cond.thru_ranges[0]
+                    lo_val = repr(lo) if not _is_numeric_literal(lo) else lo
+                    hi_val = repr(hi) if not _is_numeric_literal(hi) else hi
+                    self._condition_lookup[cond.name.upper()] = (py_name, f"({lo_val}, {hi_val})")
+            for child in item.children:
+                self._build_condition_lookup([child])
 
     def generate(self) -> str:
         """Generate the complete Python module source."""
@@ -339,7 +361,7 @@ class PythonMapper:
                 f"# self.{file_hint}.rewrite(self.data.{py_record})",
             ]
         elif verb == "SET":
-            return [f"# SET: {stmt.raw_text}", f"# TODO(high): manual translation required"]
+            return strt.translate_set(ops, self._resolve_operand, self._condition_lookup)
         elif verb == "GO":
             safe_text = (
                 stmt.raw_text
@@ -354,8 +376,12 @@ class PythonMapper:
                 f"raise NotImplementedError('GO TO not supported: {safe_text}')",
                 f"# TODO(high): GO TO requires manual restructuring",
             ]
-        elif verb in ("STRING", "UNSTRING", "INSPECT"):
-            return [f"# TODO(high): {verb} — manual translation required", f"# {stmt.raw_text}"]
+        elif verb == "STRING":
+            return strt.translate_string(ops, self._resolve_operand)
+        elif verb == "UNSTRING":
+            return strt.translate_unstring(ops, self._resolve_operand)
+        elif verb == "INSPECT":
+            return strt.translate_inspect(ops, self._resolve_operand)
         elif verb == "INITIALIZE":
             return self._translate_initialize(ops)
         elif verb in ("NOT", "AT"):
@@ -399,126 +425,12 @@ class PythonMapper:
         return st.translate_perform(ops, raw, self._translate_condition)
 
     def _translate_condition(self, cond: str) -> str:
-        """Best-effort translation of a COBOL condition to Python."""
-        c = cond.strip()
+        """Two-pass COBOL condition to Python expression translator.
 
-        # Extract quoted strings, replacing with placeholders to protect them
-        # from uppercasing and splitting
-        literals: list[str] = []
-
-        def _save_literal(m: re.Match) -> str:
-            literals.append(m.group(0))
-            return f"__LIT{len(literals) - 1}__"
-
-        c = re.sub(r'"[^"]*"|\'[^\']*\'', _save_literal, c)
-
-        # Uppercase for case-insensitive comparison operator matching
-        c = c.upper()
-        # COBOL class conditions: IS [NOT] NUMERIC / IS [NOT] ALPHABETIC
-        # Must be handled BEFORE stripping IS keyword
-        c = re.sub(r'\bIS\s+NOT\s+NUMERIC\b', '__CLASS_NOT_NUMERIC__', c)
-        c = re.sub(r'\bIS\s+NOT\s+ALPHABETIC\b', '__CLASS_NOT_ALPHABETIC__', c)
-        c = re.sub(r'\bNOT\s+NUMERIC\b', '__CLASS_NOT_NUMERIC__', c)
-        c = re.sub(r'\bNOT\s+ALPHABETIC\b', '__CLASS_NOT_ALPHABETIC__', c)
-        c = re.sub(r'\bIS\s+NUMERIC\b', '__CLASS_NUMERIC__', c)
-        c = re.sub(r'\bIS\s+ALPHABETIC\b', '__CLASS_ALPHABETIC__', c)
-        # Bare NUMERIC/ALPHABETIC (without IS) — must come AFTER IS/NOT variants
-        c = re.sub(r'\bNUMERIC\b(?!__)', '__CLASS_NUMERIC__', c)
-        c = re.sub(r'\bALPHABETIC\b(?!__)', '__CLASS_ALPHABETIC__', c)
-        # Strip COBOL IS keyword (class conditions already handled above)
-        # Use (?:^|\s) instead of \b to avoid corrupting data names ending in -IS
-        c = re.sub(r'(?:^|\s)IS\s+(?!__CLASS)', ' ', c).strip()
-        # Replace compound COBOL comparisons FIRST — longest patterns first to avoid partial matches
-        c = c.replace(" NOT GREATER THAN OR EQUAL TO ", " < ")
-        c = c.replace(" NOT LESS THAN OR EQUAL TO ", " > ")
-        c = c.replace(" GREATER THAN OR EQUAL TO ", " >= ")
-        c = c.replace(" LESS THAN OR EQUAL TO ", " <= ")
-        c = c.replace(" NOT GREATER THAN ", " <= ")
-        c = c.replace(" NOT LESS THAN ", " >= ")
-        c = c.replace(" NOT EQUAL TO ", " != ")
-        # Simple comparisons (long forms before short forms)
-        c = c.replace(" GREATER THAN ", " > ")
-        c = c.replace(" LESS THAN ", " < ")
-        c = c.replace(" EQUAL TO ", " == ")
-        # Short comparison forms (COBOL permits EQUAL, GREATER, LESS without TO/THAN)
-        c = c.replace(" NOT > ", " <= ")
-        c = c.replace(" NOT < ", " >= ")
-        c = c.replace(" NOT = ", " != ")
-        c = c.replace(" EQUAL ", " == ")
-        c = c.replace(" GREATER ", " > ")
-        c = c.replace(" LESS ", " < ")
-        c = c.replace(" = ", " == ")
-        # Separate parentheses from adjacent tokens before splitting
-        c = re.sub(r'([()])', r' \1 ', c)
-        # Convert data names and figurative constants
-        tokens = c.split()
-        result: list[str] = []
-        for t in tokens:
-            # Restore literal placeholders
-            lit_m = re.match(r'^__LIT(\d+)__$', t)
-            if lit_m:
-                result.append(literals[int(lit_m.group(1))])
-            elif t in ("(", ")"):
-                result.append(t)
-            elif t in (">", "<", "==", "!=", ">=", "<=", "AND", "OR"):
-                result.append(t.lower() if t in ("AND", "OR") else t)
-            elif t == "NOT":
-                # Wrap the following comparison in parentheses so Python
-                # evaluates "not (a > b)" rather than "(not a) > b".
-                result.append("not")
-            elif t == "__CLASS_NUMERIC__":
-                # Look back — previous token is the subject
-                if result:
-                    subj = result.pop()
-                    result.append(f"str({subj}).replace('.','').replace('-','').isdigit()")
-                else:
-                    result.append("False  # TODO(high): IS NUMERIC — no subject found")
-            elif t == "__CLASS_ALPHABETIC__":
-                if result:
-                    subj = result.pop()
-                    result.append(f"str({subj}).isalpha()")
-                else:
-                    result.append("False  # TODO(high): IS ALPHABETIC — no subject found")
-            elif t == "__CLASS_NOT_NUMERIC__":
-                if result:
-                    subj = result.pop()
-                    result.append(f"not str({subj}).replace('.','').replace('-','').isdigit()")
-                else:
-                    result.append("True  # TODO(high): IS NOT NUMERIC — no subject found")
-            elif t == "__CLASS_NOT_ALPHABETIC__":
-                if result:
-                    subj = result.pop()
-                    result.append(f"not str({subj}).isalpha()")
-                else:
-                    result.append("True  # TODO(high): IS NOT ALPHABETIC — no subject found")
-            elif _is_numeric_literal(t):
-                result.append(t)
-            elif t.upper() in FIGURATIVE_RESOLVE:
-                result.append(FIGURATIVE_RESOLVE[t.upper()])
-            else:
-                result.append(f"self.data.{_to_python_name(t)}.value")
-        # Post-process: wrap "not X op Y" into "not (X op Y)" to fix
-        # Python operator precedence (not binds tighter than comparisons).
-        _CMP_OPS = {">", "<", "==", "!=", ">=", "<="}
-        fixed: list[str] = []
-        i = 0
-        while i < len(result):
-            if result[i] == "not" and i + 3 < len(result) and result[i + 2] in _CMP_OPS:
-                # not X op Y -> not (X op Y)
-                fixed.append("not")
-                fixed.append("(")
-                fixed.append(result[i + 1])
-                fixed.append(result[i + 2])
-                fixed.append(result[i + 3])
-                fixed.append(")")
-                i += 4
-            else:
-                fixed.append(result[i])
-                i += 1
-        joined = " ".join(fixed)
-        if joined.count("(") != joined.count(")"):
-            return "True"  # unbalanced parens — fall through to let programmer review
-        return joined
+        Delegates to condition_translator module, passing the 88-level lookup.
+        """
+        from .condition_translator import translate_condition
+        return translate_condition(cond, self._condition_lookup)
 
     def _translate_if(self, raw: str) -> list[str]:
         """Fallback IF translation (used when block translator can't handle it)."""

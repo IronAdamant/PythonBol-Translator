@@ -17,12 +17,28 @@ from pathlib import Path
 
 from .models import (
     CobolProgram,
-    CobolStatement,
+    ConditionName,
     DataItem,
     FileControl,
-    Paragraph,
-    PicCategory,
     PicClause,
+)
+
+# Re-export PIC utilities so existing imports from .parser still work
+from .pic_parser import (  # noqa: F401
+    _PIC_REPEAT,
+    classify_pic,
+    compute_pic_size,
+    expand_pic,
+    parse_pic,
+)
+
+# Re-export procedure parser so existing imports from .parser still work
+from .procedure_parser import (  # noqa: F401
+    KNOWN_VERBS,
+    _join_sentences,
+    _parse_statements,
+    _split_operands,
+    parse_procedure,
 )
 
 # --- Preprocessing ---
@@ -118,96 +134,6 @@ def count_raw_lines(raw_text: str) -> tuple[int, int, int, int]:
     return total, code, comments, blanks
 
 
-# --- PIC parsing ---
-
-_PIC_REPEAT = re.compile(r"(CR|DB|[A9XZVBS,.\-+$P/])\((\d+)\)", re.IGNORECASE)
-
-
-def expand_pic(raw: str) -> str:
-    """Expand PIC shorthand: 9(5) -> 99999, X(3) -> XXX, etc."""
-    result = raw.upper().strip()
-    # Remove leading PIC/PICTURE keyword if present
-    for prefix in ("PIC ", "PICTURE "):
-        if result.startswith(prefix):
-            result = result[len(prefix):]
-            break
-
-    def _expand(m: re.Match) -> str:
-        char = m.group(1)
-        count = int(m.group(2))
-        return char * count
-
-    return _PIC_REPEAT.sub(_expand, result)
-
-
-def classify_pic(expanded: str) -> PicCategory:
-    """Determine the PIC category from an expanded PIC string."""
-    upper = expanded.upper()
-    has_nine = "9" in upper
-    has_x = "X" in upper
-    has_a = "A" in upper
-    has_edit = any(tok in upper for tok in ("CR", "DB")) or any(c in upper for c in "ZB,.+-$")
-
-    if has_edit:
-        return PicCategory.EDITED
-    if has_x and not has_nine:
-        return PicCategory.ALPHANUMERIC
-    if has_a and not has_nine and not has_x:
-        return PicCategory.ALPHABETIC
-    if has_nine and not has_x and not has_a:
-        return PicCategory.NUMERIC
-    if has_x:
-        return PicCategory.ALPHANUMERIC
-    return PicCategory.UNKNOWN
-
-
-def compute_pic_size(expanded: str) -> tuple[int, int, bool]:
-    """Return (total_size, decimal_places, is_signed) from expanded PIC."""
-    upper = expanded.upper()
-    signed = "S" in upper
-
-    # Remove sign character for size calculation
-    clean = upper.replace("S", "")
-
-    # Count decimals (digits after V)
-    decimals = 0
-    if "V" in clean:
-        _, after_v = clean.split("V", 1)
-        decimals = sum(1 for c in after_v if c in ("9",))
-
-    # Handle CR/DB as 2-position editing symbols before char loop
-    cr_db_extra = clean.upper().count("CR") + clean.upper().count("DB")
-    # Remove CR and DB for per-character counting to avoid double-counting
-    count_clean = clean.upper().replace("CR", "").replace("DB", "")
-
-    size = cr_db_extra * 2  # Each CR/DB occupies 2 display positions
-    for c in count_clean:
-        if c in ("9", "X", "A", "Z", "*"):
-            size += 1
-        elif c in (".", ",", "B", "+", "-", "$", "/"):
-            size += 1
-        elif c == "P":
-            size += 1
-        elif c == "V":
-            pass  # implied decimal, no display position
-    return size, decimals, signed
-
-
-def parse_pic(raw: str) -> PicClause:
-    """Parse a PIC clause string into a PicClause dataclass."""
-    expanded = expand_pic(raw)
-    category = classify_pic(expanded)
-    size, decimals, signed = compute_pic_size(expanded)
-    return PicClause(
-        raw=raw.strip(),
-        expanded=expanded,
-        category=category,
-        size=size,
-        decimals=decimals,
-        signed=signed,
-    )
-
-
 # --- Division splitting ---
 
 _DIVISION_RE = re.compile(
@@ -269,16 +195,40 @@ _SELECT_RE = re.compile(
     r"SELECT\s+([\w-]+)\s+ASSIGN\s+TO\s+[\"']?([\w.\-]+)[\"']?",
     re.IGNORECASE,
 )
+_FILE_STATUS_RE = re.compile(
+    r"FILE\s+STATUS\s+(?:IS\s+)?([\w-]+)", re.IGNORECASE,
+)
+_ORGANIZATION_RE = re.compile(
+    r"ORGANIZATION\s+(?:IS\s+)?(SEQUENTIAL|INDEXED|RELATIVE)", re.IGNORECASE,
+)
 
 
 def parse_environment(lines: list[str]) -> list[FileControl]:
-    """Extract SELECT/ASSIGN file controls."""
+    """Extract SELECT/ASSIGN file controls with FILE STATUS and ORGANIZATION."""
     combined = " ".join(l.strip() for l in lines)
     controls: list[FileControl] = []
-    for m in _SELECT_RE.finditer(combined):
+
+    # Split on SELECT keyword to process each file control entry
+    # (FILE STATUS etc. appear between SELECT entries)
+    select_blocks = re.split(r"(?=\bSELECT\b)", combined, flags=re.IGNORECASE)
+
+    for block in select_blocks:
+        m = _SELECT_RE.search(block)
+        if not m:
+            continue
+        file_status = None
+        organization = None
+        fs_m = _FILE_STATUS_RE.search(block)
+        if fs_m:
+            file_status = fs_m.group(1).upper()
+        org_m = _ORGANIZATION_RE.search(block)
+        if org_m:
+            organization = org_m.group(1).upper()
         controls.append(FileControl(
             select_name=m.group(1).upper(),
             assign_to=m.group(2),
+            file_status=file_status,
+            organization=organization,
         ))
     return controls
 
@@ -288,8 +238,13 @@ def parse_environment(lines: list[str]) -> list[FileControl]:
 _LEVEL_RE = re.compile(r"^(\d{1,2})\s+([\w-]+)")
 _PIC_RE = re.compile(r"PIC(?:TURE)?\s+(?:IS\s+)?(S?[0-9XAVZBS().,+\-$CRDB*P/]+)", re.IGNORECASE)
 _VALUE_RE = re.compile(r'VALUE\s+(?:IS\s+)?("[^"]*"|\'[^\']*\'|[+\-]?\d+\.\d+|[^\s.]+)(?:\.|$|\s)', re.IGNORECASE)
+_VALUES_RE = re.compile(r'VALUE(?:S)?\s+(?:IS\s+|ARE\s+)?(.*?)(?:\.\s*$|$)', re.IGNORECASE)
 _OCCURS_RE = re.compile(r"OCCURS\s+(\d+)", re.IGNORECASE)
 _REDEFINES_RE = re.compile(r"REDEFINES\s+([\w-]+)", re.IGNORECASE)
+_USAGE_RE = re.compile(
+    r"(?:USAGE\s+(?:IS\s+)?)?(COMP(?:UTATIONAL)?(?:-[0-9])?|BINARY|PACKED-DECIMAL|DISPLAY)\b",
+    re.IGNORECASE,
+)
 
 
 def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem], list[DataItem]]:
@@ -298,6 +253,8 @@ def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem
     file_items: list[DataItem] = []
     ws_items: list[DataItem] = []
     linkage_items: list[DataItem] = []
+
+    last_item: DataItem | None = None
 
     for line in lines:
         upper = line.strip().upper()
@@ -314,10 +271,20 @@ def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem
             # File descriptor — skip the FD line itself
             continue
 
+        # Check for 88-level condition names first
+        stripped = line.strip()
+        level_m = _LEVEL_RE.match(stripped)
+        if level_m and int(level_m.group(1)) == 88:
+            cond = _parse_88_condition(line)
+            if cond and last_item is not None:
+                last_item.conditions.append(cond)
+            continue
+
         item = _parse_data_item(line)
         if item is None:
             continue
 
+        last_item = item
         if section == "FILE":
             file_items.append(item)
         elif section == "WS":
@@ -332,8 +299,71 @@ def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem
     return file_items, ws_items, linkage_items
 
 
+def _parse_88_condition(line: str) -> ConditionName | None:
+    """Parse an 88-level condition name line.
+
+    Handles: VALUE "A", VALUE "A" "B" "C", VALUE 1 THRU 10.
+    """
+    stripped = line.strip()
+    level_m = _LEVEL_RE.match(stripped)
+    if not level_m:
+        return None
+    name = level_m.group(2).upper()
+
+    values_m = _VALUES_RE.search(stripped[level_m.end():])
+    if not values_m:
+        return ConditionName(name=name)
+
+    raw_values = values_m.group(1).strip().rstrip(".")
+    values: list[str] = []
+    thru_ranges: list[tuple[str, str]] = []
+
+    # Tokenize the value clause
+    tokens: list[str] = []
+    current = ""
+    in_quote: str | None = None
+    for ch in raw_values:
+        if in_quote:
+            current += ch
+            if ch == in_quote:
+                in_quote = None
+        elif ch in ('"', "'"):
+            in_quote = ch
+            current += ch
+        elif ch in (" ", "\t"):
+            if current:
+                tokens.append(current)
+                current = ""
+        else:
+            current += ch
+    if current:
+        tokens.append(current)
+
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        # Check for THRU/THROUGH range
+        if i + 2 < len(tokens) and tokens[i + 1].upper() in ("THRU", "THROUGH"):
+            lo = _strip_quotes(token)
+            hi = _strip_quotes(tokens[i + 2])
+            thru_ranges.append((lo, hi))
+            i += 3
+        else:
+            values.append(_strip_quotes(token))
+            i += 1
+
+    return ConditionName(name=name, values=values, thru_ranges=thru_ranges)
+
+
+def _strip_quotes(s: str) -> str:
+    """Remove surrounding quotes from a string value."""
+    if len(s) >= 2 and ((s[0] == '"' and s[-1] == '"') or (s[0] == "'" and s[-1] == "'")):
+        return s[1:-1]
+    return s
+
+
 def _parse_data_item(line: str) -> DataItem | None:
-    """Parse a single data item line."""
+    """Parse a single data item line (non-88 levels)."""
     stripped = line.strip()
     if not stripped:
         return None
@@ -345,7 +375,7 @@ def _parse_data_item(line: str) -> DataItem | None:
     level = int(level_m.group(1))
     name = level_m.group(2).upper()
 
-    # Skip 88-level condition names
+    # 88-levels are parsed separately by _parse_88_condition
     if level == 88:
         return None
 
@@ -374,6 +404,11 @@ def _parse_data_item(line: str) -> DataItem | None:
     if redefines_m:
         redefines = redefines_m.group(1).upper()
 
+    usage: str | None = None
+    usage_m = _USAGE_RE.search(stripped)
+    if usage_m:
+        usage = usage_m.group(1).upper()
+
     return DataItem(
         level=level,
         name=name,
@@ -381,6 +416,7 @@ def _parse_data_item(line: str) -> DataItem | None:
         value=value,
         occurs=occurs,
         redefines=redefines,
+        usage=usage,
     )
 
 
@@ -415,125 +451,6 @@ def _build_hierarchy(flat_items: list[DataItem]) -> list[DataItem]:
         stack.append(item)
 
     return roots
-
-
-# --- PROCEDURE DIVISION ---
-
-_PARAGRAPH_RE = re.compile(r"^([\w-]+)\s*\.\s*$")
-_SECTION_RE = re.compile(r"^([\w-]+)\s+SECTION\s*\.\s*$", re.IGNORECASE)
-_VERB_RE = re.compile(r"^([\w-]+)")
-
-# Verbs we explicitly recognize
-KNOWN_VERBS = frozenset({
-    "MOVE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE",
-    "DISPLAY", "ACCEPT", "PERFORM", "GO", "IF", "ELSE", "EVALUATE",
-    "WHEN", "READ", "WRITE", "OPEN", "CLOSE", "CALL", "STOP",
-    "SET", "STRING", "UNSTRING", "INSPECT", "INITIALIZE",
-    "REWRITE",
-    "END-IF", "END-EVALUATE", "END-PERFORM", "END-READ",
-    "NOT", "END-WRITE", "END-CALL", "END-STRING",
-})
-
-
-def parse_procedure(lines: list[str]) -> list[Paragraph]:
-    """Parse PROCEDURE DIVISION into paragraphs and statements."""
-    paragraphs: list[Paragraph] = []
-    current_para: Paragraph | None = None
-
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-
-        # Detect SECTION headers (e.g., MAIN-SECTION SECTION.)
-        section_m = _SECTION_RE.match(stripped)
-        if section_m:
-            candidate = section_m.group(1).upper()
-            if candidate not in KNOWN_VERBS:
-                current_para = Paragraph(name=candidate)
-                paragraphs.append(current_para)
-                continue
-
-        # Strip trailing period for paragraph detection
-        para_m = _PARAGRAPH_RE.match(stripped)
-        if para_m:
-            candidate = para_m.group(1).upper()
-            # Check it looks like a paragraph name (not a standalone verb)
-            if candidate not in KNOWN_VERBS:
-                current_para = Paragraph(name=candidate)
-                paragraphs.append(current_para)
-                continue
-
-        if current_para is None:
-            # Statements before any paragraph — create implicit main
-            current_para = Paragraph(name="__MAIN__")
-            paragraphs.append(current_para)
-
-        # Parse statements from this line
-        stmts = _parse_statements(stripped)
-        current_para.statements.extend(stmts)
-
-    return paragraphs
-
-
-def _split_operands(text: str) -> list[str]:
-    """Split operand text into tokens, preserving quoted strings as single tokens.
-
-    Parentheses are split into separate tokens so COMPUTE expressions
-    like ``WS-A * (WS-B + 1)`` produce ``['WS-A', '*', '(', 'WS-B', '+', '1', ')']``.
-    """
-    tokens: list[str] = []
-    current = ""
-    in_quote: str | None = None
-
-    for ch in text:
-        if in_quote:
-            current += ch
-            if ch == in_quote:
-                in_quote = None
-        elif ch in ('"', "'"):
-            in_quote = ch
-            current += ch
-        elif ch in (" ", "\t"):
-            if current:
-                tokens.append(current)
-                current = ""
-        elif ch in ("(", ")"):
-            if current:
-                tokens.append(current)
-                current = ""
-            tokens.append(ch)
-        else:
-            current += ch
-
-    if current:
-        tokens.append(current)
-
-    return tokens
-
-
-def _parse_statements(line: str) -> list[CobolStatement]:
-    """Parse one logical line into statement(s).
-
-    Handles simple single-verb lines. Multi-statement lines
-    (separated by periods or scope terminators) are kept as one
-    statement for simplicity in the MVP.
-    """
-    stripped = line.strip().rstrip(".")
-    if not stripped:
-        return []
-
-    verb_m = _VERB_RE.match(stripped)
-    if not verb_m:
-        return []
-
-    verb = verb_m.group(1).upper()
-    rest = stripped[verb_m.end():].strip()
-
-    # Split remaining text into operands, preserving quoted strings
-    operands = _split_operands(rest) if rest else []
-
-    return [CobolStatement(verb=verb, raw_text=line.strip(), operands=operands)]
 
 
 # --- Main parse entry point ---

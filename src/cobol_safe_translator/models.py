@@ -33,6 +33,14 @@ class PicClause:
 # --- DATA DIVISION models ---
 
 @dataclass
+class ConditionName:
+    """88-level condition name (e.g., 88 WS-EOF VALUE "Y")."""
+    name: str
+    values: list[str] = field(default_factory=list)  # VALUE "A" "B" "C"
+    thru_ranges: list[tuple[str, str]] = field(default_factory=list)  # VALUE 1 THRU 10
+
+
+@dataclass
 class DataItem:
     level: int
     name: str
@@ -40,7 +48,9 @@ class DataItem:
     value: str | None = None
     occurs: int | None = None
     redefines: str | None = None
+    usage: str | None = None  # COMP, COMP-3, BINARY, etc.
     children: list[DataItem] = field(default_factory=list)
+    conditions: list[ConditionName] = field(default_factory=list)  # 88-level items
 
 
 # --- PROCEDURE DIVISION models ---
@@ -64,6 +74,8 @@ class Paragraph:
 class FileControl:
     select_name: str
     assign_to: str
+    file_status: str | None = None
+    organization: str | None = None  # SEQUENTIAL, INDEXED, RELATIVE
 
 
 @dataclass

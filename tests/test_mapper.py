@@ -980,14 +980,16 @@ class TestEvaluateStatement:
         assert "else:" in source
         assert "self.write_normal_record()" in source
 
-    def test_inline_evaluate_emits_todo(self):
-        """Inline EVALUATE (packed in one statement) should emit TODO."""
+    def test_inline_evaluate_now_translated(self):
+        """Inline EVALUATE is now split and handled by block translator."""
         src = _make_cobol(["EVALUATE TRUE WHEN OTHER DISPLAY WS-A END-EVALUATE."])
         program = parse_cobol(src)
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "TODO(high)" in source
+        # Multi-line sentence joining splits this into proper block statements
+        assert "if True:" in source
+        assert "print(" in source
 
 
 class TestMoveFunction:
