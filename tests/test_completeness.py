@@ -89,7 +89,11 @@ class TestAcceptTranslation:
         program = parse_cobol(src)
         source = generate_python(analyze(program))
         ast.parse(source)
-        assert "TODO(high)" not in source
+        # Check code body (after the module docstring) has no TODO(high)
+        # The header disclaimer mentions TODO(high) as guidance, which is expected
+        body_start = source.find('class ')
+        assert body_start != -1
+        assert "TODO(high)" not in source[body_start:]
 
 
 # ============================================================

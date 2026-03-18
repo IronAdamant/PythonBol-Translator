@@ -2,6 +2,13 @@
 
 This document lists every COBOL construct handled by cobol-safe-translator, with examples and known limitations.
 
+> [!IMPORTANT]
+> **This tool translates COBOL language constructs to Python.** It does not translate or provide runtime infrastructure such as CICS transaction processing, DB2/SQL database access, IMS/DLI, MQ messaging, VSAM file systems, or JCL job control. These are stripped from the source and replaced with `TODO(high)` hints indicating what Python libraries or services are needed as replacements.
+>
+> The generated code is a **migration accelerator** — it handles the heavy lifting of converting COBOL syntax, data structures, and procedure logic to Python, but the middleware and platform integrations must be implemented separately using appropriate Python libraries (e.g. SQLAlchemy for DB2, Flask/FastAPI for CICS, ibm_mq for MQ).
+>
+> **All untranslated constructs are marked with `TODO(high)`.** Review every marker before production use.
+
 > **Known parser limitation:** Statements that span multiple physical COBOL lines (without a column-7 continuation `-`) are not joined by the parser. Each physical line is treated as a separate statement. As a result, a DIVIDE or MULTIPLY whose `GIVING` clause is on the next line will produce two separate statements instead of one complete translation. Write all statement clauses on a single line (or use the column-7 `-` continuation character) to get the best translation results.
 
 ## Divisions

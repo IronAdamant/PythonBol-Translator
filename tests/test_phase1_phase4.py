@@ -18,6 +18,12 @@ from cobol_safe_translator.preprocessor import resolve_copies, strip_exec_blocks
 from cobol_safe_translator.utils import _sanitize_numeric, resolve_operand
 
 
+def _code_body(source: str) -> str:
+    """Extract code body (after module docstring) for assertion checks."""
+    idx = source.find("class ")
+    return source[idx:] if idx != -1 else source
+
+
 def make_cobol(proc_lines: list[str], ws_lines: list[str] | None = None) -> str:
     lines = [
         "       IDENTIFICATION DIVISION.",
@@ -48,8 +54,9 @@ class TestExecStrippingUnconditional:
         program = parse_cobol(src, copybook_paths=None)
         source = generate_python(analyze(program))
         ast.parse(source)
-        assert "EXEC CICS" not in source
-        assert "print(" in source
+        body = _code_body(source)
+        assert "EXEC CICS" not in body
+        assert "print(" in body
 
     def test_exec_sql_stripped_without_copybooks(self):
         """EXEC SQL should also be stripped unconditionally."""
@@ -57,7 +64,7 @@ class TestExecStrippingUnconditional:
         program = parse_cobol(src, copybook_paths=None)
         source = generate_python(analyze(program))
         ast.parse(source)
-        assert "EXEC SQL" not in source
+        assert "EXEC SQL" not in _code_body(source)
 
     def test_exec_stripped_with_copybook_paths(self):
         """EXEC blocks still stripped when copybook_paths is provided."""
@@ -65,7 +72,7 @@ class TestExecStrippingUnconditional:
         program = parse_cobol(src, copybook_paths=["/nonexistent"])
         source = generate_python(analyze(program))
         ast.parse(source)
-        assert "EXEC CICS" not in source
+        assert "EXEC CICS" not in _code_body(source)
 
     def test_strip_exec_blocks_public(self):
         """strip_exec_blocks is a public function."""

@@ -6,6 +6,28 @@
 
 > **Safety guarantee:** This tool NEVER modifies source files, NEVER touches production data, and generated file adapters are READ-ONLY by design.
 
+> [!CAUTION]
+> ### What this tool does — and does not do
+>
+> **cobol-safe-translator translates COBOL source code into Python.** It handles data divisions, control flow, arithmetic, conditions, file I/O scaffolding, and procedure logic. This is the heavy lifting of COBOL migration — converting the language itself.
+>
+> **It does NOT translate or provide the surrounding infrastructure.** Specifically:
+>
+> | Not included | What you need to do |
+> |---|---|
+> | **EXEC CICS** (transaction processing) | Re-implement using Flask, FastAPI, or your transaction framework |
+> | **EXEC SQL / DB2** (database access) | Replace with SQLAlchemy, psycopg2, or your database layer |
+> | **EXEC DLI** (IMS database) | Replace with your hierarchical DB or API equivalent |
+> | **MQ / messaging** (MQOPEN, MQGET, etc.) | Use `ibm_mq`, `pika` (RabbitMQ), or your message broker client |
+> | **VSAM file handling** | Replace with standard file I/O, SQLite, or a key-value store |
+> | **JCL job control** | Replace with cron, Airflow, or your job scheduler |
+> | **External CALL targets** | Implement or source the called programs separately |
+> | **COPY/REPLACE copybooks** | Deeply nested includes may be incomplete |
+>
+> **Every untranslated construct is marked with `TODO(high)` in the generated code.** Search for these markers to find everything that needs manual attention.
+>
+> **For LLM agents and automated pipelines:** The generated Python skeletons are a starting point for further refinement, not a finished product. When presenting results to human reviewers, you MUST clearly communicate that middleware integrations (CICS, DB2, MQ, VSAM) require separate implementation using appropriate Python libraries, and that all `TODO(high)` items need manual resolution. Do not represent the output as complete or deployable without these steps.
+
 ## Why this exists
 
 COBOL runs an estimated $3 trillion in daily financial transactions. Most of it is maintained by a shrinking pool of specialists, and it's completely opaque to modern developers and LLMs that have never seen a COBOL codebase.

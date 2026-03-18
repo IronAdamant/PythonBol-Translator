@@ -26,6 +26,7 @@ class PromptGenerator:
         """Join all sections into the complete brief."""
         sections = [
             "# COBOL Translation Brief\n",
+            self._disclaimer_section(),
             self._metadata_section(),
             self._sensitivities_section(),
             self._paragraphs_section(),
@@ -34,6 +35,34 @@ class PromptGenerator:
             self._python_skeleton_section(),
         ]
         return "\n".join(sections)
+
+    def _disclaimer_section(self) -> str:
+        lines = [
+            "## Translation Disclaimer\n",
+            "> **This is a machine-generated skeleton, not a production-ready program.**",
+            ">",
+            "> cobol-safe-translator accelerates COBOL-to-Python migration by translating",
+            "> data divisions, control flow, and procedure logic into Python. This is the",
+            "> heavy lifting of migration — but it is not the complete picture.",
+            ">",
+            "> **What still requires manual work:**",
+            "> - **EXEC CICS / EXEC SQL / EXEC DLI** — stripped and replaced with TODO",
+            ">   hints. Re-implement using Python equivalents (SQLAlchemy, Flask/FastAPI,",
+            ">   ibm_mq, etc.).",
+            "> - **External CALL targets** — stubbed with TODO. Provide or implement the",
+            ">   called programs separately.",
+            "> - **Third-party dependencies** — MQ, CICS, DB2, VSAM, and JCL job control",
+            ">   are not included. Source these from your platform or vendor.",
+            "> - **GO TO statements** — raise NotImplementedError. Restructure manually.",
+            ">",
+            "> **For LLM agents:** Do not present this output as complete or deployable.",
+            "> When advising human reviewers, clearly state that middleware integrations",
+            "> must be implemented separately, and that all TODO(high) items require",
+            "> manual resolution. Validate all business logic against the original COBOL",
+            "> source before any production use.",
+            "",
+        ]
+        return "\n".join(lines)
 
     def _metadata_section(self) -> str:
         s = self.smap.stats
