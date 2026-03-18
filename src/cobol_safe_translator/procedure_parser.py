@@ -18,10 +18,10 @@ _SECTION_RE = re.compile(r"^([\w-]+)\s+SECTION\s*\.\s*$", re.IGNORECASE)
 # Verbs we explicitly recognize
 KNOWN_VERBS = frozenset({
     "MOVE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE",
-    "DISPLAY", "ACCEPT", "PERFORM", "GO", "IF", "ELSE", "EVALUATE",
+    "DISPLAY", "ACCEPT", "PERFORM", "GO", "GOBACK", "IF", "ELSE", "EVALUATE",
     "WHEN", "READ", "WRITE", "OPEN", "CLOSE", "CALL", "STOP",
     "SET", "STRING", "UNSTRING", "INSPECT", "INITIALIZE",
-    "REWRITE", "CONTINUE",
+    "REWRITE", "CONTINUE", "EXIT",
     "END-IF", "END-EVALUATE", "END-PERFORM", "END-READ",
     "END-COMPUTE", "END-SUBTRACT", "END-ADD", "END-MULTIPLY",
     "END-DIVIDE", "END-UNSTRING",

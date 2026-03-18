@@ -94,7 +94,11 @@ def _collect_copy_block(lines: list[str], start_idx: int) -> tuple[str, int]:
         # Check if this line contains the terminating period
         # Strip any trailing comment area for the check
         text = lines[i]
-        content = text[7:72] if len(text) > 7 else text
+        # Handle both fixed-format (cols 8-72) and free-format (full line)
+        if len(text) > 7 and not text[:6].strip().isalpha():
+            content = text[7:72]
+        else:
+            content = text
         if content.rstrip().endswith("."):
             return "\n".join(collected), i
         i += 1

@@ -114,7 +114,8 @@ def _translate_single(src: Path, out_dir: Path, config: str | None,
 
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_name = _to_python_filename(program.program_id)
+        pid = program.program_id or src.stem
+        out_name = _to_python_filename(pid)
         out_path = out_dir / out_name
         out_path.write_text(python_source, encoding="utf-8")
     except OSError as e:

@@ -370,6 +370,14 @@ class PythonMapper:
             return self._translate_call(ops)
         elif verb == "STOP":
             return ["return"]
+        elif verb == "GOBACK":
+            return ["return"]
+        elif verb == "EXIT":
+            if ops and ops[0].upper() == "PROGRAM":
+                return ["return"]
+            elif ops and ops[0].upper() == "PERFORM":
+                return ["break  # EXIT PERFORM"]
+            return ["pass  # EXIT"]
         elif verb == "CONTINUE":
             return ["pass  # CONTINUE"]
         elif verb == "ACCEPT":
