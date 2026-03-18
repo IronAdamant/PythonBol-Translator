@@ -289,12 +289,29 @@ def translate_compute(
         eq_idx = ops.index("=")
         targets = [t for t in ops[:eq_idx] if t.upper() != "ROUNDED"]
         expr_parts = ops[eq_idx + 1:]
+
+        # Detect FUNCTION intrinsic — bail to safe TODO
+        if any(p.upper() == "FUNCTION" for p in expr_parts):
+            return [
+                f"# COMPUTE: {' '.join(ops)}",
+                f"# TODO(high): COMPUTE uses FUNCTION intrinsic — manual translation required",
+            ]
+
+        # Detect LENGTH OF pattern — translate to len()
         resolved: list[str] = []
-        for part in expr_parts:
-            if part in _COMPUTE_OPERATORS:
+        i = 0
+        while i < len(expr_parts):
+            part = expr_parts[i]
+            if part.upper() == "LENGTH" and i + 2 < len(expr_parts) and expr_parts[i + 1].upper() == "OF":
+                field = expr_parts[i + 2]
+                resolved.append(f"len(str({resolve(field)}))")
+                i += 3
+            elif part in _COMPUTE_OPERATORS:
                 resolved.append(part)
+                i += 1
             else:
                 resolved.append(resolve(part))
+                i += 1
         expr = " ".join(resolved)
         if not expr:
             return [

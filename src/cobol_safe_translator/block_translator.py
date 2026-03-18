@@ -91,13 +91,17 @@ def translate_if_block(
                 _indent_line("pass  # TODO(high): missing END-IF", indent + 1)
             )
 
-    if not then_body:
+    def _has_code(body: list[str]) -> bool:
+        """Check if body has any non-comment executable lines."""
+        return any(ln.strip() and not ln.strip().startswith("#") for ln in body)
+
+    if not _has_code(then_body):
         then_body.append(_indent_line("pass", indent + 1))
     lines.extend(then_body)
 
     if in_else:
         lines.append(_indent_line("else:", indent))
-        if not else_body:
+        if not _has_code(else_body):
             else_body.append(_indent_line("pass", indent + 1))
         lines.extend(else_body)
 

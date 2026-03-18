@@ -27,6 +27,9 @@ _CMP_PHRASES: list[tuple[list[str], str]] = [
     (["NOT", "GREATER", "THAN"], "<="),
     (["NOT", "LESS", "THAN"], ">="),
     (["NOT", "EQUAL", "TO"], "!="),
+    (["NOT", "EQUAL"], "!="),
+    (["NOT", "GREATER"], "<="),
+    (["NOT", "LESS"], ">="),
     (["GREATER", "THAN"], ">"),
     (["LESS", "THAN"], "<"),
     (["EQUAL", "TO"], "=="),
@@ -170,6 +173,13 @@ def _handle_conjunction(tokens: list[str], i: int, n: int, result: list[str],
     if i >= n:
         return i
     next_upper = _upper(tokens[i])
+
+    # NOT followed by 88-level or class condition — new sub-expression, no implied subject
+    if next_upper == 'NOT' and i + 1 < n:
+        peek = _upper(tokens[i + 1])
+        if peek in condition_lookup or peek in ('NUMERIC', 'ALPHABETIC'):
+            return i  # let _handle_not deal with it
+
     # Abbreviated: AND/OR followed by comparison op (no left operand)
     if next_upper in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL', 'NOT'):
         if last_subject:
@@ -246,13 +256,12 @@ def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) ->
             continue
         if t == 'FUNCTION':
             # COBOL intrinsic function: FUNCTION NUMVAL(x) etc.
-            # Resolve as a TODO placeholder
+            # Can't translate — use 0 as placeholder
             if i + 1 < n:
-                func_name = tokens[i + 1]
-                result.append(f"0  # TODO(high): FUNCTION {func_name}")
-                i += 2
+                i += 2  # skip FUNCTION + function-name
             else:
                 i += 1
+            result.append("0")
             continue
         if t == 'NOT':
             i = _handle_not(tokens, i, n, result, condition_lookup)

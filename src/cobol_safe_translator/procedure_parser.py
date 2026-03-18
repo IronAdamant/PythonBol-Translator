@@ -22,7 +22,7 @@ KNOWN_VERBS = frozenset({
     "DISPLAY", "ACCEPT", "PERFORM", "GO", "IF", "ELSE", "EVALUATE",
     "WHEN", "READ", "WRITE", "OPEN", "CLOSE", "CALL", "STOP",
     "SET", "STRING", "UNSTRING", "INSPECT", "INITIALIZE",
-    "REWRITE",
+    "REWRITE", "CONTINUE",
     "END-IF", "END-EVALUATE", "END-PERFORM", "END-READ",
     "NOT", "END-WRITE", "END-CALL", "END-STRING",
 })
@@ -186,7 +186,25 @@ def _split_operands(text: str) -> list[str]:
     if current:
         tokens.append(current)
 
-    return tokens
+    # Post-process: split tokens where a closing quote is immediately followed
+    # by an identifier (e.g., 'ACCT ID : 'WS-KEY -> two tokens)
+    fixed: list[str] = []
+    for tok in tokens:
+        if len(tok) > 2 and (tok[0] in ('"', "'")) and tok[0] in tok[1:]:
+            # Find the closing quote position
+            close_idx = tok.index(tok[0], 1)
+            if close_idx < len(tok) - 1:
+                # There's content after the closing quote
+                fixed.append(tok[:close_idx + 1])
+                remainder = tok[close_idx + 1:]
+                if remainder:
+                    fixed.append(remainder)
+            else:
+                fixed.append(tok)
+        else:
+            fixed.append(tok)
+
+    return fixed
 
 
 def _parse_statements(line: str) -> list[CobolStatement]:

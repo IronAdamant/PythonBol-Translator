@@ -348,6 +348,8 @@ class PythonMapper:
             return self._translate_call(ops)
         elif verb == "STOP":
             return ["return"]
+        elif verb == "CONTINUE":
+            return ["pass  # CONTINUE"]
         elif verb == "ACCEPT":
             return [f"# ACCEPT: {stmt.raw_text}", f"# TODO(high): ACCEPT — user input requires manual implementation"]
         elif verb == "REWRITE":
@@ -407,7 +409,7 @@ class PythonMapper:
             return fig
         # COBOL intrinsic function — can't auto-translate
         if upper == "FUNCTION":
-            return "0  # TODO(high): FUNCTION intrinsic"
+            return "0"
         # Skip OF/IN qualifiers (take the field before OF)
         if " OF " in op.upper() or " IN " in op.upper():
             field = op.split()[0]
