@@ -10,12 +10,46 @@ requires-python = ">=3.11"
 license = "MIT"
 readme = "README.md"
 dependencies = []
+authors = [
+    { name = "IronAdamant", email = "18153828+IronAdamant@users.noreply.github.com" },
+]
+keywords = ["cobol", "python", "translator", "migration", "mainframe", "legacy"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Compilers",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/IronAdamant/PythonBol-Translator"
+Repository = "https://github.com/IronAdamant/PythonBol-Translator"
+Issues = "https://github.com/IronAdamant/PythonBol-Translator/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
 
 [project.scripts]
 cobol2py = "cobol_safe_translator.cli:main"
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.claude",
+    "/.mcp.json",
+    "/out1",
+    "/out2",
+    "/tests",
+    "/wiki-local",
+    "/LLM_Development.md",
+    "/COMPLETE_PROJECT_DOCUMENTATION.md",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cobol_safe_translator"]

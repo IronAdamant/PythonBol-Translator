@@ -105,7 +105,8 @@ def _collect_copy_block(lines: list[str], start_idx: int) -> tuple[str, int]:
             content = text[7:72]
         else:
             content = text
-        if content.rstrip().endswith("."):
+        # Check fixed-format content area OR full line (for free-format)
+        if content.rstrip().endswith(".") or text.rstrip().endswith("."):
             return "\n".join(collected), i
         i += 1
     # Unterminated COPY — return what we have

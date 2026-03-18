@@ -1,0 +1,5 @@
+include LICENSE
+include README.md
+include SUPPORTED_SUBSET.md
+recursive-include config *.json *.example
+recursive-include samples *.cob *.cbl *.cobol

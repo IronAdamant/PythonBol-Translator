@@ -311,12 +311,62 @@ def translate_divide(
     return [f"# DIVIDE: could not parse operands: {' '.join(ops)}"]
 
 
+def _merge_spaced_subscripts(tokens: list[str]) -> list[str]:
+    """Merge space-separated subscripts into their parent identifiers.
+
+    In COBOL, ``TABLE (1 2)`` is equivalent to ``TABLE(1 2)``.
+    The tokenizer may split these when a space precedes the paren.
+    This function re-attaches ``(`` ... ``)`` groups to the preceding
+    identifier so that resolve_operand can handle them properly.
+
+    Only merges when the token before ``(`` looks like a COBOL
+    identifier (contains a letter) and is NOT an arithmetic operator
+    or keyword.
+    """
+    result: list[str] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        # Check if this is a standalone "(" preceded by an identifier
+        if (tok == "(" and result
+                and result[-1] not in _COMPUTE_OPERATORS
+                and result[-1].upper() not in _BITWISE_OPS
+                and result[-1].upper() not in ("=", "ROUNDED", "FUNCTION",
+                                                "LENGTH", "OF", "IN",
+                                                "NOT", "AND", "OR")
+                and any(c.isalpha() for c in result[-1])):
+            # Collect tokens until closing ")"
+            depth = 1
+            inner_tokens: list[str] = []
+            j = i + 1
+            while j < len(tokens) and depth > 0:
+                if tokens[j] == "(":
+                    depth += 1
+                elif tokens[j] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                inner_tokens.append(tokens[j])
+                j += 1
+            # Merge: attach (inner) to the identifier
+            inner = " ".join(inner_tokens)
+            result[-1] = f"{result[-1]}({inner})"
+            i = j + 1  # skip past closing ")"
+        else:
+            result.append(tok)
+            i += 1
+    return result
+
+
 def translate_compute(
     ops: list[str],
     resolve: Callable[[str], str],
 ) -> list[str]:
     """Translate COMPUTE verb."""
     if "=" in ops:
+        # Pre-process: merge space-separated subscripts into identifiers
+        # e.g., TABLE ( 1 2 ) → TABLE(1 2)
+        ops = _merge_spaced_subscripts(ops)
         eq_idx = ops.index("=")
         targets = [t for t in ops[:eq_idx] if t.upper() != "ROUNDED"]
         expr_parts = ops[eq_idx + 1:]
