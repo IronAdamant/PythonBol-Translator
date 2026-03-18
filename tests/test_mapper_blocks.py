@@ -214,3 +214,140 @@ class TestEvaluateStatement:
         # Multi-line sentence joining splits this into proper block statements
         assert "if True:" in source
         assert "print(" in source
+
+
+class TestSearchStatement:
+    def test_serial_search_with_at_end(self):
+        """SEARCH with AT END and WHEN should generate for-loop with break."""
+        src = make_cobol([
+            "SEARCH WS-TABLE",
+            "    AT END",
+            '        DISPLAY "NOT FOUND"',
+            "    WHEN WS-A = 1",
+            '        DISPLAY "FOUND"',
+            "END-SEARCH.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "_found = False" in source
+        assert "for _idx in range(len(self.data.ws_table)):" in source
+        assert "if self.data.ws_a.value == 1:" in source
+        assert "_found = True" in source
+        assert "break" in source
+        assert "if not _found:" in source
+        assert '"NOT FOUND"' in source
+        assert '"FOUND"' in source
+
+    def test_search_all_generates_linear_scan_comment(self):
+        """SEARCH ALL should emit a comment noting binary search is approximated."""
+        src = make_cobol([
+            "SEARCH ALL WS-TABLE",
+            "    AT END",
+            '        DISPLAY "NOT FOUND"',
+            "    WHEN WS-KEY = WS-A",
+            '        DISPLAY "FOUND"',
+            "END-SEARCH.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "SEARCH ALL WS-TABLE" in source
+        assert "binary search approximated as linear" in source
+        assert "for _idx in range(" in source
+
+    def test_search_without_at_end(self):
+        """SEARCH without AT END should generate loop without the not-found block."""
+        src = make_cobol([
+            "SEARCH WS-TABLE",
+            "    WHEN WS-A = 1",
+            '        DISPLAY "FOUND"',
+            "END-SEARCH.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "_found = False" in source
+        assert "for _idx in range(" in source
+        assert "break" in source
+        assert "if not _found:" not in source
+
+    def test_search_multiple_when_clauses(self):
+        """SEARCH with multiple WHENs should generate multiple if-break blocks."""
+        src = make_cobol([
+            "SEARCH WS-TABLE",
+            "    WHEN WS-A = 1",
+            '        DISPLAY "ONE"',
+            "    WHEN WS-A = 2",
+            '        DISPLAY "TWO"',
+            "END-SEARCH.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert source.count("break") == 2
+        assert '"ONE"' in source
+        assert '"TWO"' in source
+
+    def test_search_multi_statement_when_body(self):
+        """WHEN body with multiple statements should all appear inside the if."""
+        src = make_cobol([
+            "SEARCH WS-TABLE",
+            "    WHEN WS-A = 1",
+            "        MOVE 1 TO WS-B",
+            '        DISPLAY "FOUND"',
+            "END-SEARCH.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ws_b.set(1)" in source
+        assert '"FOUND"' in source
+
+    def test_search_inside_if(self):
+        """SEARCH nested inside IF should produce valid Python."""
+        src = make_cobol([
+            "IF WS-A > 0",
+            "    SEARCH WS-TABLE",
+            "        AT END",
+            '            DISPLAY "NOT FOUND"',
+            "        WHEN WS-A = 1",
+            '            DISPLAY "FOUND"',
+            "    END-SEARCH",
+            "END-IF.",
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "if self.data.ws_a.value > 0:" in source
+        assert "for _idx in range(" in source
+
+    def test_statements_after_end_search_not_in_block(self):
+        """Statements after END-SEARCH should be at the same indent as SEARCH."""
+        src = make_cobol([
+            "SEARCH WS-TABLE",
+            "    AT END",
+            '        DISPLAY "NOT FOUND"',
+            "    WHEN WS-A = 1",
+            '        DISPLAY "FOUND"',
+            "END-SEARCH.",
+            'DISPLAY "AFTER".',
+        ])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        lines = source.split("\n")
+        after_line = [l for l in lines if '"AFTER"' in l]
+        search_line = [l for l in lines if "# SEARCH WS-TABLE" in l]
+        assert after_line, "Expected AFTER display in output"
+        assert search_line, "Expected SEARCH comment in output"
+        after_indent = len(after_line[0]) - len(after_line[0].lstrip())
+        search_indent = len(search_line[0]) - len(search_line[0].lstrip())
+        assert after_indent == search_indent, "AFTER should be at same indent as SEARCH"

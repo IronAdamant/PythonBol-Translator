@@ -1,7 +1,8 @@
-"""Block-level translation for IF and EVALUATE COBOL statements.
+"""Block-level translation for IF, EVALUATE, and SEARCH COBOL statements.
 
 The parser produces FLAT CobolStatement objects. This module reconstructs
-block structure at the mapper level to generate Python if/elif/else blocks.
+block structure at the mapper level to generate Python if/elif/else blocks
+and SEARCH for-loops.
 
 Pipeline position: Called by mapper.py during paragraph method generation.
 """
@@ -13,7 +14,7 @@ from typing import Callable
 from .models import CobolStatement
 from .utils import resolve_operand as _fallback_resolve
 
-_BLOCK_OPENERS = frozenset({"IF", "EVALUATE"})
+_BLOCK_OPENERS = frozenset({"IF", "EVALUATE", "SEARCH"})
 
 # Verbs that indicate an inline IF/EVALUATE (body packed into operands)
 _KNOWN_BODY_VERBS = frozenset({
@@ -82,6 +83,12 @@ def translate_if_block(
             nested_lines, i = translate_evaluate_block(
                 stmts, i, translate_stmt_fn, translate_cond_fn,
                 _fallback_resolve, indent + 1,
+            )
+            target.extend(nested_lines)
+            continue
+        if stmt.verb == "SEARCH":
+            nested_lines, i = translate_search_block(
+                stmts, i, translate_stmt_fn, translate_cond_fn, indent + 1,
             )
             target.extend(nested_lines)
             continue
@@ -169,6 +176,12 @@ def _translate_evaluate_also(
         if current_when_ops is not None:
             if stmt.verb == "IF":
                 nested, i = translate_if_block(
+                    stmts, i, translate_stmt_fn, translate_cond_fn, indent + 1,
+                )
+                current_body.extend(nested)
+                continue
+            if stmt.verb == "SEARCH":
+                nested, i = translate_search_block(
                     stmts, i, translate_stmt_fn, translate_cond_fn, indent + 1,
                 )
                 current_body.extend(nested)
@@ -288,6 +301,12 @@ def translate_evaluate_block(
                 nested_lines, i = translate_evaluate_block(
                     stmts, i, translate_stmt_fn, translate_cond_fn,
                     resolve_operand_fn, indent + 1,
+                )
+                current_body.extend(nested_lines)
+                continue
+            if stmt.verb == "SEARCH":
+                nested_lines, i = translate_search_block(
+                    stmts, i, translate_stmt_fn, translate_cond_fn, indent + 1,
                 )
                 current_body.extend(nested_lines)
                 continue
@@ -467,3 +486,189 @@ def translate_inline_evaluate(
         _indent_line(f"# {stmt.raw_text}", indent),
         _indent_line(f"# TODO(high): translate inline EVALUATE manually", indent),
     ]
+
+
+# ---------------------------------------------------------------------------
+# SEARCH block translation
+# ---------------------------------------------------------------------------
+
+def _parse_search_operands(operands: list[str]) -> tuple[str, bool, bool]:
+    """Extract table name and flags from SEARCH operands.
+
+    Returns (table_name, is_search_all, has_at_end).
+    The parser folds AT END into the SEARCH operands (since AT and END are
+    in _OPERAND_VERBS).  Statements between SEARCH and the first WHEN are
+    the AT END body only when AT END was present in the operands.
+    """
+    is_all = False
+    has_at_end = False
+    table_name = ""
+    upper_ops = [o.upper() for o in operands]
+    for idx, upper in enumerate(upper_ops):
+        if upper == "ALL":
+            is_all = True
+        elif upper == "AT" and idx + 1 < len(upper_ops) and upper_ops[idx + 1] == "END":
+            has_at_end = True
+        elif upper not in ("AT", "END") and not table_name:
+            table_name = operands[idx]
+    return table_name, is_all, has_at_end
+
+
+def translate_search_block(
+    stmts: list[CobolStatement],
+    start_idx: int,
+    translate_stmt_fn: Callable[[CobolStatement], list[str]],
+    translate_cond_fn: Callable[[str], str],
+    indent: int = 0,
+) -> tuple[list[str], int]:
+    """Translate a SEARCH / SEARCH ALL block into a Python for-loop.
+
+    Scans forward from *start_idx* collecting AT END and WHEN clauses
+    until END-SEARCH.  Returns (python_lines, next_index).
+
+    Serial SEARCH generates::
+
+        _found = False
+        for _idx in range(len(self.data.table)):
+            if condition_1:
+                action_1
+                _found = True
+                break
+        if not _found:
+            at_end_action
+
+    SEARCH ALL is approximated as a linear scan (we cannot guarantee the
+    table is sorted at run-time).
+    """
+    from .utils import _to_python_name  # local import to avoid circular
+
+    search_stmt = stmts[start_idx]
+    table_name, is_search_all, has_at_end = _parse_search_operands(
+        search_stmt.operands
+    )
+
+    if not table_name:
+        # Cannot determine table — fall back to TODO
+        return [
+            _indent_line(
+                "# TODO(high): SEARCH could not determine table name", indent
+            ),
+            _indent_line(f"# {search_stmt.raw_text}", indent),
+        ], start_idx + 1
+
+    py_table = _to_python_name(table_name)
+
+    # ------------------------------------------------------------------
+    # Collect AT END body and WHEN clauses.
+    #
+    # The parser folds "AT END" into the SEARCH operands.  If has_at_end
+    # is True, statements between the SEARCH stmt and the first WHEN are
+    # the AT END body.  Otherwise those stray statements are ignored (or
+    # placed in a fallback bucket).
+    # ------------------------------------------------------------------
+    at_end_body: list[str] = []
+    when_clauses: list[tuple[str, list[str]]] = []  # (condition_text, body)
+    current_when_cond: str | None = None
+    current_body: list[str] = []
+    i = start_idx + 1
+
+    while i < len(stmts):
+        stmt = stmts[i]
+
+        if stmt.verb == "END-SEARCH":
+            if current_when_cond is not None:
+                when_clauses.append((current_when_cond, current_body))
+            i += 1
+            break
+
+        if stmt.verb == "WHEN":
+            # Flush previous WHEN clause if any
+            if current_when_cond is not None:
+                when_clauses.append((current_when_cond, current_body))
+            current_when_cond = " ".join(stmt.operands)
+            current_body = []
+            i += 1
+            continue
+
+        # Decide which body this statement belongs to
+        if current_when_cond is not None:
+            target = current_body
+            body_indent = indent + 2  # inside the for + if
+        elif has_at_end:
+            target = at_end_body
+            body_indent = indent + 1  # inside "if not _found:"
+        else:
+            # No AT END and no WHEN yet — stray statement, collect anyway
+            target = at_end_body
+            body_indent = indent + 1
+
+        # Handle nested blocks
+        if stmt.verb == "IF":
+            nested, i = translate_if_block(
+                stmts, i, translate_stmt_fn, translate_cond_fn, body_indent,
+            )
+            target.extend(nested)
+            continue
+        if stmt.verb == "EVALUATE":
+            nested, i = translate_evaluate_block(
+                stmts, i, translate_stmt_fn, translate_cond_fn,
+                _fallback_resolve, body_indent,
+            )
+            target.extend(nested)
+            continue
+        if stmt.verb == "SEARCH":
+            nested, i = translate_search_block(
+                stmts, i, translate_stmt_fn, translate_cond_fn, body_indent,
+            )
+            target.extend(nested)
+            continue
+
+        translated = translate_stmt_fn(stmt)
+        for tl in translated:
+            target.append(_indent_line(tl, body_indent))
+        i += 1
+    else:
+        # Ran off the end without END-SEARCH
+        if current_when_cond is not None:
+            when_clauses.append((current_when_cond, current_body))
+
+    # --- Generate Python code ---
+    lines: list[str] = []
+
+    if is_search_all:
+        lines.append(
+            _indent_line(
+                f"# SEARCH ALL {table_name} (binary search approximated as linear)",
+                indent,
+            )
+        )
+    else:
+        lines.append(_indent_line(f"# SEARCH {table_name}", indent))
+
+    lines.append(_indent_line("_found = False", indent))
+    lines.append(
+        _indent_line(f"for _idx in range(len(self.data.{py_table})):", indent)
+    )
+
+    if not when_clauses:
+        lines.append(
+            _indent_line(
+                "pass  # TODO(high): SEARCH has no WHEN clauses", indent + 1
+            )
+        )
+    else:
+        for cond_text, body in when_clauses:
+            py_cond = translate_cond_fn(cond_text)
+            lines.append(_indent_line(f"if {py_cond}:", indent + 1))
+            if _has_code(body):
+                lines.extend(body)
+            else:
+                lines.append(_indent_line("pass", indent + 2))
+            lines.append(_indent_line("_found = True", indent + 2))
+            lines.append(_indent_line("break", indent + 2))
+
+    if at_end_body:
+        lines.append(_indent_line("if not _found:", indent))
+        lines.extend(at_end_body)
+
+    return lines, i

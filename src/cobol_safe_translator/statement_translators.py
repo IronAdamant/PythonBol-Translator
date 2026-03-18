@@ -20,6 +20,9 @@ from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _sanitize_numeric, _
 # Re-export from io_translators (split for LOC compliance)
 from .io_translators import translate_accept, translate_rewrite, wrap_on_size_error  # noqa: F401
 
+# Re-export from function_translators (split for LOC compliance)
+from .function_translators import translate_function_intrinsic  # noqa: F401
+
 
 # Keywords that should be filtered from arithmetic operand/target lists
 _ARITHMETIC_KEYWORDS = frozenset({
@@ -318,13 +321,6 @@ def translate_compute(
         targets = [t for t in ops[:eq_idx] if t.upper() != "ROUNDED"]
         expr_parts = ops[eq_idx + 1:]
 
-        # Detect FUNCTION intrinsic — bail to safe TODO
-        if any(p.upper() == "FUNCTION" for p in expr_parts):
-            return [
-                f"# COMPUTE: {' '.join(ops)}",
-                f"# TODO(high): COMPUTE uses FUNCTION intrinsic — manual translation required",
-            ]
-
         # Detect LENGTH OF pattern — translate to len()
         resolved: list[str] = []
         i = 0
@@ -337,7 +333,46 @@ def translate_compute(
             # COPY statement leaked into COMPUTE — stop here
             if upper_part == "COPY":
                 break
-            if upper_part == "LENGTH" and i + 2 < len(expr_parts) and expr_parts[i + 1].upper() == "OF":
+            # FUNCTION intrinsic — translate known functions inline
+            if upper_part == "FUNCTION" and i + 1 < len(expr_parts):
+                func_token = expr_parts[i + 1]
+                # Split function name from parenthesized arguments
+                paren_pos = func_token.find("(")
+                consumed = 2  # FUNCTION + func_name/func_name(args)
+                if paren_pos >= 0:
+                    func_name = func_token[:paren_pos]
+                    raw_inner = func_token[paren_pos + 1:]
+                    if raw_inner.endswith(")"):
+                        raw_inner = raw_inner[:-1]
+                    raw_args = raw_inner.strip()
+                else:
+                    func_name = func_token
+                    raw_args = ""
+                    # Check for space-separated parens: FUNCTION LENGTH ( args )
+                    if i + 2 < len(expr_parts) and expr_parts[i + 2] == "(":
+                        # Collect tokens until closing )
+                        arg_tokens: list[str] = []
+                        j = i + 3
+                        depth = 1
+                        while j < len(expr_parts) and depth > 0:
+                            if expr_parts[j] == "(":
+                                depth += 1
+                            elif expr_parts[j] == ")":
+                                depth -= 1
+                                if depth == 0:
+                                    break
+                            arg_tokens.append(expr_parts[j])
+                            j += 1
+                        raw_args = " ".join(arg_tokens)
+                        consumed = j + 1 - i  # skip past closing )
+                translated = translate_function_intrinsic(func_name, raw_args, resolve)
+                if translated is not None:
+                    resolved.append(translated)
+                else:
+                    # Use bare 0 — no inline comment (would break expressions)
+                    resolved.append("0")
+                i += consumed
+            elif upper_part == "LENGTH" and i + 2 < len(expr_parts) and expr_parts[i + 1].upper() == "OF":
                 field = expr_parts[i + 2]
                 resolved.append(f"len(str({resolve(field)}))")
                 i += 3

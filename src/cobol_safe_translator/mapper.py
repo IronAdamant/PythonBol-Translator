@@ -18,6 +18,7 @@ from .block_translator import (
     translate_if_block,
     translate_inline_evaluate,
     translate_inline_if,
+    translate_search_block,
 )
 from .models import (
     CobolProgram,
@@ -31,6 +32,7 @@ from .models import (
 from . import statement_translators as st
 from .io_translators import wrap_on_size_error
 from . import string_translators as strt
+from . import sort_translators as sort_t
 from .utils import (
     FIGURATIVE_RESOLVE,
     _is_numeric_literal,
@@ -326,6 +328,16 @@ class PythonMapper:
                     lines.extend(block_lines)
                 continue
 
+            if stmt.verb == "SEARCH":
+                block_lines, i = translate_search_block(
+                    para.statements, i,
+                    self._translate_statement,
+                    self._translate_condition,
+                    indent=2,
+                )
+                lines.extend(block_lines)
+                continue
+
             translated = self._translate_statement(stmt)
             for tl in translated:
                 lines.append(f"        {tl}")
@@ -411,13 +423,21 @@ class PythonMapper:
             return strt.translate_inspect(ops, self._resolve_operand)
         elif verb == "INITIALIZE":
             return self._translate_initialize(ops)
-        elif verb in ("SEARCH", "SORT", "MERGE", "RELEASE", "RETURN",
-                       "DELETE", "START"):
+        elif verb == "SORT":
+            return sort_t.translate_sort(ops, self._resolve_operand)
+        elif verb == "MERGE":
+            return sort_t.translate_merge(ops, self._resolve_operand)
+        elif verb == "RELEASE":
+            return sort_t.translate_release(ops)
+        elif verb == "RETURN":
+            return sort_t.translate_return_verb(ops, stmt.raw_text)
+        elif verb in ("SEARCH", "DELETE", "START"):
             return [
                 f"# TODO(high): {verb} requires manual translation",
                 f"# {stmt.raw_text}",
             ]
-        elif verb in ("END-SEARCH", "END-DELETE", "END-START", "END-RETURN"):
+        elif verb in ("END-SEARCH", "END-DELETE", "END-START",
+                       "END-RETURN", "END-SORT", "END-MERGE"):
             return [f"# {verb} (scope terminator)"]
         elif verb in ("NOT", "AT"):
             return [f"# {stmt.raw_text}"]

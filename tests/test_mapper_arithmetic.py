@@ -347,3 +347,213 @@ class TestGivingEmptyTarget:
         result = translate_multiply(["2", "BY", "WS-X", "GIVING"], lambda x: x)
         assert any("MULTIPLY" in r for r in result)
         assert any("missing" in r or "no valid" in r for r in result)
+
+
+class TestComputeFunctionIntrinsics:
+    """Tests for COMPUTE FUNCTION intrinsic translation."""
+
+    def test_function_length(self):
+        """FUNCTION LENGTH(field) should translate to len(str(field))."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION LENGTH(WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "len(str(" in source
+        assert "ws_b" in source
+
+    def test_function_current_date(self):
+        """FUNCTION CURRENT-DATE should translate to datetime call."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION CURRENT-DATE."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "datetime" in source
+        assert "strftime" in source
+
+    def test_function_upper_case(self):
+        """FUNCTION UPPER-CASE(field) should translate to str(field).upper()."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION UPPER-CASE(WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert ".upper()" in source
+
+    def test_function_lower_case(self):
+        """FUNCTION LOWER-CASE(field) should translate to str(field).lower()."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION LOWER-CASE(WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert ".lower()" in source
+
+    def test_function_reverse(self):
+        """FUNCTION REVERSE(field) should translate to str(field)[::-1]."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION REVERSE(WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "[::-1]" in source
+
+    def test_function_trim(self):
+        """FUNCTION TRIM(field) should translate to str(field).strip()."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION TRIM(WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert ".strip()" in source
+
+    def test_function_numval(self):
+        """FUNCTION NUMVAL(field) should translate to float(field)."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION NUMVAL(WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "float(" in source
+
+    def test_function_numval_c(self):
+        """FUNCTION NUMVAL-C(field) should strip commas and dollars."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION NUMVAL-C(WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "replace(" in source
+        assert "float(" in source
+
+    def test_function_abs(self):
+        """FUNCTION ABS(x) should translate to abs(x)."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION ABS(WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "abs(" in source
+
+    def test_function_sqrt(self):
+        """FUNCTION SQRT(x) should translate to x ** 0.5."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION SQRT(WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "** 0.5" in source
+
+    def test_function_integer(self):
+        """FUNCTION INTEGER(x) should translate to int(x)."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION INTEGER(WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "int(" in source
+
+    def test_function_integer_part(self):
+        """FUNCTION INTEGER-PART(x) should translate to int(x)."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION INTEGER-PART(WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "int(" in source
+
+    def test_function_ord(self):
+        """FUNCTION ORD(char) should translate to ord(char)."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION ORD(WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "ord(" in source
+
+    def test_function_char(self):
+        """FUNCTION CHAR(n) should translate to chr(n)."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION CHAR(WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "chr(" in source
+
+    def test_function_mod(self):
+        """FUNCTION MOD(a b) should translate to a % b."""
+        src = make_cobol(["COMPUTE WS-C = FUNCTION MOD(WS-A WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "%" in source
+
+    def test_function_max(self):
+        """FUNCTION MAX(a b c) should translate to max(a, b, c)."""
+        src = make_cobol(["COMPUTE WS-C = FUNCTION MAX(WS-A WS-B WS-C)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "max(" in source
+
+    def test_function_min(self):
+        """FUNCTION MIN(a b) should translate to min(a, b)."""
+        src = make_cobol(["COMPUTE WS-C = FUNCTION MIN(WS-A WS-B)."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "min(" in source
+
+    def test_function_when_compiled(self):
+        """FUNCTION WHEN-COMPILED should translate to a static string."""
+        src = make_cobol(["COMPUTE WS-A = FUNCTION WHEN-COMPILED."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "compile_timestamp" in source
+
+    def test_unknown_function_emits_todo(self):
+        """Unknown FUNCTION intrinsic should emit a TODO comment."""
+        from cobol_safe_translator.statement_translators import translate_compute
+        result = translate_compute(
+            ["WS-A", "=", "FUNCTION", "BOGUS-FUNC(X)"],
+            lambda op: f"self.data.{op.lower()}.value",
+        )
+        combined = "\n".join(result)
+        assert "TODO(high)" in combined
+        assert "BOGUS-FUNC" in combined
+
+    def test_function_in_expression(self):
+        """FUNCTION intrinsic used within a larger COMPUTE expression."""
+        src = make_cobol(["COMPUTE WS-C = FUNCTION LENGTH(WS-A) + 1."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "len(str(" in source
+        assert "+ 1" in source
+
+    def test_function_trim_leading_direct(self):
+        """FUNCTION TRIM(field LEADING) should translate to lstrip."""
+        from cobol_safe_translator.statement_translators import translate_compute
+        result = translate_compute(
+            ["WS-A", "=", "FUNCTION", "TRIM(WS-B LEADING)"],
+            lambda op: f"self.data.{op.lower().replace('-','_')}.value",
+        )
+        combined = "\n".join(result)
+        assert ".lstrip()" in combined
+
+    def test_function_trim_trailing_direct(self):
+        """FUNCTION TRIM(field TRAILING) should translate to rstrip."""
+        from cobol_safe_translator.statement_translators import translate_compute
+        result = translate_compute(
+            ["WS-A", "=", "FUNCTION", "TRIM(WS-B TRAILING)"],
+            lambda op: f"self.data.{op.lower().replace('-','_')}.value",
+        )
+        combined = "\n".join(result)
+        assert ".rstrip()" in combined
