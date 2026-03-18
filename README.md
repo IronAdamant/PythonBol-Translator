@@ -2,7 +2,9 @@
 
 **Offline COBOL-to-Python translator that generates Python skeletons and analysis reports.**
 
-**100% syntax-valid output across 4,542 real-world COBOL files from 29 test projects** — including NIST conformance suites, IBM CICS banking, French government tax code, a Minecraft server, DB2 stored procedures, and a Lisp interpreter written in COBOL.
+**99.98% syntax-valid output across 4,542 real-world COBOL files from 30 test projects** — including NIST conformance suites, IBM CICS banking, French government tax code, a Minecraft server, DB2 stored procedures, and a Lisp interpreter written in COBOL.
+
+![Validation Report — 4,541/4,542 valid Python across 30 projects](docs/images/validation-report.png)
 
 > **This tool generates SKELETON code that requires manual review.** It does NOT produce production-ready translations. Generated code may be incomplete, incorrect, or miss critical business logic. **Always verify against the original COBOL source.**
 
