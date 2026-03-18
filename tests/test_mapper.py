@@ -125,7 +125,7 @@ class TestValueIsSyntax:
             "WORKING-STORAGE SECTION.",
             '01 WS-X PIC X(5) VALUE IS "HELLO".',
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "HELLO"
 
@@ -136,7 +136,7 @@ class TestValueIsSyntax:
             "WORKING-STORAGE SECTION.",
             '01 WS-Y PIC X(5) VALUE "WORLD".',
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "WORLD"
 
@@ -268,7 +268,7 @@ class TestValueDecimalLiteral:
             "WORKING-STORAGE SECTION.",
             "01 WS-C PIC 9(3)V99 VALUE 12.34.",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "12.34"
 
@@ -279,7 +279,7 @@ class TestValueDecimalLiteral:
             "WORKING-STORAGE SECTION.",
             "01 WS-D PIC S9(5)V99 VALUE -3.50.",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "-3.50"
 

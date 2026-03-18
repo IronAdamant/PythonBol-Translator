@@ -21,7 +21,9 @@ from .models import (
     DataItem,
     FileControl,
     PicClause,
+    ReportDescription,
 )
+from .report_parser import parse_report_section
 
 # Re-export PIC utilities so existing imports from .parser still work
 from .pic_parser import (  # noqa: F401
@@ -388,12 +390,37 @@ _USAGE_RE = re.compile(
 )
 
 
-def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem], list[DataItem]]:
-    """Parse DATA DIVISION into file section, working-storage, and linkage items."""
+def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem], list[DataItem], list[ReportDescription]]:
+    """Parse DATA DIVISION into file, working-storage, linkage items, and report descriptions."""
     section = "UNKNOWN"
     file_items: list[DataItem] = []
     ws_items: list[DataItem] = []
     linkage_items: list[DataItem] = []
+
+    # Detect and extract REPORT SECTION lines for the dedicated parser
+    report_lines: list[str] = []
+    non_report_lines: list[str] = []
+    in_report = False
+    for line in lines:
+        upper = line.strip().upper()
+        if "REPORT SECTION" in upper:
+            in_report = True
+            report_lines.append(line)
+            continue
+        # REPORT SECTION ends when another section starts
+        if in_report and any(kw in upper for kw in (
+            "WORKING-STORAGE SECTION", "LINKAGE SECTION", "FILE SECTION",
+            "LOCAL-STORAGE SECTION", "SCREEN SECTION",
+            "COMMUNICATION SECTION",
+        )):
+            in_report = False
+        if in_report:
+            report_lines.append(line)
+        else:
+            non_report_lines.append(line)
+
+    reports = parse_report_section(report_lines) if report_lines else []
+    lines = non_report_lines
 
     last_item: DataItem | None = None
 
@@ -437,7 +464,7 @@ def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem
     file_items = _build_hierarchy(file_items)
     ws_items = _build_hierarchy(ws_items)
     linkage_items = _build_hierarchy(linkage_items)
-    return file_items, ws_items, linkage_items
+    return file_items, ws_items, linkage_items, reports
 
 
 def _parse_88_condition(line: str) -> ConditionName | None:
@@ -627,7 +654,7 @@ def parse_cobol(
 
     program_id, author = parse_identification(divisions["IDENTIFICATION"])
     file_controls = parse_environment(divisions["ENVIRONMENT"])
-    file_section, working_storage, linkage_section = parse_data_division(divisions["DATA"])
+    file_section, working_storage, linkage_section, report_section = parse_data_division(divisions["DATA"])
     paragraphs = parse_procedure(divisions["PROCEDURE"])
 
     return CobolProgram(
@@ -638,6 +665,7 @@ def parse_cobol(
         file_section=file_section,
         working_storage=working_storage,
         linkage_section=linkage_section,
+        report_section=report_section,
         paragraphs=paragraphs,
         raw_lines=source.splitlines(),
     )

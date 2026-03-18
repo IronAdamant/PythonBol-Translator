@@ -33,6 +33,7 @@ from . import statement_translators as st
 from .io_translators import wrap_on_size_error
 from . import string_translators as strt
 from . import sort_translators as sort_t
+from . import report_translators as rpt_t
 from .utils import (
     FIGURATIVE_RESOLVE,
     _is_numeric_literal,
@@ -441,6 +442,12 @@ class PythonMapper:
             return sort_t.translate_release(ops)
         elif verb == "RETURN":
             return sort_t.translate_return_verb(ops, stmt.raw_text)
+        elif verb == "INITIATE":
+            return rpt_t.translate_initiate(ops, self.program.report_section)
+        elif verb == "GENERATE":
+            return rpt_t.translate_generate(ops, self.program.report_section)
+        elif verb == "TERMINATE":
+            return rpt_t.translate_terminate(ops, self.program.report_section)
         elif verb in ("SEARCH", "DELETE", "START"):
             return [
                 f"# TODO(high): {verb} requires manual translation",

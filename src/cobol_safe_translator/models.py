@@ -78,6 +78,49 @@ class FileControl:
     organization: str | None = None  # SEQUENTIAL, INDEXED, RELATIVE
 
 
+# --- REPORT SECTION models ---
+
+@dataclass
+class ReportField:
+    """A printable field within a report line (03-level with PIC/SOURCE/SUM/VALUE)."""
+    name: str = ""  # optional field name
+    column: int = 0
+    pic: str = ""
+    source: str = ""  # SOURCE data-name (runtime value)
+    sum_field: str = ""  # SUM data-name (accumulated value)
+    value: str = ""  # literal VALUE
+    group_indicate: bool = False
+
+
+@dataclass
+class ReportLine:
+    """A LINE entry within a report group (02-level with LINE IS ...)."""
+    line_number: int | str = 0  # absolute number or "PLUS n"
+    fields: list[ReportField] = field(default_factory=list)
+
+
+@dataclass
+class ReportGroup:
+    """A 01-level report group (TYPE IS DETAIL, CONTROL HEADING, etc.)."""
+    name: str = ""
+    type_clause: str = ""  # e.g. "DETAIL", "REPORT HEADING", "CONTROL FOOTING STATENUM"
+    next_group: str = ""  # NEXT GROUP PLUS n
+    lines: list[ReportLine] = field(default_factory=list)
+
+
+@dataclass
+class ReportDescription:
+    """RD entry — Report Description."""
+    name: str = ""
+    controls: list[str] = field(default_factory=list)  # CONTROLS ARE field1 field2 ...
+    page_limit: int = 0
+    heading: int = 0
+    first_detail: int = 0
+    last_detail: int = 0
+    footing: int = 0
+    groups: list[ReportGroup] = field(default_factory=list)
+
+
 @dataclass
 class CobolProgram:
     program_id: str = ""
@@ -93,6 +136,7 @@ class CobolProgram:
     file_section: list[DataItem] = field(default_factory=list)
     working_storage: list[DataItem] = field(default_factory=list)
     linkage_section: list[DataItem] = field(default_factory=list)
+    report_section: list[ReportDescription] = field(default_factory=list)
 
     # PROCEDURE
     paragraphs: list[Paragraph] = field(default_factory=list)

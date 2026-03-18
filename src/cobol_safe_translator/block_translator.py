@@ -24,6 +24,7 @@ _KNOWN_BODY_VERBS = frozenset({
     "OPEN", "CLOSE", "READ", "WRITE",
     "ACCEPT", "REWRITE", "GOBACK", "EXIT", "NEXT", "CONTINUE",
     "SEARCH", "SORT", "MERGE", "RELEASE", "RETURN", "DELETE", "START",
+    "INITIATE", "GENERATE", "TERMINATE",
 })
 
 

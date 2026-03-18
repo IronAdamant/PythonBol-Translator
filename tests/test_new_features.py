@@ -59,7 +59,7 @@ class TestParser88Level:
             '01 WS-EOF-FLAG PIC X VALUE "N".',
             '   88 WS-EOF VALUE "Y".',
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert len(ws) == 1
         item = ws[0]
         assert item.name == "WS-EOF-FLAG"
@@ -73,7 +73,7 @@ class TestParser88Level:
             "01 WS-CODE PIC 9(2).",
             "   88 VALID-CODE VALUE 1 THRU 10.",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         item = ws[0]
         assert len(item.conditions) == 1
         cond = item.conditions[0]
@@ -87,7 +87,7 @@ class TestParser88Level:
             "01 WS-TYPE PIC X.",
             '   88 WS-VALID-TYPE VALUE "A" "B" "C".',
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         cond = ws[0].conditions[0]
         assert cond.name == "WS-VALID-TYPE"
         assert "A" in cond.values
@@ -102,7 +102,7 @@ class TestParser88Level:
             '   88 WS-TRUE VALUE "Y".',
             "01 WS-OTHER PIC 9(3).",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         names = [item.name for item in ws]
         assert "WS-TRUE" not in names
         assert len(ws) == 2
@@ -157,7 +157,7 @@ class TestParserUsageClause:
             "WORKING-STORAGE SECTION.",
             "01 WS-AMT PIC S9(9)V99 COMP-3.",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].usage == "COMP-3"
 
@@ -166,7 +166,7 @@ class TestParserUsageClause:
             "WORKING-STORAGE SECTION.",
             "01 WS-IDX PIC 9(4) USAGE BINARY.",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert ws[0].usage == "BINARY"
 
     def test_no_usage(self):
@@ -174,7 +174,7 @@ class TestParserUsageClause:
             "WORKING-STORAGE SECTION.",
             "01 WS-PLAIN PIC X(10).",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert ws[0].usage is None
 
 

@@ -76,7 +76,7 @@ class TestLevel77:
             "   05 WS-FIELD-A PIC X(10).",
             "77 WS-STANDALONE PIC 9(5).",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         root_names = [item.name for item in ws]
         assert "WS-GROUP" in root_names
         assert "WS-STANDALONE" in root_names
@@ -232,7 +232,7 @@ class TestPositiveSignedDecimalValue:
             "WORKING-STORAGE SECTION.",
             "01 WS-D PIC S9(3)V99 VALUE +1.50.",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "+1.50"
 
@@ -246,7 +246,7 @@ class TestLinkageSection:
             "01 LK-PARAM PIC X(10).",
             "01 LK-VALUE PIC 9(5).",
         ]
-        _, _, linkage = parse_data_division(lines)
+        _, _, linkage, _ = parse_data_division(lines)
         assert len(linkage) == 2
         names = [item.name for item in linkage]
         assert "LK-PARAM" in names
@@ -331,7 +331,7 @@ class TestPicIsSyntax:
             "WORKING-STORAGE SECTION.",
             "01 WS-A PIC IS 9(5).",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].pic is not None
         assert ws[0].pic.size == 5
@@ -343,7 +343,7 @@ class TestOccursRedefines:
             "WORKING-STORAGE SECTION.",
             "01 WS-ARRAY PIC 9(3) OCCURS 5 TIMES.",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].occurs == 5
 
@@ -353,7 +353,7 @@ class TestOccursRedefines:
             "01 WS-A PIC 9(3).",
             "01 WS-B REDEFINES WS-A PIC X(3).",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert len(ws) == 2
         assert ws[1].redefines == "WS-A"
 
@@ -366,7 +366,7 @@ class TestValueQuoteStripping:
             "WORKING-STORAGE SECTION.",
             '01 WS-MSG PIC X(10) VALUE "HELLO".',
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert ws[0].value == "HELLO"
 
     def test_single_quoted_value(self):
@@ -374,7 +374,7 @@ class TestValueQuoteStripping:
             "WORKING-STORAGE SECTION.",
             "01 WS-MSG PIC X(10) VALUE 'WORLD'.",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert ws[0].value == "WORLD"
 
     def test_numeric_value_no_stripping(self):
@@ -382,7 +382,7 @@ class TestValueQuoteStripping:
             "WORKING-STORAGE SECTION.",
             "01 WS-NUM PIC 9(3) VALUE 123.",
         ]
-        _, ws, _ = parse_data_division(lines)
+        _, ws, _, _ = parse_data_division(lines)
         assert ws[0].value == "123"
 
 
