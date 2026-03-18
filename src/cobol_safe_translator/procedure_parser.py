@@ -40,7 +40,7 @@ _OPERAND_VERBS = frozenset({
     "FIRST", "ALL", "INITIAL", "BEFORE", "AFTER",
     "ON", "ERROR", "OVERFLOW", "CORRESPONDING", "CORR",
     "ASCENDING", "DESCENDING", "KEY", "INDEXED",
-    "DEPENDING",
+    "DEPENDING", "OF", "IN", "FUNCTION",
 })
 
 

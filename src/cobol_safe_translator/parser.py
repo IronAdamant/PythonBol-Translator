@@ -455,8 +455,24 @@ def _build_hierarchy(flat_items: list[DataItem]) -> list[DataItem]:
 
 # --- Main parse entry point ---
 
-def parse_cobol(source: str, source_path: str = "") -> CobolProgram:
-    """Parse COBOL source text into a CobolProgram AST."""
+def parse_cobol(
+    source: str,
+    source_path: str = "",
+    copybook_paths: list[str | Path] | None = None,
+) -> CobolProgram:
+    """Parse COBOL source text into a CobolProgram AST.
+
+    Args:
+        source: Raw COBOL source text.
+        source_path: Path to the source file (for metadata).
+        copybook_paths: Directories to search for COPY copybooks.
+            If provided, the preprocessor resolves COPY statements and
+            strips EXEC CICS/SQL blocks before parsing.
+    """
+    if copybook_paths is not None:
+        from .preprocessor import resolve_copies
+        source = resolve_copies(source, copybook_paths)
+
     logical_lines = preprocess_lines(source)
     divisions = split_divisions(logical_lines)
 
@@ -478,8 +494,16 @@ def parse_cobol(source: str, source_path: str = "") -> CobolProgram:
     )
 
 
-def parse_cobol_file(path: str | Path) -> CobolProgram:
-    """Parse a COBOL file from disk."""
+def parse_cobol_file(
+    path: str | Path,
+    copybook_paths: list[str | Path] | None = None,
+) -> CobolProgram:
+    """Parse a COBOL file from disk.
+
+    Args:
+        path: Path to the COBOL source file.
+        copybook_paths: Directories to search for COPY copybooks.
+    """
     p = Path(path)
     source = p.read_text(encoding="utf-8", errors="replace")
-    return parse_cobol(source, source_path=str(p))
+    return parse_cobol(source, source_path=str(p), copybook_paths=copybook_paths)

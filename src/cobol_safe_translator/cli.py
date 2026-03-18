@@ -64,9 +64,12 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
 
     print(bold(f"{label}: {source_path}"))
 
+    # Collect copybook search paths (may be None or list of strings)
+    copybook_paths = getattr(args, "copybook_path", None) or None
+
     # Parse
     try:
-        program = parse_cobol_file(source_path)
+        program = parse_cobol_file(source_path, copybook_paths=copybook_paths)
     except OSError as e:
         print(red(f"Error: could not read file: {e}"), file=sys.stderr)
         return 1, None, None
@@ -264,6 +267,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--recursive", "-r", action="store_true",
         help="Recurse into subdirectories (directory mode only)",
     )
+    tr.add_argument(
+        "--copybook-path", "-I", action="append", default=[],
+        help="Directory to search for COPY copybooks (can be repeated)",
+    )
 
     # map subcommand
     mp = subparsers.add_parser(
@@ -283,6 +290,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--recursive", "-r", action="store_true",
         help="Recurse into subdirectories (directory mode only)",
     )
+    mp.add_argument(
+        "--copybook-path", "-I", action="append", default=[],
+        help="Directory to search for COPY copybooks (can be repeated)",
+    )
 
     # prompt subcommand
     pr = subparsers.add_parser(
@@ -301,6 +312,10 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument(
         "--recursive", "-r", action="store_true",
         help="Recurse into subdirectories (directory mode only)",
+    )
+    pr.add_argument(
+        "--copybook-path", "-I", action="append", default=[],
+        help="Directory to search for COPY copybooks (can be repeated)",
     )
 
     return parser

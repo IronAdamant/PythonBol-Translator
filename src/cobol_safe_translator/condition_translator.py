@@ -40,6 +40,7 @@ _COBOL_KEYWORDS = frozenset({
     'EQUAL', 'NUMERIC', 'ALPHABETIC', 'POSITIVE', 'NEGATIVE',
     'ZERO', 'ZEROS', 'ZEROES', 'SPACE', 'SPACES',
     'HIGH-VALUE', 'HIGH-VALUES', 'LOW-VALUE', 'LOW-VALUES',
+    'OF', 'IN',
 })
 
 _OP_KEYWORDS = frozenset({
@@ -236,8 +237,22 @@ def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) ->
             result.append(t)
             i += 1
             continue
-        if t == 'IS':
+        if t in ('IS', 'THEN'):
             i += 1
+            continue
+        if t in ('OF', 'IN'):
+            # COBOL qualification: FIELD OF GROUP — skip OF and the group name
+            i += 2  # skip OF/IN + group-name
+            continue
+        if t == 'FUNCTION':
+            # COBOL intrinsic function: FUNCTION NUMVAL(x) etc.
+            # Resolve as a TODO placeholder
+            if i + 1 < n:
+                func_name = tokens[i + 1]
+                result.append(f"0  # TODO(high): FUNCTION {func_name}")
+                i += 2
+            else:
+                i += 1
             continue
         if t == 'NOT':
             i = _handle_not(tokens, i, n, result, condition_lookup)

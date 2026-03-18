@@ -401,9 +401,17 @@ class PythonMapper:
             return op
         if _is_numeric_literal(op):
             return op
-        fig = FIGURATIVE_RESOLVE.get(op.upper())
+        upper = op.upper()
+        fig = FIGURATIVE_RESOLVE.get(upper)
         if fig is not None:
             return fig
+        # COBOL intrinsic function — can't auto-translate
+        if upper == "FUNCTION":
+            return "0  # TODO(high): FUNCTION intrinsic"
+        # Skip OF/IN qualifiers (take the field before OF)
+        if " OF " in op.upper() or " IN " in op.upper():
+            field = op.split()[0]
+            return f"self.data.{_to_python_name(field)}.value"
         return f"self.data.{_to_python_name(op)}.value"
 
     def _translate_add(self, ops: list[str]) -> list[str]:
