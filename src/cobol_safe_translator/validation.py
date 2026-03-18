@@ -74,7 +74,7 @@ def validate_generated_python(
                     obj()  # should not crash
                     break
         finally:
-            sys.path.pop(0)
+            sys.path.remove(tmp_dir)
             if module_name in sys.modules:
                 del sys.modules[module_name]
     except Exception as e:

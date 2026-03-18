@@ -150,7 +150,7 @@ def extract_dependencies(program: CobolProgram) -> list[Dependency]:
 
 def _extract_call_target(operands: list[str]) -> str:
     """Extract the target program name from CALL operands."""
-    if not operands or operands[0] is None:
+    if not operands or not operands[0]:
         return ""
     target = operands[0].strip('"').strip("'")
     return target
@@ -201,7 +201,7 @@ def analyze(
                 )
             elif stmt.verb == "COPY":
                 warnings.append(
-                    f"COPY statement in {para.name}: copybook expansion not supported in MVP"
+                    f"COPY statement in {para.name}: unresolved copybook (preprocessor may not have found the copybook file)"
                 )
 
     if sensitivities:

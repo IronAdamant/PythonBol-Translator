@@ -248,9 +248,6 @@ def _parse_statements(line: str) -> list[CobolStatement]:
         upper = tok.upper()
         if upper in KNOWN_VERBS and upper not in _OPERAND_VERBS:
             verb_positions.append(i)
-        elif upper in ("ELSE", "WHEN") and upper in KNOWN_VERBS:
-            # ELSE and WHEN are structural — always split
-            verb_positions.append(i)
 
     if not verb_positions:
         # No known verb found — try first token as verb

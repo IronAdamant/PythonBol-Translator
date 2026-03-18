@@ -6,8 +6,6 @@ from __future__ import annotations
 
 import ast
 
-import pytest
-
 from cobol_safe_translator.analyzer import analyze
 from cobol_safe_translator.mapper import generate_python
 from cobol_safe_translator.parser import parse_cobol

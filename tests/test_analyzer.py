@@ -146,7 +146,6 @@ class TestAnalyzerWarnings:
             "           COPY MY-COPYBOOK.",
         ]
         src = "\n".join(lines) + "\n"
-        from cobol_safe_translator.parser import parse_cobol
         program = parse_cobol(src)
         smap = analyze(program)
         assert any("COPY" in w for w in smap.warnings)
@@ -164,7 +163,6 @@ class TestAnalyzerWarnings:
             "           GO TO MAIN-PARA.",
         ]
         src = "\n".join(lines) + "\n"
-        from cobol_safe_translator.parser import parse_cobol
         program = parse_cobol(src)
         smap = analyze(program)
         assert any("GO TO" in w for w in smap.warnings)

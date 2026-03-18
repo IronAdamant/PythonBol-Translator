@@ -21,7 +21,6 @@ from .block_translator import (
     translate_search_block,
 )
 from .models import (
-    CobolProgram,
     CobolStatement,
     DataItem,
     Paragraph,
@@ -35,7 +34,6 @@ from . import string_translators as strt
 from . import sort_translators as sort_t
 from . import report_translators as rpt_t
 from .utils import (
-    FIGURATIVE_RESOLVE,
     _is_numeric_literal,
     _sanitize_numeric,
     _to_method_name,
@@ -81,10 +79,7 @@ class PythonMapper:
 
     def generate(self) -> str:
         """Generate the complete Python module source."""
-        if not self.program.program_id:
-            self._program_id = "UNNAMED"
-        else:
-            self._program_id = self.program.program_id
+        self._program_id = self.program.program_id or "UNNAMED"
         self._class_name = _to_python_name(self._program_id).title().replace("_", "")
         parts: list[str] = []
         parts.append(self._header())

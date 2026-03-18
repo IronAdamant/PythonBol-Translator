@@ -632,7 +632,7 @@ def parse_cobol(
         copy_paths: Additional directories to search for copybooks
             (searched after the source file's directory).
     """
-    from .preprocessor import resolve_copies, strip_exec_blocks
+    from .preprocessor import resolve_copies
 
     # Derive source directory from source_path when available
     source_dir: Path | None = None

@@ -33,18 +33,8 @@ def payroll_calc_cob() -> Path:
 
 
 @pytest.fixture
-def payroll_calc_source(payroll_calc_cob: Path) -> str:
-    return payroll_calc_cob.read_text()
-
-
-@pytest.fixture
 def bankacct_cob() -> Path:
     return SAMPLES_DIR / "BANKACCT.cob"
-
-
-@pytest.fixture
-def bankacct_source(bankacct_cob: Path) -> str:
-    return bankacct_cob.read_text()
 
 
 @pytest.fixture

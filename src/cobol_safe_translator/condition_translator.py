@@ -11,8 +11,6 @@ Pipeline position: Called by mapper.py._translate_condition()
 
 from __future__ import annotations
 
-import re
-
 from .utils import resolve_operand
 
 _CMP_OPS = frozenset({">", "<", "==", "!=", ">=", "<="})

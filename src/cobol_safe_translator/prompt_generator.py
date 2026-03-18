@@ -96,7 +96,7 @@ class PromptGenerator:
         for level in (SensitivityLevel.HIGH, SensitivityLevel.MEDIUM, SensitivityLevel.LOW):
             names = by_level[level.value]
             if names:
-                badge = {"high": "HIGH", "medium": "MEDIUM", "low": "LOW"}[level.value]
+                badge = level.value.upper()
                 lines.append(f"**{badge}:** {', '.join(f'`{n}`' for n in names)}")
         lines.append("")
         return "\n".join(lines)

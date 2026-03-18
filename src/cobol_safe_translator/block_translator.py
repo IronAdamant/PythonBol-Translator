@@ -12,9 +12,7 @@ from __future__ import annotations
 from typing import Callable
 
 from .models import CobolStatement
-from .utils import resolve_operand as _fallback_resolve
-
-_BLOCK_OPENERS = frozenset({"IF", "EVALUATE", "SEARCH"})
+from .utils import resolve_operand as _fallback_resolve, _to_python_name
 
 # Verbs that indicate an inline IF/EVALUATE (body packed into operands)
 _KNOWN_BODY_VERBS = frozenset({
@@ -181,6 +179,13 @@ def _translate_evaluate_also(
                 )
                 current_body.extend(nested)
                 continue
+            if stmt.verb == "EVALUATE":
+                nested, i = translate_evaluate_block(
+                    stmts, i, translate_stmt_fn, translate_cond_fn,
+                    resolve_operand_fn, indent + 1,
+                )
+                current_body.extend(nested)
+                continue
             if stmt.verb == "SEARCH":
                 nested, i = translate_search_block(
                     stmts, i, translate_stmt_fn, translate_cond_fn, indent + 1,
@@ -342,7 +347,7 @@ def translate_evaluate_block(
 
         # THRU/THROUGH — emit TODO
         has_thru = any(
-            "THRU" in [o.upper() for o in ops] or "THROUGH" in [o.upper() for o in ops]
+            any(o.upper() in ("THRU", "THROUGH") for o in ops)
             for ops in when_ops_list
         )
         if has_thru:
@@ -472,7 +477,7 @@ def translate_inline_if(
 
 def is_inline_evaluate(stmt: CobolStatement) -> bool:
     """Check if an EVALUATE has everything packed into one statement's operands."""
-    return "WHEN" in [o.upper() for o in stmt.operands]
+    return any(o.upper() == "WHEN" for o in stmt.operands)
 
 
 def translate_inline_evaluate(
@@ -541,8 +546,6 @@ def translate_search_block(
     SEARCH ALL is approximated as a linear scan (we cannot guarantee the
     table is sorted at run-time).
     """
-    from .utils import _to_python_name  # local import to avoid circular
-
     search_stmt = stmts[start_idx]
     table_name, is_search_all, has_at_end = _parse_search_operands(
         search_stmt.operands

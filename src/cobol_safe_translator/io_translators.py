@@ -32,10 +32,15 @@ def translate_accept(ops: list[str], raw: str) -> list[str]:
                 "import datetime as _dt",
                 f"self.data.{target}.set(_dt.datetime.now().strftime('%y%m%d'))",
             ]
-        if source in ("DAY", "DAY-OF-WEEK"):
+        if source == "DAY":
             return [
                 "import datetime as _dt",
                 f"self.data.{target}.set(_dt.datetime.now().strftime('%y%j'))",
+            ]
+        if source == "DAY-OF-WEEK":
+            return [
+                "import datetime as _dt",
+                f"self.data.{target}.set(str(_dt.datetime.now().isoweekday()))",
             ]
         if source == "TIME":
             return [

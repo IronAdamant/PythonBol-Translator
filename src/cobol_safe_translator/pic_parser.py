@@ -65,7 +65,7 @@ def compute_pic_size(expanded: str) -> tuple[int, int, bool]:
     decimals = 0
     if "V" in clean:
         _, after_v = clean.split("V", 1)
-        decimals = sum(1 for c in after_v if c in ("9",))
+        decimals = after_v.count("9")
 
     # Handle CR/DB as 2-position editing symbols before char loop
     cr_db_extra = clean.count("CR") + clean.count("DB")

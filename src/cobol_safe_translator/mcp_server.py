@@ -23,8 +23,10 @@ from .mapper import generate_python
 from .parser import parse_cobol_file
 from .prompt_generator import generate_prompt
 
+from . import __version__
+
 _SERVER_NAME = "cobol-safe-translator"
-_SERVER_VERSION = "0.2.0"
+_SERVER_VERSION = __version__
 _PROTOCOL_VERSION = "2024-11-05"
 
 # ---------------------------------------------------------------------------
@@ -218,7 +220,7 @@ def _parse_and_analyze_file(params: dict) -> tuple:
 
 
 def _handle_translate_cobol(params: dict) -> str:
-    _, program, smap = _parse_and_analyze_file(params)
+    _, _, smap = _parse_and_analyze_file(params)
     python_source = generate_python(smap)
 
     output_path = params.get("output_path")
@@ -231,7 +233,7 @@ def _handle_translate_cobol(params: dict) -> str:
 
 
 def _handle_analyze_cobol(params: dict) -> str:
-    _, program, smap = _parse_and_analyze_file(params)
+    _, _, smap = _parse_and_analyze_file(params)
 
     fmt = params.get("format", "markdown")
     if fmt == "json":
@@ -240,13 +242,13 @@ def _handle_analyze_cobol(params: dict) -> str:
 
 
 def _handle_generate_brief(params: dict) -> str:
-    _, program, smap = _parse_and_analyze_file(params)
+    _, _, smap = _parse_and_analyze_file(params)
     python_source = generate_python(smap)
     return generate_prompt(smap, python_source)
 
 
 def _handle_list_sensitivities(params: dict) -> str:
-    _, program, smap = _parse_and_analyze_file(params)
+    _, _, smap = _parse_and_analyze_file(params)
 
     result = [
         {
@@ -289,7 +291,8 @@ def _handle_translate_directory(params: dict) -> str:
             out_dir = out_root / src.stem
             out_dir.mkdir(parents=True, exist_ok=True)
 
-            name = program.program_id.lower().replace("-", "_") or "unnamed"
+            import re as _re
+            name = _re.sub(r"[^\w]", "_", program.program_id.lower()) or "unnamed"
             out_file = out_dir / f"{name}.py"
             out_file.write_text(python_source, encoding="utf-8")
             successes += 1

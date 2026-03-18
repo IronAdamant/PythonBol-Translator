@@ -1,7 +1,5 @@
 """Tests for the condition_translator module."""
 
-import ast
-
 from cobol_safe_translator.condition_translator import (
     tokenize_condition,
     translate_condition,

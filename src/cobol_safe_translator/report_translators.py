@@ -9,7 +9,9 @@ Pipeline position: Called by mapper.py for INITIATE, GENERATE, TERMINATE verbs.
 
 from __future__ import annotations
 
-from .models import ReportDescription, ReportField, ReportGroup
+import re
+
+from .models import ReportDescription, ReportGroup
 from .utils import _to_python_name
 
 
@@ -84,7 +86,6 @@ def _pic_display_size(pic: str) -> int:
     if not pic:
         return 10
     # Remove parenthesized repeats and count characters
-    import re
     expanded = re.sub(r"(\w)\((\d+)\)", lambda m: m.group(1) * int(m.group(2)), pic)
     return max(len(expanded), 1)
 
@@ -160,9 +161,7 @@ def translate_generate(ops: list[str], reports: list[ReportDescription]) -> list
     detail_group = None
     for r in reports:
         for g in r.groups:
-            if g.name.upper() == detail_name or (
-                g.type_clause.upper().startswith("DETAIL") and g.name.upper() == detail_name
-            ):
+            if g.name.upper() == detail_name:
                 rd = r
                 detail_group = g
                 break

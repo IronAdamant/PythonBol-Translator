@@ -67,7 +67,7 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
     print(bold(f"{label}: {source_path}"))
 
     # Collect copybook search paths (may be None or list of strings)
-    copy_paths = getattr(args, "copybook_path", None) or None
+    copy_paths = getattr(args, "copybook_path", None)
 
     # Parse
     try:
@@ -78,7 +78,7 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
     print(green(f"  Parsed: {program.program_id} ({len(program.paragraphs)} paragraphs)"))
 
     # Analyze
-    config_path = args.config if args.config else None
+    config_path = args.config or None
     smap = analyze(program, config_path=config_path)
 
     if smap.sensitivities:
@@ -200,7 +200,7 @@ def cmd_translate(args: argparse.Namespace) -> int:
     """Parse, analyze, and generate Python translation."""
     p = Path(args.path)
     config = args.config or None
-    copy_paths = getattr(args, "copybook_path", None) or None
+    copy_paths = getattr(args, "copybook_path", None)
     recursive = getattr(args, "recursive", False)
     validate = getattr(args, "validate", False)
 
@@ -219,7 +219,7 @@ def cmd_map(args: argparse.Namespace) -> int:
     """Parse, analyze, and export reports."""
     p = Path(args.path)
     config = args.config or None
-    copy_paths = getattr(args, "copybook_path", None) or None
+    copy_paths = getattr(args, "copybook_path", None)
     recursive = getattr(args, "recursive", False)
 
     if p.is_dir():
@@ -237,7 +237,7 @@ def cmd_prompt(args: argparse.Namespace) -> int:
     """Generate an LLM translation brief (stdout or file)."""
     p = Path(args.path)
     config = args.config or None
-    copy_paths = getattr(args, "copybook_path", None) or None
+    copy_paths = getattr(args, "copybook_path", None)
     recursive = getattr(args, "recursive", False)
     output = getattr(args, "output", None)
 
@@ -292,10 +292,6 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument(
         "--copybook-path", "-I", action="append", default=[],
         help="Directory to search for COPY copybooks (can be repeated)",
-    )
-    tr.add_argument(
-        "--ebcdic", action="store_true", default=False,
-        help="Use EBCDIC (cp037) collation for string comparisons (mainframe dialect)",
     )
     tr.add_argument(
         "--validate", action="store_true", default=False,

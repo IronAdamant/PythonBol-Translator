@@ -8,7 +8,7 @@ from cobol_safe_translator.adapters import CobolDecimal, FileAdapter
 from cobol_safe_translator.analyzer import analyze
 from cobol_safe_translator.mapper import generate_python, PythonMapper
 from cobol_safe_translator.parser import parse_cobol
-from cobol_safe_translator.utils import _is_numeric_literal, _to_python_name
+from cobol_safe_translator.utils import _to_python_name
 
 
 class TestPythonGeneration:
@@ -89,8 +89,6 @@ class TestPythonGeneration:
         source = generate_python(smap)
         assert "TODO(high)" in source
 
-
-_make_cobol = make_cobol
 
 
 class TestFileAdapterContextManager:
@@ -487,7 +485,7 @@ class TestMultiDimSubscripts:
 
     def test_multidim_in_generated_python(self):
         """Multi-dim subscript in a DISPLAY should produce valid Python."""
-        src = _make_cobol(
+        src = make_cobol(
             procedure_lines=["DISPLAY WS-TABLE(1 2)."],
             data_lines=[
                 "       01 WS-TABLE PIC 9(5) OCCURS 3.",

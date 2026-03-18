@@ -262,9 +262,7 @@ def strip_exec_blocks(raw_text: str) -> str:
                 break
             i += 1
 
-        if not found_end:
-            # Unterminated EXEC — still replace what we collected
-            pass
+        # (if not found_end, we still replace what we collected)
 
         # Build the original text as a single line for the comment
         original_parts = []

@@ -5,11 +5,10 @@ PERFORM THRU, recursive COPY, FileAdapter write, EBCDIC, EXEC hints.
 from __future__ import annotations
 
 import ast
-import textwrap
 
 import pytest
 
-from cobol_safe_translator.adapters import CobolDecimal, CobolString, FileAdapter
+from cobol_safe_translator.adapters import CobolString, FileAdapter
 from cobol_safe_translator.analyzer import analyze
 from cobol_safe_translator.ebcdic import ebcdic_compare, ebcdic_key
 from cobol_safe_translator.mapper import generate_python
