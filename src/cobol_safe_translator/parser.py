@@ -42,10 +42,16 @@ from .procedure_parser import (  # noqa: F401
 def _detect_free_format(raw_text: str) -> bool:
     """Detect whether COBOL source uses free-format (no column-7 layout).
 
-    Heuristics:
+    Heuristics (positive = free, negative = fixed):
     - Free-format uses *> for comments (anywhere on line)
     - Free-format has division headers starting in cols 1-6
     - Fixed-format has sequence numbers in cols 1-6 and indicator in col 7
+    - Fixed-format has identifier content in cols 73-80 (e.g., 'IF1014.2')
+
+    When scores are tied, checks for structural fixed-format markers across
+    the entire file. Files with no sequence numbers, no col-7 indicators,
+    and no identification-area content default to free-format to avoid
+    incorrectly stripping code that overflows into column 73+.
     """
     lines = raw_text.splitlines()
     free_score = 0
@@ -68,9 +74,11 @@ def _detect_free_format(raw_text: str) -> bool:
             free_score += 2
 
         # Division/section headers in cols 1-6 (free-format)
-        if re.match(r"^\s{0,3}(IDENTIFICATION|ENVIRONMENT|DATA|PROCEDURE)\s+DIVISION",
+        if re.match(r"^\s{0,6}(IDENTIFICATION|ENVIRONMENT|DATA|PROCEDURE)\s+DIVISION",
                      line, re.IGNORECASE):
-            free_score += 2
+            leading = len(line) - len(line.lstrip())
+            if leading < 7:
+                free_score += 2
 
         # Fixed-format indicator: col 7 is */- and cols 1-6 are digits or spaces
         if len(line) > 6:
@@ -83,7 +91,30 @@ def _detect_free_format(raw_text: str) -> bool:
 
     if checked == 0:
         return False
-    return free_score > fixed_score
+    if free_score > fixed_score:
+        return True
+    if fixed_score > free_score:
+        return False
+
+    # Scores tied — look for structural fixed-format markers across the file
+    # to break the tie. Check for sequence numbers or identification areas.
+    has_seq_numbers = False
+    has_ident_area = False
+    for line in lines:
+        if not line.strip():
+            continue
+        if len(line) >= 6 and line[:6].strip().isdigit() and line[:6].strip():
+            has_seq_numbers = True
+            break
+        if len(line) > 72 and line[72:].strip():
+            has_ident_area = True
+            break
+
+    # If the file has sequence numbers or identification areas, it's fixed-format
+    if has_seq_numbers or has_ident_area:
+        return False
+    # No fixed-format structural markers found — treat as free-format
+    return True
 
 
 # --- Preprocessing ---
@@ -131,6 +162,7 @@ def _strip_free_comment(line: str) -> str:
             return line[:i]
         i += 1
     return line
+
 
 
 def preprocess_lines(raw_text: str) -> list[str]:

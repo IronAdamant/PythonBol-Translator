@@ -57,9 +57,13 @@ class TestPreprocessing:
         assert preprocess_lines("") == []
 
     def test_short_lines_skipped(self):
-        raw = "AB\nCD\n"
+        # In fixed-format mode, lines shorter than 7 chars have no content area.
+        # Use sequence numbers in cols 1-6 to force fixed-format detection.
+        raw = "000010 IDENTIFICATION DIVISION.\n000020 PROGRAM-ID. TEST.\nAB\nCD\n"
         lines = preprocess_lines(raw)
-        assert lines == []
+        # Short lines "AB" and "CD" should be skipped (no content area)
+        assert "AB" not in lines
+        assert "CD" not in lines
 
 
 class TestLevel77:
