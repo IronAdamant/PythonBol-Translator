@@ -96,8 +96,25 @@ def resolve_operand(op: str) -> str:
     FUNCTION keyword, reference modification, OF/IN qualification,
     and plain data names.
     """
+    # Hex literal: X"FF" / X'FF' / H"FF" / H'FF' → 0xFF
+    if (len(op) >= 4 and op[0].upper() in ('X', 'H')
+            and op[1] in ('"', "'") and op[-1] == op[1]):
+        hex_str = op[2:-1]
+        if hex_str and all(c in '0123456789abcdefABCDEF' for c in hex_str):
+            return f"0x{hex_str}"
+    # Binary literal: B"01010" or B'01010' → 0b01010
+    if (len(op) >= 4 and op[0].upper() == 'B'
+            and op[1] in ('"', "'") and op[-1] == op[1]):
+        bin_str = op[2:-1]
+        if bin_str and all(c in '01' for c in bin_str):
+            return f"0b{bin_str}"
     # Quoted string (strict: require matching open and close)
     if len(op) >= 2 and op[0] in ('"', "'") and op[-1] == op[0]:
+        inner = op[1:-1]
+        # Escape backslashes for Python (COBOL has no escape sequences)
+        if '\\' in inner:
+            inner = inner.replace('\\', '\\\\')
+            return f'{op[0]}{inner}{op[0]}'
         return op
     # Numeric literal — sanitize leading zeros for Python 3
     if _is_numeric_literal(op):

@@ -32,6 +32,12 @@ _CLOSE_KEYWORDS = frozenset({"WITH", "LOCK", "NO", "REWIND"})
 # Valid operators inside COMPUTE expressions
 _COMPUTE_OPERATORS = frozenset({"+", "-", "*", "/", "(", ")", "**"})
 
+# COBOL bitwise operators → Python equivalents
+_BITWISE_OPS: dict[str, str] = {
+    "B-AND": "&", "B-OR": "|", "B-XOR": "^", "B-NOT": "~",
+    "B-SHIFT-L": "<<", "B-SHIFT-R": ">>",
+}
+
 
 def translate_display(
     stmt: CobolStatement,
@@ -86,7 +92,9 @@ def translate_move(ops: list[str]) -> list[str]:
         return [f"# MOVE: missing target operand: {' '.join(ops)}"]
 
     if source.startswith('"') or source.startswith("'"):
-        src_expr = source
+        # Escape backslashes for Python (COBOL has no escape sequences)
+        inner = source[1:-1].replace('\\', '\\\\') if '\\' in source else source[1:-1]
+        src_expr = f'{source[0]}{inner}{source[0]}'
     elif _is_numeric_literal(source):
         src_expr = _sanitize_numeric(source)
     elif source.upper().startswith("FUNCTION"):
@@ -322,16 +330,32 @@ def translate_compute(
         i = 0
         while i < len(expr_parts):
             part = expr_parts[i]
-            if part.upper() == "LENGTH" and i + 2 < len(expr_parts) and expr_parts[i + 1].upper() == "OF":
+            upper_part = part.upper()
+            # Free-format compiler directives (>>ELSE, >>END-IF) — stop here
+            if part.startswith(">>"):
+                break
+            # COPY statement leaked into COMPUTE — stop here
+            if upper_part == "COPY":
+                break
+            if upper_part == "LENGTH" and i + 2 < len(expr_parts) and expr_parts[i + 1].upper() == "OF":
                 field = expr_parts[i + 2]
                 resolved.append(f"len(str({resolve(field)}))")
                 i += 3
+            elif upper_part in ('OF', 'IN') and i + 1 < len(expr_parts):
+                # Qualification: skip OF/IN and the group name
+                i += 2
             elif part in _COMPUTE_OPERATORS:
                 resolved.append(part)
+                i += 1
+            elif upper_part in _BITWISE_OPS:
+                resolved.append(_BITWISE_OPS[upper_part])
                 i += 1
             else:
                 resolved.append(resolve(part))
                 i += 1
+        # Strip trailing operator (from multi-line COMPUTE split at line boundary)
+        while resolved and resolved[-1] in ('+', '-', '*', '/', '&', '|', '^', '<<', '>>'):
+            resolved.pop()
         expr = " ".join(resolved)
         if not expr:
             return [

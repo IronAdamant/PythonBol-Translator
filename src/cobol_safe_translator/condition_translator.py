@@ -78,6 +78,10 @@ def tokenize_condition(cond: str) -> list[str]:
         elif ch in ('"', "'"):
             j = cond.index(ch, i + 1) + 1
             tokens.append(cond[i:j])
+            # Merge hex/binary/national prefix: X"FF" → X"FF", H'0F' → H'0F'
+            if (len(tokens) >= 2 and len(tokens[-2]) == 1
+                    and tokens[-2].upper() in ('X', 'B', 'Z', 'N', 'H')):
+                tokens[-2:] = [tokens[-2] + tokens[-1]]
             i = j
         elif ch == '(':
             if tokens and _upper(tokens[-1]) not in ('AND', 'OR', 'NOT', '(', ')', *_CMP_OPS):
@@ -187,20 +191,20 @@ def _handle_conjunction(tokens: list[str], i: int, n: int, result: list[str],
         return i
     next_upper = _upper(tokens[i])
 
-    # NOT starts a new sub-expression — never insert implied subject before it
+    # NOT: check if followed by comparison op → abbreviated relation
+    # e.g., "AND NOT = 'X'" needs implied subject inserted before NOT
     if next_upper == 'NOT':
+        if i + 1 < n:
+            peek = _upper(tokens[i + 1])
+            if peek in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL'):
+                if last_subject:
+                    result.append(last_subject)
         return i
 
     # Abbreviated: AND/OR followed by comparison op (no left operand)
-    # Also check for NOT followed by comparison (e.g., AND NOT = 'X')
     if next_upper in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL'):
         if last_subject:
             result.append(last_subject)
-    elif next_upper == 'NOT' and i + 1 < n:
-        peek_after_not = _upper(tokens[i + 1]) if i + 1 < n else ''
-        if peek_after_not in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL'):
-            if last_subject:
-                result.append(last_subject)
     else:
         # Implied subject: value without operator follows AND/OR
         is_value = (next_upper not in _OP_KEYWORDS
@@ -344,4 +348,10 @@ def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) ->
     joined = " ".join(fixed)
     if joined.count("(") != joined.count(")"):
         return "True"
+    # Safety valve: ensure the condition is valid Python syntax
+    if joined and joined != "True":
+        try:
+            compile(joined, '<cond>', 'eval')
+        except SyntaxError:
+            return "True"
     return joined if joined else "True"

@@ -22,10 +22,12 @@ KNOWN_VERBS = frozenset({
     "WHEN", "READ", "WRITE", "OPEN", "CLOSE", "CALL", "STOP",
     "SET", "STRING", "UNSTRING", "INSPECT", "INITIALIZE",
     "REWRITE", "CONTINUE", "EXIT", "NEXT",
+    "SEARCH", "RELEASE", "SORT", "MERGE", "DELETE", "START", "RETURN",
     "END-IF", "END-EVALUATE", "END-PERFORM", "END-READ",
     "END-COMPUTE", "END-SUBTRACT", "END-ADD", "END-MULTIPLY",
     "END-DIVIDE", "END-UNSTRING",
     "END-WRITE", "END-CALL", "END-STRING",
+    "END-SEARCH", "END-DELETE", "END-START", "END-RETURN",
 })
 
 # Tokens that look like verbs but are actually operands/clauses
@@ -205,7 +207,18 @@ def _split_operands(text: str) -> list[str]:
         else:
             fixed.append(tok)
 
-    return fixed
+    # Post-process: merge hex/binary/national prefix with following quoted string
+    # e.g., X "FF" → X"FF", H'0F' → H'0F'
+    merged: list[str] = []
+    for tok in fixed:
+        if (merged and len(merged[-1]) == 1
+                and merged[-1].upper() in ('X', 'B', 'Z', 'N', 'H')
+                and tok and tok[0] in ('"', "'")):
+            merged[-1] = merged[-1] + tok
+        else:
+            merged.append(tok)
+
+    return merged
 
 
 def _parse_statements(line: str) -> list[CobolStatement]:

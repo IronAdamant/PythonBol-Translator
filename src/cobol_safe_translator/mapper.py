@@ -411,6 +411,14 @@ class PythonMapper:
             return strt.translate_inspect(ops, self._resolve_operand)
         elif verb == "INITIALIZE":
             return self._translate_initialize(ops)
+        elif verb in ("SEARCH", "SORT", "MERGE", "RELEASE", "RETURN",
+                       "DELETE", "START"):
+            return [
+                f"# TODO(high): {verb} requires manual translation",
+                f"# {stmt.raw_text}",
+            ]
+        elif verb in ("END-SEARCH", "END-DELETE", "END-START", "END-RETURN"):
+            return [f"# {verb} (scope terminator)"]
         elif verb in ("NOT", "AT"):
             return [f"# {stmt.raw_text}"]
         elif verb.startswith("END-"):

@@ -21,6 +21,8 @@ _KNOWN_BODY_VERBS = frozenset({
     "COMPUTE", "PERFORM", "SET", "CALL", "GO", "STOP",
     "STRING", "UNSTRING", "INSPECT", "INITIALIZE",
     "OPEN", "CLOSE", "READ", "WRITE",
+    "ACCEPT", "REWRITE", "GOBACK", "EXIT", "NEXT", "CONTINUE",
+    "SEARCH", "SORT", "MERGE", "RELEASE", "RETURN", "DELETE", "START",
 })
 
 
@@ -324,9 +326,15 @@ def translate_evaluate_block(
             for ops in when_ops_list
         )
         if has_thru:
+            # Emit placeholder if/elif so subsequent clauses don't orphan elif
+            prefix = "if" if clause_idx == 0 else "elif"
+            lines.append(_indent_line(f"{prefix} True:  # TODO(high): WHEN THRU/THROUGH — manual translation required", indent))
             for ops in when_ops_list:
-                lines.append(_indent_line(f"# TODO(high): WHEN THRU/THROUGH — manual translation required", indent))
-                lines.append(_indent_line(f"# WHEN {' '.join(ops)}", indent))
+                lines.append(_indent_line(f"    # WHEN {' '.join(ops)}", indent))
+            if not _has_code(body):
+                lines.append(_indent_line("    pass", indent))
+            else:
+                lines.extend(body)
             continue
 
         if is_other:
