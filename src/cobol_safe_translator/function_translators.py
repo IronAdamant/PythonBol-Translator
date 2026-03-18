@@ -88,15 +88,25 @@ def _is_numeric_token(s: str) -> bool:
 def _split_args_by_comma(raw_args: str) -> list[str] | None:
     """Split function arguments by comma at top-level paren depth.
 
-    Returns None if no commas are present (space-separated args).
+    Respects quoted strings — commas inside "..." or '...' are not delimiters.
+    Returns None if no commas are present outside quotes (space-separated args).
     """
     if ',' not in raw_args:
         return None
     args: list[str] = []
     current: list[str] = []
     depth = 0
+    in_quote: str | None = None
     for ch in raw_args:
-        if ch == '(':
+        if in_quote:
+            current.append(ch)
+            if ch == in_quote:
+                in_quote = None
+            continue
+        if ch in ('"', "'"):
+            in_quote = ch
+            current.append(ch)
+        elif ch == '(':
             depth += 1
             current.append(ch)
         elif ch == ')':
@@ -110,6 +120,9 @@ def _split_args_by_comma(raw_args: str) -> list[str] | None:
     remainder = ''.join(current).strip()
     if remainder:
         args.append(remainder)
+    # If all commas were inside quotes, treat as no-comma (single arg)
+    if len(args) <= 1:
+        return None
     return args
 
 
