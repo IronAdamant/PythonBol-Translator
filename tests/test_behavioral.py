@@ -1146,6 +1146,64 @@ class TestSortUsingGiving:
         assert "BANANA" in result_lines[1]
         assert "CHERRY" in result_lines[2]
 
+    def test_sort_field_based_numeric_key(self, tmp_path):
+        """SORT by numeric field within fixed-format records."""
+        # Records: 5-char ID + 10-char name + 5-char amount = 20 chars
+        (tmp_path / "in.dat").write_text(
+            "00001ALICE     00300\n"
+            "00002BOB       00100\n"
+            "00003CAROL     00200\n"
+        )
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. FIELD-SORT.\n"
+            "       ENVIRONMENT DIVISION.\n"
+            "       INPUT-OUTPUT SECTION.\n"
+            "       FILE-CONTROL.\n"
+            "           SELECT IN-FILE ASSIGN TO 'in.dat'.\n"
+            "           SELECT OUT-FILE ASSIGN TO 'out.dat'.\n"
+            "           SELECT SORT-FILE ASSIGN TO SORTWORK.\n"
+            "       DATA DIVISION.\n"
+            "       FILE SECTION.\n"
+            "       FD IN-FILE.\n"
+            "       01 IN-REC PIC X(20).\n"
+            "       FD OUT-FILE.\n"
+            "       01 OUT-REC PIC X(20).\n"
+            "       SD SORT-FILE.\n"
+            "       01 SORT-REC.\n"
+            "           05 S-ID PIC 9(5).\n"
+            "           05 S-NAME PIC X(10).\n"
+            "           05 S-AMT PIC 9(5).\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-X PIC X.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           SORT SORT-FILE ON ASCENDING KEY S-AMT\n"
+            "               USING IN-FILE\n"
+            "               GIVING OUT-FILE.\n"
+            '           DISPLAY "FIELD SORT DONE".\n'
+            "           STOP RUN.\n"
+        )
+        prog = parse_cobol(src)
+        smap = analyze(prog)
+        py_source = generate_python(smap)
+        py_file = tmp_path / "field_sort.py"
+        py_file.write_text(py_source)
+        result = subprocess.run(
+            [sys.executable, str(py_file)],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(tmp_path),
+            env={**os.environ, "PYTHONPATH": _PROJECT_SRC},
+        )
+        assert result.returncode == 0, f"rc={result.returncode}\n{result.stderr}"
+        assert "FIELD SORT DONE" in result.stdout
+        out_lines = (tmp_path / "out.dat").read_text().strip().splitlines()
+        assert len(out_lines) == 3
+        # Sorted by S-AMT ascending: 100, 200, 300
+        assert "BOB" in out_lines[0]       # amount 100
+        assert "CAROL" in out_lines[1]     # amount 200
+        assert "ALICE" in out_lines[2]     # amount 300
+
 
 # ---------------------------------------------------------------------------
 # 30. PERFORM THRU — call paragraph range A through C
@@ -1412,3 +1470,64 @@ class TestSignConditions:
         )
         stdout = _run_cobol_program(src)
         assert stdout.strip() == "ZERO"
+
+
+# ---------------------------------------------------------------------------
+# 37. Inline PERFORM VARYING — statements inside the loop
+# ---------------------------------------------------------------------------
+class TestInlinePerformVarying:
+    def test_inline_perform_varying_displays_each(self):
+        """Inline PERFORM VARYING ... END-PERFORM should execute body in loop."""
+        src = make_cobol(
+            [
+                "PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 5",
+                "    DISPLAY WS-I",
+                "END-PERFORM.",
+                "STOP RUN.",
+            ],
+            data_lines=["       01 WS-I PIC 9(5) VALUE 0."],
+        )
+        stdout = _run_cobol_program(src)
+        lines = stdout.strip().splitlines()
+        assert len(lines) == 5
+        for i, line in enumerate(lines, start=1):
+            assert line.strip() == str(i)
+
+    def test_inline_perform_varying_nested(self):
+        """Inline PERFORM VARYING with AFTER (nested inline loop)."""
+        src = make_cobol(
+            [
+                "PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 2",
+                "    AFTER WS-J FROM 1 BY 1 UNTIL WS-J > 2",
+                "    ADD 1 TO WS-COUNT",
+                "END-PERFORM.",
+                "DISPLAY WS-COUNT.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-I PIC 9(5) VALUE 0.",
+                "       01 WS-J PIC 9(5) VALUE 0.",
+                "       01 WS-COUNT PIC 9(5) VALUE 0.",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "4"
+
+    def test_inline_perform_varying_with_arithmetic(self):
+        """Inline PERFORM VARYING with ADD inside loop body."""
+        src = make_cobol(
+            [
+                "PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 4",
+                "    ADD WS-I TO WS-SUM",
+                "END-PERFORM.",
+                "DISPLAY WS-SUM.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-I PIC 9(5) VALUE 0.",
+                "       01 WS-SUM PIC 9(5) VALUE 0.",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        # Sum of 1+2+3+4 = 10
+        assert stdout.strip() == "10"

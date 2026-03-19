@@ -11,6 +11,7 @@ where the return value is a list of Python source lines.
 
 from __future__ import annotations
 
+from .models import DataItem, PicCategory
 from .utils import _to_method_name, _to_python_name, _upper_ops
 
 # Clause keywords that terminate field-name collection in KEY clauses
@@ -111,19 +112,56 @@ def _parse_sort_merge_clauses(ops: list[str]) -> dict[str, object]:
     return result
 
 
-def _build_key_lambda(keys: list[tuple[str, list[str]]]) -> str:
+def compute_field_offsets(items: list[DataItem]) -> dict[str, tuple[int, int, bool]]:
+    """Compute {FIELD_NAME: (start, length, is_numeric)} for flat fields in a record."""
+    offsets: dict[str, tuple[int, int, bool]] = {}
+
+    def _walk(children: list[DataItem], pos: int) -> int:
+        for item in children:
+            if item.children:
+                pos = _walk(item.children, pos)
+            elif item.pic:
+                is_num = item.pic.category in (PicCategory.NUMERIC, PicCategory.EDITED)
+                offsets[item.name.upper()] = (pos, item.pic.size, is_num)
+                pos += item.pic.size
+        return pos
+
+    _walk(items, 0)
+    return offsets
+
+
+def _build_key_lambda(
+    keys: list[tuple[str, list[str]]],
+    field_offsets: dict[str, tuple[int, int, bool]] | None = None,
+) -> str:
     """Build a Python lambda for sorted() key from ASCENDING/DESCENDING keys.
 
-    Records may be strings (from RELEASE/FileAdapter) or dicts, so the
-    lambda falls back to str(r) for non-dict records.
+    When *field_offsets* is provided, generates substring extraction from
+    fixed-format string records. Falls back to whole-string comparison
+    when field offset information is unavailable.
     """
     if not keys:
         return ""
     parts: list[str] = []
     for direction, fields in keys:
         for f in fields:
-            py = _to_python_name(f)
-            accessor = f"(r['{py}'] if isinstance(r, dict) else str(r))"
+            upper_f = f.upper()
+            if field_offsets and upper_f in field_offsets:
+                start, length, is_num = field_offsets[upper_f]
+                end = start + length
+                if is_num:
+                    accessor = (
+                        f"(int(r[{start}:{end}].strip() or '0') "
+                        f"if isinstance(r, str) else r['{_to_python_name(f)}'])"
+                    )
+                else:
+                    accessor = (
+                        f"(r[{start}:{end}] "
+                        f"if isinstance(r, str) else r['{_to_python_name(f)}'])"
+                    )
+            else:
+                py = _to_python_name(f)
+                accessor = f"(r['{py}'] if isinstance(r, dict) else str(r))"
             parts.append(accessor)
     if len(parts) == 1:
         return f"key=lambda r: {parts[0]}"
@@ -135,17 +173,18 @@ def _all_descending(keys: list[tuple[str, list[str]]]) -> bool:
     return bool(keys) and all(d == "DESCENDING" for d, _ in keys)
 
 
-def _emit_sort_call(keys: list[tuple[str, list[str]]], target: str) -> list[str]:
+def _emit_sort_call(
+    keys: list[tuple[str, list[str]]],
+    target: str,
+    field_offsets: dict[str, tuple[int, int, bool]] | None = None,
+) -> list[str]:
     """Emit one or two lines that sort *target* in place using *keys*."""
     if not keys:
         return [f"{target}.sort()"]
     if _all_descending(keys):
         asc = [("ASCENDING", fs) for _, fs in keys]
-        return [f"{target}.sort({_build_key_lambda(asc)}, reverse=True)"]
-    return [
-        f"{target}.sort({_build_key_lambda(keys)})",
-        f"# TODO: verify key types (negate works for numeric only)",
-    ]
+        return [f"{target}.sort({_build_key_lambda(asc, field_offsets)}, reverse=True)"]
+    return [f"{target}.sort({_build_key_lambda(keys, field_offsets)})"]
 
 
 def _emit_read_loop(py_file: str, list_var: str) -> list[str]:
@@ -183,8 +222,16 @@ def _emit_proc_call(proc: tuple[str, str | None], label: str) -> list[str]:
 # ---- Public translators ------------------------------------------------
 
 
-def translate_sort(ops: list[str]) -> list[str]:
-    """Translate SORT verb to Python."""
+def translate_sort(
+    ops: list[str],
+    file_section: list[DataItem] | None = None,
+) -> list[str]:
+    """Translate SORT verb to Python.
+
+    When *file_section* is provided, field offsets are computed from the SD
+    record definition so the sort lambda extracts fields by column position
+    instead of sorting whole lines.
+    """
     if not ops:
         return ["# SORT: no operands"]
 
@@ -195,6 +242,17 @@ def translate_sort(ops: list[str]) -> list[str]:
     giving: list[str] = c["giving"]  # type: ignore[assignment]
     in_proc = c["input_procedure"]
     out_proc = c["output_procedure"]
+
+    # Build field offset map from SD record definition (if available)
+    field_offsets: dict[str, tuple[int, int, bool]] | None = None
+    if file_section and keys:
+        for item in file_section:
+            if item.children:
+                offsets = compute_field_offsets(item.children)
+                # Check if any sort key is in these offsets
+                if any(f.upper() in offsets for _, fs in keys for f in fs):
+                    field_offsets = offsets
+                    break
 
     lines: list[str] = [f"# SORT {c['sort_file']}"]
     for d, fs in keys:
@@ -207,7 +265,7 @@ def translate_sort(ops: list[str]) -> list[str]:
         lines.append(f"{rec_var} = []")
         for uf in using:
             lines.extend(_emit_read_loop(_to_python_name(uf), rec_var))
-        lines.extend(_emit_sort_call(keys, rec_var))
+        lines.extend(_emit_sort_call(keys, rec_var, field_offsets))
         for gf in giving:
             lines.extend(_emit_write_loop(_to_python_name(gf), rec_var))
         return lines
@@ -217,7 +275,7 @@ def translate_sort(ops: list[str]) -> list[str]:
         lines.append(f"{rec_var} = []")
         for uf in using:
             lines.extend(_emit_read_loop(_to_python_name(uf), rec_var))
-        lines.extend(_emit_sort_call(keys, rec_var))
+        lines.extend(_emit_sort_call(keys, rec_var, field_offsets))
         lines.append(f"self._sort_sorted = list({rec_var})")
         lines.extend(_emit_proc_call(out_proc, "OUTPUT PROCEDURE"))  # type: ignore[arg-type]
         return lines
@@ -226,7 +284,7 @@ def translate_sort(ops: list[str]) -> list[str]:
     if in_proc and giving:
         lines.append(f"self._sort_work = []")
         lines.extend(_emit_proc_call(in_proc, "INPUT PROCEDURE"))  # type: ignore[arg-type]
-        lines.extend(_emit_sort_call(keys, f"self._sort_work"))
+        lines.extend(_emit_sort_call(keys, f"self._sort_work", field_offsets))
         for gf in giving:
             lines.extend(_emit_write_loop(_to_python_name(gf), f"self._sort_work"))
         return lines
@@ -235,7 +293,7 @@ def translate_sort(ops: list[str]) -> list[str]:
     if in_proc and out_proc:
         lines.append(f"self._sort_work = []")
         lines.extend(_emit_proc_call(in_proc, "INPUT PROCEDURE"))  # type: ignore[arg-type]
-        lines.extend(_emit_sort_call(keys, f"self._sort_work"))
+        lines.extend(_emit_sort_call(keys, f"self._sort_work", field_offsets))
         lines.append(f"self._sort_sorted = list(self._sort_work)")
         lines.extend(_emit_proc_call(out_proc, "OUTPUT PROCEDURE"))  # type: ignore[arg-type]
         return lines

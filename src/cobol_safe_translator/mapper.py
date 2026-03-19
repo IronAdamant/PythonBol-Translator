@@ -92,7 +92,7 @@ class PythonMapper:
             "UNSTRING": lambda s: strt.translate_unstring(s.operands, self._resolve_operand),
             "INSPECT": lambda s: strt.translate_inspect(s.operands, self._resolve_operand),
             "INITIALIZE": lambda s: st.translate_initialize(s.operands),
-            "SORT": lambda s: sort_t.translate_sort(s.operands),
+            "SORT": lambda s: sort_t.translate_sort(s.operands, self.program.file_section),
             "MERGE": lambda s: sort_t.translate_merge(s.operands),
             "RELEASE": lambda s: sort_t.translate_release(s.operands),
             "RETURN": lambda s: sort_t.translate_return_verb(s.operands, s.raw_text),
@@ -391,6 +391,15 @@ class PythonMapper:
                 lines.extend(block_lines)
                 continue
 
+            # Inline PERFORM VARYING — consume body until END-PERFORM
+            if (stmt.verb == "PERFORM" and stmt.operands
+                    and stmt.operands[0].upper() == "VARYING"):
+                block_lines, i = self._translate_inline_perform_varying(
+                    para.statements, i,
+                )
+                lines.extend(block_lines)
+                continue
+
             translated = self._translate_statement(stmt)
             for tl in translated:
                 lines.append(f"        {tl}")
@@ -566,6 +575,57 @@ class PythonMapper:
         if e_idx < s_idx:
             return [start]  # inverted range: fallback
         return [self.program.paragraphs[i].name for i in range(s_idx, e_idx + 1)]
+
+    def _translate_inline_perform_varying(
+        self, statements: list[CobolStatement], start: int,
+    ) -> tuple[list[str], int]:
+        """Handle inline PERFORM VARYING ... END-PERFORM as a block."""
+        stmt = statements[start]
+        # Generate the loop header via the normal PERFORM translator
+        header_lines = st.translate_perform(
+            stmt.operands, stmt.raw_text, self._translate_condition,
+            get_paragraph_range=self._get_paragraph_range,
+        )
+
+        # Find the innermost while loop's indentation depth
+        depth = 0
+        for hl in header_lines:
+            stripped = hl.lstrip()
+            if stripped.startswith("while not "):
+                depth = (len(hl) - len(stripped)) // 4 + 1
+
+        # Collect body statements until END-PERFORM
+        body_stmts: list[CobolStatement] = []
+        i = start + 1
+        while i < len(statements):
+            s = statements[i]
+            if s.verb == "END-PERFORM":
+                i += 1
+                break
+            body_stmts.append(s)
+            i += 1
+
+        # Translate body and place at innermost depth
+        body_lines: list[str] = []
+        for bs in body_stmts:
+            for tl in self._translate_statement(bs):
+                body_lines.append(f"{'    ' * depth}{tl}")
+
+        # Rebuild: header lines, replacing the pass/TODO with actual body,
+        # then step increments
+        result: list[str] = []
+        for hl in header_lines:
+            stripped = hl.lstrip()
+            if stripped.startswith("pass  # TODO(high): inline PERFORM VARYING"):
+                if body_lines:
+                    for bl in body_lines:
+                        result.append(f"        {bl}")
+                else:
+                    result.append(f"        {hl}")
+            else:
+                result.append(f"        {hl}")
+
+        return result, i
 
     def _translate_perform(self, ops: list[str], raw: str) -> list[str]:
         return st.translate_perform(
