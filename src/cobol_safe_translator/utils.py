@@ -179,6 +179,15 @@ def resolve_operand(op: str) -> str:
     return f"self.data.{_to_python_name(op)}.value"
 
 
+def extract_from_expr(ops: list[str], upper_ops: list[str]) -> str | None:
+    """Extract FROM clause value as a Python expression, or None if absent."""
+    if "FROM" in upper_ops:
+        idx = upper_ops.index("FROM")
+        if idx + 1 < len(ops):
+            return f"self.data.{_to_python_name(ops[idx + 1])}.value"
+    return None
+
+
 def resolve_target(op: str) -> str:
     """Resolve a COBOL target operand to a Python assignment target.
 

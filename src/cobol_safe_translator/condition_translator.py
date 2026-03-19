@@ -41,6 +41,9 @@ _ARITH_OPS = frozenset({'+', '-', '*', '/'})
 # Tokens that precede a '(' and indicate it's NOT a reference-modification paren
 _NON_REFMOD_TOKENS = frozenset({'AND', 'OR', 'NOT', '(', ')'}) | _CMP_OPS
 
+# Combined set for sign-word subject exclusion check
+_NON_SUBJECT_TOKENS = frozenset({'and', 'or', 'not', '('}) | _CMP_OPS
+
 _OP_KEYWORDS = frozenset({
     'AND', 'OR', 'NOT', '(', ')', 'NUMERIC', 'ALPHABETIC', 'POSITIVE', 'NEGATIVE',
 })
@@ -307,7 +310,7 @@ def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) ->
             continue
         if t in _SIGN_WORDS and result:
             prev = result[-1]
-            if prev not in ('and', 'or', 'not', '(', *_CMP_OPS):
+            if prev not in _NON_SUBJECT_TOKENS:
                 result.append(_SIGN_WORDS[t])
                 i += 1
                 continue

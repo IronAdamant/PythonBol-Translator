@@ -12,7 +12,7 @@ where the return value is a list of Python source lines.
 from __future__ import annotations
 
 from .models import DataItem, PicCategory
-from .utils import _to_method_name, _to_python_name, _upper_ops
+from .utils import _to_method_name, _to_python_name, _upper_ops, extract_from_expr
 
 # Clause keywords that terminate field-name collection in KEY clauses
 _CLAUSE_STOPS = frozenset((
@@ -382,11 +382,7 @@ def translate_release(ops: list[str]) -> list[str]:
     py_rec = _to_python_name(record)
     upper_ops = _upper_ops(ops)
 
-    from_expr = None
-    if "FROM" in upper_ops:
-        idx = upper_ops.index("FROM")
-        if idx + 1 < len(ops):
-            from_expr = f"self.data.{_to_python_name(ops[idx + 1])}.value"
+    from_expr = extract_from_expr(ops, upper_ops)
 
     lines = [f"# RELEASE {record}"]
     if from_expr:

@@ -105,11 +105,7 @@ def detect_sensitivities(
     excludes: list[str],
 ) -> list[SensitivityFlag]:
     """Flag data items whose names match sensitive patterns."""
-    all_names = (
-        _collect_all_data_names(program.file_section)
-        + _collect_all_data_names(program.working_storage)
-        + _collect_all_data_names(program.linkage_section)
-    )
+    all_names = _collect_all_data_names(program.all_data_items)
 
     exclude_set = {e.upper() for e in excludes}
     flags: list[SensitivityFlag] = []
@@ -161,11 +157,7 @@ def compute_stats(program: CobolProgram) -> ProgramStats:
     raw_text = "\n".join(program.raw_lines)
     total, code, comments, blanks = count_raw_lines(raw_text)
 
-    data_count = (
-        len(_collect_all_data_names(program.file_section))
-        + len(_collect_all_data_names(program.working_storage))
-        + len(_collect_all_data_names(program.linkage_section))
-    )
+    data_count = len(_collect_all_data_names(program.all_data_items))
 
     stmt_count = sum(len(p.statements) for p in program.paragraphs)
 

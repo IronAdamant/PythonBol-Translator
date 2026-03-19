@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from .models import CobolStatement
-from .utils import FIGURATIVE_RESOLVE, _file_hint_from_record, _is_numeric_literal, _sanitize_numeric, _to_method_name, _to_python_name, _upper_ops, resolve_operand as _resolve_operand, resolve_target as _resolve_target
+from .utils import FIGURATIVE_RESOLVE, _file_hint_from_record, _is_numeric_literal, _sanitize_numeric, _to_method_name, _to_python_name, _upper_ops, extract_from_expr, resolve_operand as _resolve_operand, resolve_target as _resolve_target
 
 # Re-export from io_translators (split for LOC compliance)
 from .io_translators import translate_accept, translate_rewrite, wrap_on_size_error  # noqa: F401
@@ -724,11 +724,7 @@ def translate_write(ops: list[str]) -> list[str]:
     file_hint = _file_hint_from_record(py_record)
 
     # Check for FROM clause: WRITE record FROM data-name
-    from_expr = None
-    if "FROM" in upper_ops:
-        from_idx = upper_ops.index("FROM")
-        if from_idx + 1 < len(ops):
-            from_expr = f"self.data.{_to_python_name(ops[from_idx + 1])}.value"
+    from_expr = extract_from_expr(ops, upper_ops)
 
     if from_expr:
         return [f"self.{file_hint}.write(str({from_expr}))"]

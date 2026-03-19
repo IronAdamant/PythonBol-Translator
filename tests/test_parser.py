@@ -399,7 +399,7 @@ class TestPicRepeatExpansion:
 
     def test_p_in_size(self):
         size, _, _ = compute_pic_size("PPP999")
-        assert size == 6  # 3 P + 3 digits
+        assert size == 3  # P is implied scaling, not a display position
 
     def test_slash_in_size(self):
         size, _, _ = compute_pic_size("99/99/9999")

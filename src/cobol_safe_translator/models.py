@@ -144,6 +144,11 @@ class CobolProgram:
     # Raw text preserved for reference
     raw_lines: list[str] = field(default_factory=list)
 
+    @property
+    def all_data_items(self) -> list[DataItem]:
+        """All data items across working-storage, file section, and linkage."""
+        return self.working_storage + self.file_section + self.linkage_section
+
 
 # --- Analysis models ---
 

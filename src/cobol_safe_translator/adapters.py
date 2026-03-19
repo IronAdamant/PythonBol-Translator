@@ -291,6 +291,7 @@ class FileAdapter:
             self._file.close()
             self._file = None
             self._mode = None
+            self._eof = False
 
     def __enter__(self) -> FileAdapter:
         self.open_input()

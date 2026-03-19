@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import importlib
 import os
+import shutil
 import sys
 import tempfile
 
@@ -44,19 +45,16 @@ def validate_generated_python(
     except SyntaxError as e:
         return False, f"SyntaxError: {e.msg} (line {e.lineno})"
 
-    # Step 2: import test — write to temp file, import, instantiate Program
-    tmp_path: str | None = None
+    # Step 2: import test — write to temp dir, import, instantiate Program
+    tmp_dir_obj = tempfile.mkdtemp()
     try:
-        with tempfile.NamedTemporaryFile(
-            suffix=".py", mode="w", delete=False, encoding="utf-8"
-        ) as f:
+        tmp_path = os.path.join(tmp_dir_obj, "generated_module.py")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(source_code)
-            tmp_path = f.name
 
-        tmp_dir = os.path.dirname(tmp_path)
-        module_name = os.path.basename(tmp_path)[:-3]  # strip .py
+        module_name = "generated_module"
 
-        sys.path.insert(0, tmp_dir)
+        sys.path.insert(0, tmp_dir_obj)
         try:
             mod = importlib.import_module(module_name)
 
@@ -67,16 +65,12 @@ def validate_generated_python(
                     obj()  # should not crash
                     break
         finally:
-            sys.path.remove(tmp_dir)
+            sys.path.remove(tmp_dir_obj)
             if module_name in sys.modules:
                 del sys.modules[module_name]
     except Exception as e:
         return False, f"ImportError: {type(e).__name__}: {e}"
     finally:
-        if tmp_path is not None:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+        shutil.rmtree(tmp_dir_obj, ignore_errors=True)
 
     return True, ""

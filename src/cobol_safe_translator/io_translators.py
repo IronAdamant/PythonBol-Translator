@@ -6,7 +6,7 @@ Handles: ACCEPT, REWRITE, ON SIZE ERROR wrapping.
 
 from __future__ import annotations
 
-from .utils import _file_hint_from_record, _to_python_name, _upper_ops
+from .utils import _file_hint_from_record, _to_python_name, _upper_ops, extract_from_expr
 
 
 def translate_accept(ops: list[str], raw: str) -> list[str]:
@@ -89,11 +89,7 @@ def translate_rewrite(ops: list[str]) -> list[str]:
     file_hint = _file_hint_from_record(py_record)
 
     # Check for FROM clause
-    from_expr = None
-    if "FROM" in upper_ops:
-        from_idx = upper_ops.index("FROM")
-        if from_idx + 1 < len(ops):
-            from_expr = f"self.data.{_to_python_name(ops[from_idx + 1])}.value"
+    from_expr = extract_from_expr(ops, upper_ops)
 
     lines = [f"# REWRITE {record_name} — update record in file"]
     if from_expr:

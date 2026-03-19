@@ -48,10 +48,6 @@ _ORPHAN_SCOPE_VERBS = frozenset({
     "END-IF", "END-EVALUATE", "END-PERFORM", "END-READ",
     "END-WRITE", "END-CALL", "END-STRING",
 })
-_SCOPE_TERMINATORS = frozenset({
-    "END-SEARCH", "END-DELETE", "END-START",
-    "END-RETURN", "END-SORT", "END-MERGE",
-})
 _TODO_VERBS = frozenset({"DELETE", "START"})
 
 
@@ -68,10 +64,7 @@ class PythonMapper:
             f.data_name.upper(): f for f in software_map.sensitivities
         }
         self._condition_lookup: dict[str, tuple[str, str]] = {}
-        for items_list in [software_map.program.working_storage,
-                           software_map.program.file_section,
-                           software_map.program.linkage_section]:
-            self._build_condition_lookup(items_list)
+        self._build_condition_lookup(software_map.program.all_data_items)
         self._verb_handlers = {
             "DISPLAY": lambda s: st.translate_display(s, self._resolve_operand),
             "MOVE": lambda s: self._translate_move(s.operands),
@@ -192,7 +185,7 @@ class PythonMapper:
 
     def _data_class(self) -> str:
         """Generate @dataclass for WORKING-STORAGE, FILE SECTION, and LINKAGE data items."""
-        all_items = self.program.working_storage + self.program.file_section + self.program.linkage_section
+        all_items = self.program.all_data_items
         class_name = self._class_name + "Data"
 
         if not all_items:
@@ -470,8 +463,6 @@ class PythonMapper:
         # Stub verbs and scope terminators
         if verb in _TODO_VERBS:
             return [f"# TODO(high): {verb} requires manual translation", f"# {stmt.raw_text}"]
-        if verb in _SCOPE_TERMINATORS:
-            return [f"# {verb} (scope terminator)"]
         if verb in ("NOT", "AT"):
             return [f"# {stmt.raw_text}"]
         if verb == "END":
@@ -521,13 +512,8 @@ class PythonMapper:
 
     def _find_group_children(self, group_name: str) -> list[str]:
         """Find child field names for a group-level data item."""
-        for items_list in [self.program.working_storage,
-                           self.program.file_section,
-                           self.program.linkage_section]:
-            result = self._search_group(items_list, group_name)
-            if result is not None:
-                return result
-        return []
+        result = self._search_group(self.program.all_data_items, group_name)
+        return result if result is not None else []
 
     def _search_group(self, items: list[DataItem], name: str) -> list[str] | None:
         for item in items:

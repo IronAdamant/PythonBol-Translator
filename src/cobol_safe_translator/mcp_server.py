@@ -429,7 +429,7 @@ class CobolMcpServer:
 
                 self._dispatch(message)
 
-        except (BrokenPipeError, IOError):
+        except OSError:
             pass
         except KeyboardInterrupt:
             pass

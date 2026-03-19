@@ -70,6 +70,7 @@ _FUNCTION_INTRINSICS_VAR: dict[str, str] = {
 }
 
 _EXPR_OPERATORS = frozenset({'+', '-', '*', '/', '**', '(', ')'})
+_ARITH_EXPR_OPS = frozenset({'+', '-', '*', '/', '**'})
 
 
 def _split_args_by_comma(raw_args: str) -> list[str] | None:
@@ -116,7 +117,7 @@ def _split_args_by_comma(raw_args: str) -> list[str] | None:
 def _has_operators(raw: str) -> bool:
     """Check if a raw arg string contains arithmetic operators."""
     tokens = raw.split()
-    return any(t in _EXPR_OPERATORS and t not in ('(', ')') for t in tokens)
+    return any(t in _ARITH_EXPR_OPS for t in tokens)
 
 
 def _tokenize_expr(expr: str) -> list[str]:

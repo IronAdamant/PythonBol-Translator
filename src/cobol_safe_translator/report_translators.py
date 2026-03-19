@@ -9,9 +9,8 @@ Pipeline position: Called by mapper.py for INITIATE, GENERATE, TERMINATE verbs.
 
 from __future__ import annotations
 
-import re
-
 from .models import ReportDescription, ReportField, ReportGroup
+from .pic_parser import expand_pic
 from .utils import _to_python_name, resolve_operand
 
 
@@ -80,9 +79,20 @@ def _pic_display_size(pic: str) -> int:
     """Estimate the display width from a PIC string."""
     if not pic:
         return 10
-    # Remove parenthesized repeats and count characters
-    expanded = re.sub(r"(\w)\((\d+)\)", lambda m: m.group(1) * int(m.group(2)), pic)
-    return max(len(expanded), 1)
+    return max(len(expand_pic(pic)), 1)
+
+
+def _emit_group_lines(group: ReportGroup) -> list[str]:
+    """Render all lines for a report group."""
+    result: list[str] = []
+    for idx in range(len(group.lines)):
+        result.extend(_format_line_expr(group, idx))
+    return result
+
+
+def _emit_group_lines_indented(group: ReportGroup, prefix: str = "    ") -> list[str]:
+    """Render all lines for a report group with an indentation prefix."""
+    return [f"{prefix}{fl}" for fl in _emit_group_lines(group)]
 
 
 def _iter_sum_fields(rd: ReportDescription):
@@ -132,16 +142,14 @@ def translate_initiate(ops: list[str], reports: list[ReportDescription]) -> list
         rh_groups = _groups_by_type(rd, "REPORT HEADING")
         for group in rh_groups:
             lines.append("# Report Heading")
-            for idx in range(len(group.lines)):
-                lines.extend(_format_line_expr(group, idx))
+            lines.extend(_emit_group_lines(group))
 
         # Print first PAGE HEADING
         ph_groups = _groups_by_type(rd, "PAGE HEADING")
         if ph_groups:
             lines.append("# Page Heading")
             for group in ph_groups:
-                for idx in range(len(group.lines)):
-                    lines.extend(_format_line_expr(group, idx))
+                lines.extend(_emit_group_lines(group))
 
     return lines
 
@@ -202,9 +210,7 @@ def translate_generate(ops: list[str], reports: list[ReportDescription]) -> list
             if cf_groups:
                 lines.append(f"    # Control Footing for {ctrl}")
                 for group in cf_groups:
-                    for idx in range(len(group.lines)):
-                        for fl in _format_line_expr(group, idx):
-                            lines.append(f"    {fl}")
+                    lines.extend(_emit_group_lines_indented(group))
             # Emit matching CONTROL HEADING groups
             ch_groups = [g for g in rd.groups
                          if g.type_clause.upper().startswith("CONTROL HEADING")
@@ -212,9 +218,7 @@ def translate_generate(ops: list[str], reports: list[ReportDescription]) -> list
             if ch_groups:
                 lines.append(f"    # Control Heading for {ctrl}")
                 for group in ch_groups:
-                    for idx in range(len(group.lines)):
-                        for fl in _format_line_expr(group, idx):
-                            lines.append(f"    {fl}")
+                    lines.extend(_emit_group_lines_indented(group))
             # Save current value for next comparison
             lines.append(f"self.{prev_attr} = self.data.{py_ctrl}.value")
 
@@ -234,9 +238,7 @@ def translate_generate(ops: list[str], reports: list[ReportDescription]) -> list
         if pf_groups:
             lines.append("    # Page Footing")
             for group in pf_groups:
-                for idx in range(len(group.lines)):
-                    for fl in _format_line_expr(group, idx):
-                        lines.append(f"    {fl}")
+                lines.extend(_emit_group_lines_indented(group))
         # New page heading
         ph_groups = _groups_by_type(rd, "PAGE HEADING")
         lines.append("    self._rw_page_counter += 1")
@@ -244,14 +246,11 @@ def translate_generate(ops: list[str], reports: list[ReportDescription]) -> list
         if ph_groups:
             lines.append("    # Page Heading")
             for group in ph_groups:
-                for idx in range(len(group.lines)):
-                    for fl in _format_line_expr(group, idx):
-                        lines.append(f"    {fl}")
+                lines.extend(_emit_group_lines_indented(group))
 
     # Format and print the detail line
     lines.append("# Detail line")
-    for idx in range(len(detail_group.lines)):
-        lines.extend(_format_line_expr(detail_group, idx))
+    lines.extend(_emit_group_lines(detail_group))
 
     lines.append("self._rw_line_counter += 1")
     return lines
@@ -277,15 +276,13 @@ def translate_terminate(ops: list[str], reports: list[ReportDescription]) -> lis
                      and "CONTROL FOOTING" in g.type_clause.upper()]
         for group in cf_final:
             lines.append("# Control Footing FINAL")
-            for idx in range(len(group.lines)):
-                lines.extend(_format_line_expr(group, idx))
+            lines.extend(_emit_group_lines(group))
 
         # Print REPORT FOOTING
         rf_groups = _groups_by_type(rd, "REPORT FOOTING")
         for group in rf_groups:
             lines.append("# Report Footing")
-            for idx in range(len(group.lines)):
-                lines.extend(_format_line_expr(group, idx))
+            lines.extend(_emit_group_lines(group))
 
     # Write output to report file
     rpt_filename = report_name.lower().replace("-", "_") + "_report.txt"

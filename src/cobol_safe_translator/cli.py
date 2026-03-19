@@ -21,6 +21,7 @@ from .mapper import generate_python
 from .parser import parse_cobol_file
 from .prompt_generator import generate_prompt
 from .models import CobolProgram, SoftwareMap
+from .utils import _to_python_name
 from .validation import validate_generated_python
 
 
@@ -93,7 +94,6 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple[int, Cobol
 
 def _to_python_filename(program_id: str) -> str:
     """Convert COBOL program ID to a safe Python filename."""
-    from .utils import _to_python_name
     return (_to_python_name(program_id) or "unnamed") + ".py"
 
 

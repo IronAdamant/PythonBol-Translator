@@ -12,7 +12,7 @@ from .models import PicCategory, PicClause
 
 # --- PIC parsing ---
 
-_PIC_REPEAT = re.compile(r"(CR|DB|[A9XZVBS,.\-+$P/])\((\d+)\)", re.IGNORECASE)
+_PIC_REPEAT = re.compile(r"(CR|DB|[A9XZVBS,.\-+$*P/])\((\d+)\)", re.IGNORECASE)
 
 
 def expand_pic(raw: str) -> str:
@@ -38,7 +38,7 @@ def classify_pic(expanded: str) -> PicCategory:
     has_nine = "9" in upper
     has_x = "X" in upper
     has_a = "A" in upper
-    has_edit = any(tok in upper for tok in ("CR", "DB")) or any(c in upper for c in "ZB,.+-$")
+    has_edit = any(tok in upper for tok in ("CR", "DB")) or any(c in upper for c in "ZB,.+-$*/")
 
     if has_edit:
         return PicCategory.EDITED
@@ -74,7 +74,7 @@ def compute_pic_size(expanded: str) -> tuple[int, int, bool]:
 
     size = cr_db_extra * 2  # Each CR/DB occupies 2 display positions
     for c in count_clean:
-        if c != "V":  # V is implied decimal, no display position
+        if c not in ("V", "P"):  # V and P are implied positions, no display
             size += 1
     return size, decimals, signed
 
