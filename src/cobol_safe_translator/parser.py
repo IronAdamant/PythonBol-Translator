@@ -25,19 +25,8 @@ from .models import (
 )
 from .report_parser import parse_report_section
 
-# Re-export PIC utilities so existing imports from .parser still work
-from .pic_parser import (  # noqa: F401
-    classify_pic,
-    compute_pic_size,
-    expand_pic,
-    parse_pic,
-)
-
-# Re-export procedure parser so existing imports from .parser still work
-from .procedure_parser import (  # noqa: F401
-    KNOWN_VERBS,
-    parse_procedure,
-)
+from .pic_parser import parse_pic
+from .procedure_parser import parse_procedure
 
 # --- Format detection ---
 

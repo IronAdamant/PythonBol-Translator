@@ -15,13 +15,12 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from .models import CobolStatement
-from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _sanitize_numeric, _to_method_name, _to_python_name, _upper_ops, resolve_operand as _resolve_operand, resolve_target as _resolve_target
+from .utils import FIGURATIVE_RESOLVE, _file_hint_from_record, _is_numeric_literal, _sanitize_numeric, _to_method_name, _to_python_name, _upper_ops, resolve_operand as _resolve_operand, resolve_target as _resolve_target
 
 # Re-export from io_translators (split for LOC compliance)
 from .io_translators import translate_accept, translate_rewrite, wrap_on_size_error  # noqa: F401
 
-# Re-export from function_translators (split for LOC compliance)
-from .function_translators import translate_function_intrinsic  # noqa: F401
+from .function_translators import translate_function_intrinsic
 
 
 # Keywords that should be filtered from arithmetic operand/target lists
@@ -49,7 +48,7 @@ def translate_display(
     """Translate DISPLAY verb."""
     parts: list[str] = []
     no_advancing = False
-    operands = list(stmt.operands)
+    operands = stmt.operands
     for i, op in enumerate(operands):
         if op.upper() == "UPON":
             operands = operands[:i]
@@ -712,10 +711,7 @@ def translate_write(ops: list[str]) -> list[str]:
     py_record = _to_python_name(record_name)
     upper_ops = _upper_ops(ops)
 
-    # Determine file name from record name (convention: remove -RECORD/-REC suffix)
-    file_hint = py_record.replace("_record", "").replace("_rec", "")
-    if not file_hint or file_hint == py_record:
-        file_hint = py_record + "_file"
+    file_hint = _file_hint_from_record(py_record)
 
     # Check for FROM clause: WRITE record FROM data-name
     from_expr = None

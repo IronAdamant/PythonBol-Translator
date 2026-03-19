@@ -19,7 +19,7 @@ def _find_report(reports: list[ReportDescription], name: str) -> ReportDescripti
     """Find a ReportDescription by name (case-insensitive)."""
     upper = name.upper()
     for rd in reports:
-        if rd.name.upper() == upper:
+        if rd.name == upper:
             return rd
     return None
 
@@ -93,7 +93,7 @@ def _pic_display_size(pic: str) -> int:
 def _groups_by_type(rd: ReportDescription, type_prefix: str) -> list[ReportGroup]:
     """Return report groups whose type starts with the given prefix."""
     prefix = type_prefix.upper()
-    return [g for g in rd.groups if g.type_clause.upper().startswith(prefix)]
+    return [g for g in rd.groups if g.type_clause.startswith(prefix)]
 
 
 def translate_initiate(ops: list[str], reports: list[ReportDescription]) -> list[str]:

@@ -520,9 +520,7 @@ class PythonMapper:
                     return result
         return None
 
-    def _resolve_operand(self, op: str) -> str:
-        """Resolve a COBOL operand to a Python expression."""
-        return _resolve_operand_base(op)
+    _resolve_operand = staticmethod(_resolve_operand_base)
 
     def _translate_arithmetic(self, verb: str, ops: list[str]) -> list[str]:
         """Route arithmetic verb and wrap with ON SIZE ERROR if present."""

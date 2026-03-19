@@ -57,6 +57,22 @@ def _upper(tok: str) -> str:
     return tok if _is_quoted(tok) else tok.upper()
 
 
+def _numeric_check_expr(subj: str, negate: bool = False) -> str:
+    """Generate a Python NUMERIC class condition expression."""
+    expr = f"str({subj}).replace('.','').replace('-','').isdigit()"
+    return f"not {expr}" if negate else expr
+
+
+def _condition_88_expr(parent: str, val: str, negate: bool = False) -> str:
+    """Generate a Python expression for an 88-level condition lookup."""
+    if val.startswith('(') and ',' in val:
+        lo, hi = val.strip('()').split(', ', 1)
+        expr = f"({lo} <= self.data.{parent}.value <= {hi})"
+    else:
+        expr = f"self.data.{parent}.value == {val}"
+    return f"not ({expr})" if negate else expr
+
+
 def tokenize_condition(cond: str) -> list[str]:
     """Pass 1: Extract tokens preserving quoted strings and ref-mod parens."""
     tokens: list[str] = []
@@ -101,6 +117,19 @@ def tokenize_condition(cond: str) -> list[str]:
             # Arithmetic operators in conditions (e.g., "X + Y > Z")
             tokens.append(ch)
             i += 1
+        elif ch == '-':
+            # Minus as operator vs hyphen in COBOL names
+            # If preceded by a word-ending char and followed by space or operator, it's subtraction
+            if (i > 0 and cond[i - 1] in (' ', '\t', ')', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9')):
+                tokens.append(ch)
+                i += 1
+            else:
+                # Part of a COBOL hyphenated name — fall through to word collection
+                j = i
+                while j < n and cond[j] not in (' ', '\t', '(', ')', '=', '>', '<', '"', "'", '+', '*', '/'):
+                    j += 1
+                tokens.append(cond[i:j])
+                i = j
         else:
             j = i
             while j < n and cond[j] not in (' ', '\t', '(', ')', '=', '>', '<', '"', "'", '+', '*', '/'):
@@ -137,7 +166,7 @@ def _handle_not(tokens: list[str], i: int, n: int, result: list[str],
         nxt = _upper(tokens[i + 1])
         if nxt == 'NUMERIC':
             subj = result.pop() if result else "True"
-            result.append(f"not str({subj}).replace('.','').replace('-','').isdigit()")
+            result.append(_numeric_check_expr(subj, negate=True))
             return i + 2
         if nxt == 'ALPHABETIC':
             subj = result.pop() if result else "True"
@@ -145,11 +174,7 @@ def _handle_not(tokens: list[str], i: int, n: int, result: list[str],
             return i + 2
         if nxt in condition_lookup:
             parent, val = condition_lookup[nxt]
-            if val.startswith('(') and ',' in val:
-                lo, hi = val.strip('()').split(', ', 1)
-                result.append(f"not ({lo} <= self.data.{parent}.value <= {hi})")
-            else:
-                result.append(f"not (self.data.{parent}.value == {val})")
+            result.append(_condition_88_expr(parent, val, negate=True))
             return i + 2
         # NOT followed by a value (no operator) → implied NOT EQUAL
         # e.g., "IF X NOT 0" means "IF X NOT = 0"
@@ -265,7 +290,7 @@ def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) ->
             continue
         if t == 'NUMERIC':
             subj = result.pop() if result else "True"
-            result.append(f"str({subj}).replace('.','').replace('-','').isdigit()")
+            result.append(_numeric_check_expr(subj))
             i += 1
             continue
         if t == 'ALPHABETIC':
@@ -297,11 +322,7 @@ def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) ->
             continue
         if t in condition_lookup:
             parent, val = condition_lookup[t]
-            if val.startswith('(') and ',' in val:
-                lo, hi = val.strip('()').split(', ', 1)
-                result.append(f"({lo} <= self.data.{parent}.value <= {hi})")
-            else:
-                result.append(f"self.data.{parent}.value == {val}")
+            result.append(_condition_88_expr(parent, val))
             i += 1
             continue
         # Regular operand

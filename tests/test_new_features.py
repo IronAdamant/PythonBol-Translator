@@ -4,7 +4,8 @@ import ast
 
 from cobol_safe_translator.analyzer import analyze
 from cobol_safe_translator.mapper import generate_python
-from cobol_safe_translator.parser import parse_cobol, parse_data_division, parse_environment, parse_procedure
+from cobol_safe_translator.parser import parse_cobol, parse_data_division, parse_environment
+from cobol_safe_translator.procedure_parser import parse_procedure
 from cobol_safe_translator.string_translators import (
     translate_string,
     translate_unstring,

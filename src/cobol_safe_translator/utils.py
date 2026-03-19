@@ -116,6 +116,12 @@ def _resolve_subscript_base(op: str) -> tuple[str, str] | None:
     return None
 
 
+def _file_hint_from_record(py_record: str) -> str:
+    """Derive a file adapter name from a COBOL record name."""
+    hint = py_record.replace("_record", "").replace("_rec", "")
+    return hint if hint and hint != py_record else py_record + "_file"
+
+
 def resolve_operand(op: str) -> str:
     """Resolve a COBOL operand to a Python expression.
 

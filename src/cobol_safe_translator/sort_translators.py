@@ -143,8 +143,8 @@ def _emit_sort_call(keys: list[tuple[str, list[str]]], target: str) -> list[str]
         asc = [("ASCENDING", fs) for _, fs in keys]
         return [f"{target}.sort({_build_key_lambda(asc)}, reverse=True)"]
     return [
-        f"{target}.sort({_build_key_lambda(keys)})"
-        f"  # TODO: verify key types (negate works for numeric only)"
+        f"{target}.sort({_build_key_lambda(keys)})",
+        f"# TODO: verify key types (negate works for numeric only)",
     ]
 
 
@@ -189,7 +189,7 @@ def translate_sort(ops: list[str]) -> list[str]:
         return ["# SORT: no operands"]
 
     c = _parse_sort_merge_clauses(ops)
-    sf = _to_python_name(str(c["sort_file"]))
+    sf = _to_python_name(c["sort_file"])
     keys: list[tuple[str, list[str]]] = c["keys"]  # type: ignore[assignment]
     using: list[str] = c["using"]  # type: ignore[assignment]
     giving: list[str] = c["giving"]  # type: ignore[assignment]
@@ -252,7 +252,7 @@ def translate_merge(ops: list[str]) -> list[str]:
         return ["# MERGE: no operands"]
 
     c = _parse_sort_merge_clauses(ops)
-    mf = _to_python_name(str(c["sort_file"]))
+    mf = _to_python_name(c["sort_file"])
     keys: list[tuple[str, list[str]]] = c["keys"]  # type: ignore[assignment]
     using: list[str] = c["using"]  # type: ignore[assignment]
     giving: list[str] = c["giving"]  # type: ignore[assignment]

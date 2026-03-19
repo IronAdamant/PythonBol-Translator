@@ -16,12 +16,3 @@ def ebcdic_key(s: str) -> bytes:
     Characters that can't be encoded in cp037 are replaced with b'?'.
     """
     return s.encode("cp037", errors="replace")
-
-
-def ebcdic_compare(a: str, b: str) -> int:
-    """Compare two strings using EBCDIC collation.
-
-    Returns: negative if a < b, zero if equal, positive if a > b.
-    """
-    ka, kb = ebcdic_key(a), ebcdic_key(b)
-    return (ka > kb) - (ka < kb)

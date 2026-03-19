@@ -53,7 +53,7 @@ _FUNCTION_INTRINSICS_1: dict[str, str] = {
 _FUNCTION_INTRINSICS_2: dict[str, str] = {
     "MOD": "({0}) % ({1})",
     "REM": "({0}) % ({1})",
-    "ANNUITY": "({1} * {0}) / (1 - (1 + {0}) ** (-{1}))",
+    "ANNUITY": "({0}) / (1 - (1 + {0}) ** (-{1}))",
 }
 
 # Variadic intrinsics: template uses {args} for comma-separated resolved args
@@ -66,11 +66,10 @@ _FUNCTION_INTRINSICS_VAR: dict[str, str] = {
     "RANGE": "max({args}) - min({args})",
     "VARIANCE": "__import__('statistics').variance([{args}])",
     "STANDARD-DEVIATION": "__import__('statistics').stdev([{args}])",
-    "PRESENT-VALUE": "sum({a1} / (1 + {a0}) ** _i for _i, {a1} in enumerate([{rest}], 1))",
+    "PRESENT-VALUE": "sum(_v / (1 + {a0}) ** _i for _i, _v in enumerate([{rest}], 1))",
 }
 
 _EXPR_OPERATORS = frozenset({'+', '-', '*', '/', '**', '(', ')'})
-
 
 
 def _split_args_by_comma(raw_args: str) -> list[str] | None:
@@ -343,10 +342,10 @@ def translate_function_intrinsic(
         if '{count}' in template:
             return template.format(args=resolved_str, count=len(resolved_parts))
         if '{a0}' in template and '{rest}' in template and len(resolved_parts) >= 2:
+            rest_str = ", ".join(resolved_parts[1:])
             return template.format(
                 a0=resolved_parts[0],
-                a1='_v',
-                rest=resolved_str,
+                rest=rest_str,
                 args=resolved_str,
             )
         return template.format(args=resolved_str)

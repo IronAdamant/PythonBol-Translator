@@ -341,7 +341,7 @@ class TestPicStarSize:
     """Pass 2: PIC with * (check-protection) should count in size."""
 
     def test_check_protection_size(self):
-        from cobol_safe_translator.parser import compute_pic_size
+        from cobol_safe_translator.pic_parser import compute_pic_size
         size, dec, signed = compute_pic_size("***,**9.99")
         # 5 stars + 1 comma + 1 nine + 1 period + 2 nines = 10 display positions
         assert size == 10
@@ -375,7 +375,7 @@ class TestParagraphWhitespace:
     """Pass 2: Paragraph name with whitespace before period."""
 
     def test_space_before_period(self):
-        from cobol_safe_translator.parser import parse_procedure
+        from cobol_safe_translator.procedure_parser import parse_procedure
         lines = [
             "MAIN-PARA .",
             "    DISPLAY WS-A.",

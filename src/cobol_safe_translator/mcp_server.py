@@ -52,7 +52,7 @@ TOOLS: list[dict] = [
                 "copybook_paths": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional list of copybook search paths (reserved for future use)",
+                    "description": "Optional list of directories to search for COPY copybooks",
                 },
                 "output_path": {
                     "type": "string",
@@ -78,7 +78,7 @@ TOOLS: list[dict] = [
                 "copybook_paths": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional list of copybook search paths (reserved for future use)",
+                    "description": "Optional list of directories to search for COPY copybooks",
                 },
                 "format": {
                     "type": "string",
@@ -106,7 +106,7 @@ TOOLS: list[dict] = [
                 "copybook_paths": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional list of copybook search paths (reserved for future use)",
+                    "description": "Optional list of directories to search for COPY copybooks",
                 },
             },
             "required": ["path"],
@@ -128,7 +128,7 @@ TOOLS: list[dict] = [
                 "copybook_paths": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional list of copybook search paths (reserved for future use)",
+                    "description": "Optional list of directories to search for COPY copybooks",
                 },
             },
             "required": ["path"],
@@ -179,7 +179,7 @@ TOOLS: list[dict] = [
                 "copybook_paths": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional list of copybook search paths (reserved for future use)",
+                    "description": "Optional list of directories to search for COPY copybooks",
                 },
             },
             "required": ["path", "output_path"],
@@ -274,6 +274,7 @@ def _handle_translate_directory(params: dict) -> str:
     src_dir = _validate_dir(params["path"])
     out_root = Path(params["output_path"]).resolve()
     recursive = params.get("recursive", False)
+    copy_paths = params.get("copybook_paths")
 
     files = discover_cobol_files(src_dir, recursive=recursive)
     if not files:
@@ -285,7 +286,7 @@ def _handle_translate_directory(params: dict) -> str:
 
     for src in files:
         try:
-            program = parse_cobol_file(src)
+            program = parse_cobol_file(src, copybook_paths=copy_paths)
             smap = analyze(program)
             python_source = generate_python(smap)
 

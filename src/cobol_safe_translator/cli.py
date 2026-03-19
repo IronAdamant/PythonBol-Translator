@@ -80,8 +80,7 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
     print(green(f"  Parsed: {program.program_id} ({len(program.paragraphs)} paragraphs)"))
 
     # Analyze
-    config_path = args.config or None
-    smap = analyze(program, config_path=config_path)
+    smap = analyze(program, config_path=args.config)
 
     if smap.sensitivities:
         high = sum(1 for s in smap.sensitivities if s.level.value == "high")
@@ -200,9 +199,8 @@ def _prompt_single(src: Path, out_path: Path | None, config: str | None,
 def cmd_translate(args: argparse.Namespace) -> int:
     """Parse, analyze, and generate Python translation."""
     p = Path(args.path)
-    config = args.config or None
+    config = args.config
     copy_paths = args.copybook_path
-    recursive = args.recursive
     validate = args.validate
 
     if p.is_dir():
@@ -211,7 +209,7 @@ def cmd_translate(args: argparse.Namespace) -> int:
         def process(src: Path, out_dir: Path) -> int:
             return _translate_single(src, out_dir, config, copy_paths, validate)
 
-        return _batch.run_batch(p, base_out, recursive, process)
+        return _batch.run_batch(p, base_out, args.recursive, process)
 
     return _translate_single(p, Path(args.output), config, copy_paths, validate)
 
@@ -219,9 +217,8 @@ def cmd_translate(args: argparse.Namespace) -> int:
 def cmd_map(args: argparse.Namespace) -> int:
     """Parse, analyze, and export reports."""
     p = Path(args.path)
-    config = args.config or None
+    config = args.config
     copy_paths = args.copybook_path
-    recursive = args.recursive
 
     if p.is_dir():
         base_out = Path(args.output)
@@ -229,7 +226,7 @@ def cmd_map(args: argparse.Namespace) -> int:
         def process(src: Path, out_dir: Path) -> int:
             return _map_single(src, out_dir, config, copy_paths)
 
-        return _batch.run_batch(p, base_out, recursive, process)
+        return _batch.run_batch(p, base_out, args.recursive, process)
 
     return _map_single(p, Path(args.output), config, copy_paths)
 
@@ -237,9 +234,8 @@ def cmd_map(args: argparse.Namespace) -> int:
 def cmd_prompt(args: argparse.Namespace) -> int:
     """Generate an LLM translation brief (stdout or file)."""
     p = Path(args.path)
-    config = args.config or None
+    config = args.config
     copy_paths = args.copybook_path
-    recursive = args.recursive
     output = args.output
 
     if p.is_dir():
@@ -252,7 +248,7 @@ def cmd_prompt(args: argparse.Namespace) -> int:
             brief_path = out_dir / f"{src.stem}_brief.md"
             return _prompt_single(src, brief_path, config, copy_paths)
 
-        return _batch.run_batch(p, base_out, recursive, process)
+        return _batch.run_batch(p, base_out, args.recursive, process)
 
     out_path = Path(output) if output else None
     return _prompt_single(p, out_path, config, copy_paths)
@@ -270,29 +266,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--version", action="version", version=f"cobol2py {__version__}"
     )
 
+    # Shared arguments for all subcommands
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("path", help="Path to COBOL source file or directory")
+    common.add_argument(
+        "--config", "-c", default=None,
+        help="Path to protected.json config file",
+    )
+    common.add_argument(
+        "--recursive", "-r", action="store_true",
+        help="Recurse into subdirectories (directory mode only)",
+    )
+    common.add_argument(
+        "--copybook-path", "-I", action="append", default=[],
+        help="Directory to search for COPY copybooks (can be repeated)",
+    )
+
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # translate subcommand
     tr = subparsers.add_parser(
-        "translate",
+        "translate", parents=[common],
         help="Translate COBOL source to Python skeleton",
     )
-    tr.add_argument("path", help="Path to COBOL source file or directory")
     tr.add_argument(
         "--output", "-o", default="./translated",
         help="Output directory (default: ./translated)",
-    )
-    tr.add_argument(
-        "--config", "-c", default=None,
-        help="Path to protected.json config file",
-    )
-    tr.add_argument(
-        "--recursive", "-r", action="store_true",
-        help="Recurse into subdirectories (directory mode only)",
-    )
-    tr.add_argument(
-        "--copybook-path", "-I", action="append", default=[],
-        help="Directory to search for COPY copybooks (can be repeated)",
     )
     tr.add_argument(
         "--validate", action="store_true", default=False,
@@ -301,48 +300,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     # map subcommand
     mp = subparsers.add_parser(
-        "map",
+        "map", parents=[common],
         help="Generate analysis reports (Markdown + JSON)",
     )
-    mp.add_argument("path", help="Path to COBOL source file or directory")
     mp.add_argument(
         "--output", "-o", default="./report",
         help="Output directory (default: ./report)",
     )
-    mp.add_argument(
-        "--config", "-c", default=None,
-        help="Path to protected.json config file",
-    )
-    mp.add_argument(
-        "--recursive", "-r", action="store_true",
-        help="Recurse into subdirectories (directory mode only)",
-    )
-    mp.add_argument(
-        "--copybook-path", "-I", action="append", default=[],
-        help="Directory to search for COPY copybooks (can be repeated)",
-    )
 
     # prompt subcommand
     pr = subparsers.add_parser(
-        "prompt",
+        "prompt", parents=[common],
         help="Generate a compact LLM translation brief",
     )
-    pr.add_argument("path", help="Path to COBOL source file or directory")
     pr.add_argument(
         "--output", "-o", default=None,
         help="Output file or directory (default: stdout for single file)",
-    )
-    pr.add_argument(
-        "--config", "-c", default=None,
-        help="Path to protected.json config file",
-    )
-    pr.add_argument(
-        "--recursive", "-r", action="store_true",
-        help="Recurse into subdirectories (directory mode only)",
-    )
-    pr.add_argument(
-        "--copybook-path", "-I", action="append", default=[],
-        help="Directory to search for COPY copybooks (can be repeated)",
     )
 
     return parser
@@ -357,15 +330,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    if args.command == "translate":
-        return cmd_translate(args)
-    elif args.command == "map":
-        return cmd_map(args)
-    elif args.command == "prompt":
-        return cmd_prompt(args)
-    else:
-        parser.print_help()
-        return 1
+    dispatch = {"translate": cmd_translate, "map": cmd_map, "prompt": cmd_prompt}
+    handler = dispatch.get(args.command)
+    if handler:
+        return handler(args)
+    parser.print_help()
+    return 1
 
 
 if __name__ == "__main__":

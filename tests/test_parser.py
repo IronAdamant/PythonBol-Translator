@@ -1,14 +1,16 @@
 """Tests for the COBOL parser."""
 
 from cobol_safe_translator.parser import (
+    parse_cobol,
+    parse_cobol_file,
+    preprocess_lines,
+    split_divisions,
+)
+from cobol_safe_translator.pic_parser import (
     classify_pic,
     compute_pic_size,
     expand_pic,
-    parse_cobol,
-    parse_cobol_file,
     parse_pic,
-    preprocess_lines,
-    split_divisions,
 )
 from cobol_safe_translator.parser import parse_data_division
 from cobol_safe_translator.models import PicCategory
@@ -274,7 +276,7 @@ class TestLinkageSection:
 class TestSectionHeaders:
     def test_section_parsed_as_paragraph(self):
         """SECTION headers should be recognized as paragraphs."""
-        from cobol_safe_translator.parser import parse_procedure
+        from cobol_safe_translator.procedure_parser import parse_procedure
         lines = [
             "MAIN-SECTION SECTION.",
             "DISPLAY WS-A.",

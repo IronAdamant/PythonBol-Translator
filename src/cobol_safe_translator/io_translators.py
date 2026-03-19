@@ -6,7 +6,7 @@ Handles: ACCEPT, REWRITE, ON SIZE ERROR wrapping.
 
 from __future__ import annotations
 
-from .utils import _to_python_name, _upper_ops
+from .utils import _file_hint_from_record, _to_python_name, _upper_ops
 
 
 def translate_accept(ops: list[str], raw: str) -> list[str]:
@@ -86,10 +86,7 @@ def translate_rewrite(ops: list[str]) -> list[str]:
     py_record = _to_python_name(record_name)
     upper_ops = _upper_ops(ops)
 
-    # Determine file name from record name
-    file_hint = py_record.replace("_record", "").replace("_rec", "")
-    if not file_hint or file_hint == py_record:
-        file_hint = py_record + "_file"
+    file_hint = _file_hint_from_record(py_record)
 
     # Check for FROM clause
     from_expr = None
@@ -130,14 +127,15 @@ def wrap_on_size_error(
 
     # Find NOT ON SIZE ERROR
     not_on_size_idx = None
-    for i in range(on_size_idx + 3, len(upper_ops) - 3):
-        if (upper_ops[i] == "NOT" and upper_ops[i + 1] == "ON"
+    for i in range(on_size_idx + 3, max(on_size_idx + 3, len(upper_ops) - 3)):
+        if (i + 3 < len(upper_ops)
+                and upper_ops[i] == "NOT" and upper_ops[i + 1] == "ON"
                 and upper_ops[i + 2] == "SIZE" and upper_ops[i + 3] == "ERROR"):
             not_on_size_idx = i
             break
 
     # Extract error action tokens
-    if not_on_size_idx:
+    if not_on_size_idx is not None:
         error_action = " ".join(ops[on_size_idx + 3:not_on_size_idx])
         success_action = " ".join(ops[not_on_size_idx + 4:])
     else:

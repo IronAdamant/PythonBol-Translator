@@ -10,7 +10,7 @@ import pytest
 
 from cobol_safe_translator.adapters import CobolString, FileAdapter
 from cobol_safe_translator.analyzer import analyze
-from cobol_safe_translator.ebcdic import ebcdic_compare, ebcdic_key
+from cobol_safe_translator.ebcdic import ebcdic_key
 from cobol_safe_translator.mapper import generate_python
 from cobol_safe_translator.parser import parse_cobol
 from cobol_safe_translator.preprocessor import resolve_copies, strip_exec_blocks
@@ -333,10 +333,10 @@ class TestEbcdic:
         assert ebcdic_key("A") < ebcdic_key("1")
         assert ebcdic_key("Z") < ebcdic_key("0")
 
-    def test_ebcdic_compare(self):
-        assert ebcdic_compare("A", "B") < 0
-        assert ebcdic_compare("B", "A") > 0
-        assert ebcdic_compare("A", "A") == 0
+    def test_ebcdic_key_ordering(self):
+        assert ebcdic_key("A") < ebcdic_key("B")
+        assert ebcdic_key("B") > ebcdic_key("A")
+        assert ebcdic_key("A") == ebcdic_key("A")
 
     def test_cobol_string_ebcdic_comparison(self):
         """CobolString with ebcdic=True should sort differently than ASCII."""

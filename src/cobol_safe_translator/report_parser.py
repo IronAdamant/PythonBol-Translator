@@ -45,7 +45,7 @@ _TYPE_RE = re.compile(
     re.IGNORECASE,
 )
 _NEXT_GROUP_RE = re.compile(
-    r"NEXT\s+GROUP\s+(?:IS\s+)?(?:PLUS\s+)?(\d+)", re.IGNORECASE
+    r"NEXT\s+GROUP\s+(?:IS\s+)?(PLUS\s+)?(\d+)", re.IGNORECASE
 )
 
 # --- Line and field patterns ---
@@ -159,7 +159,7 @@ def _parse_report_group(text: str) -> ReportGroup | None:
 
     next_m = _NEXT_GROUP_RE.search(text)
     if next_m:
-        group.next_group = f"PLUS {next_m.group(1)}"
+        group.next_group = f"PLUS {next_m.group(2)}" if next_m.group(1) else next_m.group(2)
 
     # Parse 02-level lines and their 03-level fields
     # Split on 02 level boundaries
