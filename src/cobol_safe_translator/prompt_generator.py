@@ -13,6 +13,8 @@ from datetime import datetime
 
 from .models import SensitivityLevel, SoftwareMap
 
+_TODO_PATTERN = re.compile(r"#\s*TODO\(high\):\s*(.+)")
+
 
 class PromptGenerator:
     """Generates a compact LLM translation brief from a SoftwareMap."""
@@ -135,8 +137,7 @@ class PromptGenerator:
 
     def _todo_inventory_section(self) -> str:
         lines = ["## TODO(high) Inventory\n"]
-        pattern = re.compile(r"#\s*TODO\(high\):\s*(.+)")
-        todos = pattern.findall(self.python_source)
+        todos = _TODO_PATTERN.findall(self.python_source)
         if not todos:
             lines.append("No TODO(high) items — skeleton may be complete.\n")
             return "\n".join(lines)

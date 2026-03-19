@@ -118,13 +118,14 @@ def translate_add(
         return ["# ADD: no operands"]
     upper_ops = _upper_ops(ops)
     if "GIVING" in upper_ops:
-        giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
+        giving_idx = upper_ops.index("GIVING")
         giving_targets = ops[giving_idx + 1:]
         if not giving_targets:
             return [f"# ADD GIVING: missing target operand: {' '.join(ops)}"]
         pre_giving = ops[:giving_idx]
-        if "TO" in _upper_ops(pre_giving):
-            to_idx = next(i for i, o in enumerate(pre_giving) if o.upper() == "TO")
+        upper_pre = _upper_ops(pre_giving)
+        if "TO" in upper_pre:
+            to_idx = upper_pre.index("TO")
             all_sources = pre_giving[:to_idx] + pre_giving[to_idx + 1:]
         else:
             all_sources = pre_giving
@@ -139,7 +140,7 @@ def translate_add(
             return [f"# ADD GIVING: no valid target found: {' '.join(ops)}"]
         return results
     if "TO" in upper_ops:
-        to_idx = next(i for i, o in enumerate(upper_ops) if o == "TO")
+        to_idx = upper_ops.index("TO")
         sources = ops[:to_idx]
         targets = [t for t in ops[to_idx + 1:] if t.upper() not in _ARITHMETIC_KEYWORDS]
         if not sources or not targets:
@@ -162,13 +163,14 @@ def translate_subtract(
         return ["# SUBTRACT: no operands"]
     upper_ops = _upper_ops(ops)
     if "GIVING" in upper_ops:
-        giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
+        giving_idx = upper_ops.index("GIVING")
         giving_targets = ops[giving_idx + 1:]
         if not giving_targets:
             return [f"# SUBTRACT GIVING: missing target operand: {' '.join(ops)}"]
         pre_giving = ops[:giving_idx]
-        if "FROM" in _upper_ops(pre_giving):
-            from_idx = next(i for i, o in enumerate(pre_giving) if o.upper() == "FROM")
+        upper_pre = _upper_ops(pre_giving)
+        if "FROM" in upper_pre:
+            from_idx = upper_pre.index("FROM")
             sources = pre_giving[:from_idx]
             base = pre_giving[from_idx + 1] if from_idx + 1 < len(pre_giving) else "0"
             base_expr = resolve(base)
@@ -185,7 +187,7 @@ def translate_subtract(
             return [f"# SUBTRACT GIVING: no valid target found: {' '.join(ops)}"]
         return results
     if "FROM" in upper_ops:
-        from_idx = next(i for i, o in enumerate(upper_ops) if o == "FROM")
+        from_idx = upper_ops.index("FROM")
         sources = ops[:from_idx]
         targets = [t for t in ops[from_idx + 1:] if t.upper() not in _ARITHMETIC_KEYWORDS]
         if not sources or not targets:
@@ -206,12 +208,12 @@ def translate_multiply(
     """Translate MULTIPLY verb."""
     upper_ops = _upper_ops(ops)
     if "BY" in upper_ops:
-        by_idx = next(i for i, o in enumerate(upper_ops) if o == "BY")
+        by_idx = upper_ops.index("BY")
         if by_idx == 0:
             return [f"# MULTIPLY: missing source operand: {' '.join(ops)}"]
         source = resolve(ops[0])
         if "GIVING" in upper_ops:
-            giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
+            giving_idx = upper_ops.index("GIVING")
             multiplicand = resolve(ops[by_idx + 1]) if (by_idx + 1 < len(ops) and by_idx + 1 < giving_idx) else "1"
             results: list[str] = []
             for t in ops[giving_idx + 1:]:
@@ -269,12 +271,12 @@ def translate_divide(
     """Translate DIVIDE verb."""
     upper_ops = _upper_ops(ops)
     if "INTO" in upper_ops:
-        into_idx = next(i for i, o in enumerate(upper_ops) if o == "INTO")
+        into_idx = upper_ops.index("INTO")
         if into_idx == 0:
             return [f"# DIVIDE: missing divisor operand: {' '.join(ops)}"]
         divisor = resolve(ops[0])
         if "GIVING" in upper_ops:
-            giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
+            giving_idx = upper_ops.index("GIVING")
             dividend = resolve(ops[into_idx + 1]) if into_idx + 1 < len(ops) and into_idx + 1 < giving_idx else "0"
             return _divide_giving_results(ops, giving_idx, dividend, divisor)
         raw_targets = ops[into_idx + 1:]
@@ -286,12 +288,12 @@ def translate_divide(
             results.append(f"{_resolve_target(t)}.divide({divisor})")
         return results
     if "BY" in upper_ops:
-        by_idx = next(i for i, o in enumerate(upper_ops) if o == "BY")
+        by_idx = upper_ops.index("BY")
         if by_idx == 0:
             return [f"# DIVIDE: missing dividend operand: {' '.join(ops)}"]
         dividend = resolve(ops[0])
         if "GIVING" in upper_ops:
-            giving_idx = next(i for i, o in enumerate(upper_ops) if o == "GIVING")
+            giving_idx = upper_ops.index("GIVING")
             divisor = resolve(ops[by_idx + 1]) if by_idx + 1 < len(ops) and by_idx + 1 < giving_idx else "1"
             return _divide_giving_results(ops, giving_idx, dividend, divisor)
         if by_idx + 1 >= len(ops):
@@ -647,7 +649,7 @@ def translate_perform(
         return _translate_perform_varying(ops, raw, translate_condition)
 
     if "UNTIL" in upper_ops:
-        until_idx = next(i for i, o in enumerate(ops) if o.upper() == "UNTIL")
+        until_idx = upper_ops.index("UNTIL")
         cond_parts = ops[until_idx + 1:]
         if not cond_parts:
             return [f"# PERFORM UNTIL: missing condition — {' '.join(ops)}"]
@@ -665,7 +667,7 @@ def translate_perform(
         ]
 
     if "TIMES" in upper_ops:
-        times_idx = next(i for i, o in enumerate(ops) if o.upper() == "TIMES")
+        times_idx = upper_ops.index("TIMES")
         if times_idx >= 2:
             times_op = ops[times_idx - 1]
             is_inline = False

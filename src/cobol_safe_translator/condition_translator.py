@@ -38,6 +38,9 @@ _CMP_PHRASES: list[tuple[list[str], str]] = [
 
 _ARITH_OPS = frozenset({'+', '-', '*', '/'})
 
+# Tokens that precede a '(' and indicate it's NOT a reference-modification paren
+_NON_REFMOD_TOKENS = frozenset({'AND', 'OR', 'NOT', '(', ')'}) | _CMP_OPS
+
 _OP_KEYWORDS = frozenset({
     'AND', 'OR', 'NOT', '(', ')', 'NUMERIC', 'ALPHABETIC', 'POSITIVE', 'NEGATIVE',
 })
@@ -90,7 +93,7 @@ def tokenize_condition(cond: str) -> list[str]:
                 tokens[-2:] = [tokens[-2] + tokens[-1]]
             i = j
         elif ch == '(':
-            if tokens and _upper(tokens[-1]) not in ('AND', 'OR', 'NOT', '(', ')', *_CMP_OPS):
+            if tokens and _upper(tokens[-1]) not in _NON_REFMOD_TOKENS:
                 depth, j = 1, i + 1
                 while j < n and depth > 0:
                     depth += 1 if cond[j] == '(' else (-1 if cond[j] == ')' else 0)
@@ -120,7 +123,7 @@ def tokenize_condition(cond: str) -> list[str]:
         elif ch == '-':
             # Minus as operator vs hyphen in COBOL names
             # If preceded by a word-ending char and followed by space or operator, it's subtraction
-            if (i > 0 and cond[i - 1] in (' ', '\t', ')', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9')):
+            if i > 0 and (cond[i - 1] in (' ', '\t', ')') or cond[i - 1].isdigit()):
                 tokens.append(ch)
                 i += 1
             else:

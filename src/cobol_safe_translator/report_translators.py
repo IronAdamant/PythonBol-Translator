@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 
 from .models import ReportDescription, ReportField, ReportGroup
-from .utils import _to_python_name
+from .utils import _to_python_name, resolve_operand
 
 
 def _find_report(reports: list[ReportDescription], name: str) -> ReportDescription | None:
@@ -29,15 +29,10 @@ def _field_value_expr(field: ReportField) -> str:
     if field.value:
         return repr(field.value)
     if field.source:
-        # Handle subscript syntax like StateName(StateNum)
         src = field.source
-        if "(" in src:
-            base, rest = src.split("(", 1)
-            idx = rest.rstrip(")")
-            return f"str(self.data.{_to_python_name(base)}[int(self.data.{_to_python_name(idx)}.value) - 1].value)"
         if src.upper() == "PAGE-COUNTER":
             return "str(self._rw_page_counter)"
-        return f"str(self.data.{_to_python_name(src)}.value)"
+        return f"str({resolve_operand(src)})"
     if field.sum_field:
         py_sum = _to_python_name(field.sum_field)
         return f"str(self._rw_sums.get('{py_sum}', 0))"
@@ -224,14 +219,7 @@ def translate_generate(ops: list[str], reports: list[ReportDescription]) -> list
             for field in rline.fields:
                 if field.sum_field:
                     py_sum = _to_python_name(field.sum_field)
-                    src = field.sum_field
-                    if "(" in src:
-                        base, rest = src.split("(", 1)
-                        idx = rest.rstrip(")")
-                        py_idx = _to_python_name(idx)
-                        val_expr = f"self.data.{_to_python_name(base)}[int(self.data.{py_idx}.value) - 1].value"
-                    else:
-                        val_expr = f"self.data.{_to_python_name(src)}.value"
+                    val_expr = resolve_operand(field.sum_field)
                     lines.append(f"self._rw_sums['{py_sum}'] = self._rw_sums.get('{py_sum}', 0) + {val_expr}")
                     # Also update named field accumulator
                     if field.name:
