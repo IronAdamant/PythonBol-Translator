@@ -37,119 +37,80 @@ def has_cics(program: CobolProgram) -> bool:
     raw source lines (for preprocessor-generated CICS hints like
     ``* CICS MAP:`` or ``* Original: EXEC CICS ...``).
     """
-    for para in program.paragraphs:
-        for stmt in para.statements:
-            if "CICS" in stmt.raw_text.upper():
-                return True
-    # Also check raw source lines for preprocessor CICS hints
-    for line in program.raw_lines:
-        upper = line.upper()
-        if "EXEC CICS" in upper or "CICS MAP:" in upper:
-            return True
-    return False
+    return any(
+        "CICS" in stmt.raw_text.upper()
+        for para in program.paragraphs
+        for stmt in para.statements
+    ) or any(
+        "EXEC CICS" in (upper := line.upper()) or "CICS MAP:" in upper
+        for line in program.raw_lines
+    )
 
 
-def _extract_maps(program: CobolProgram) -> list[str]:
-    """Scan statements and raw lines for SEND MAP / RECEIVE MAP patterns.
-
-    Returns a deduplicated list of map names in discovery order.
-    Checks both statement raw text and preprocessor comment lines
-    (``* CICS MAP: MAPNAME`` or ``* Original: EXEC CICS SEND MAP(...)``).
-    """
-    seen: set[str] = set()
-    maps: list[str] = []
-
-    # Collect texts to scan: statements + raw source lines
+def _collect_cics_texts(program: CobolProgram) -> list[str]:
+    """Collect all statement and raw-line texts for CICS pattern scanning."""
     texts: list[str] = []
     for para in program.paragraphs:
         for stmt in para.statements:
             texts.append(stmt.raw_text)
     texts.extend(program.raw_lines)
+    return texts
 
+
+def _extract_cics_entities(
+    texts: list[str],
+    patterns: list[re.Pattern[str]],
+    hint_pattern: str,
+) -> list[str]:
+    """Scan texts for CICS patterns and preprocessor hints.
+
+    Returns a deduplicated list of matched names in discovery order.
+    *patterns* are compiled regexes whose group(1) captures the name.
+    *hint_pattern* is a raw regex string for preprocessor hint lines.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    hint_re = re.compile(hint_pattern, re.IGNORECASE)
     for text in texts:
-        for regex in (_SEND_MAP_RE, _RECEIVE_MAP_RE):
-            m = regex.search(text)
-            if m:
+        for regex in patterns:
+            if m := regex.search(text):
                 name = m.group(1).strip()
                 if name not in seen:
                     seen.add(name)
-                    maps.append(name)
-        # Also match preprocessor hint format: * CICS MAP: MAPNAME
-        hint_m = re.search(r"CICS\s+MAP:\s*(\S+)", text, re.IGNORECASE)
-        if hint_m:
+                    result.append(name)
+        if hint_m := hint_re.search(text):
             name = hint_m.group(1).strip()
             if name not in seen:
                 seen.add(name)
-                maps.append(name)
-    return maps
+                result.append(name)
+    return result
+
+
+def _extract_maps(program: CobolProgram) -> list[str]:
+    """Extract SEND MAP / RECEIVE MAP names from program."""
+    return _extract_cics_entities(
+        _collect_cics_texts(program),
+        [_SEND_MAP_RE, _RECEIVE_MAP_RE],
+        r"CICS\s+MAP:\s*(\S+)",
+    )
 
 
 def _extract_transids(program: CobolProgram) -> list[str]:
-    """Scan statements and raw lines for START TRANSID(name) patterns.
-
-    Returns a deduplicated list of transaction IDs in discovery order.
-    Also checks preprocessor hint lines (``* CICS TRANSID: XXXX``).
-    """
-    seen: set[str] = set()
-    transids: list[str] = []
-
-    texts: list[str] = []
-    for para in program.paragraphs:
-        for stmt in para.statements:
-            texts.append(stmt.raw_text)
-    texts.extend(program.raw_lines)
-
-    for text in texts:
-        m = _START_TRANSID_RE.search(text)
-        if m:
-            name = m.group(1).strip()
-            if name not in seen:
-                seen.add(name)
-                transids.append(name)
-        # Preprocessor hint: * CICS TRANSID: MN01
-        hint_m = re.search(
-            r"CICS\s+TRANSID:\s*(\S+)", text, re.IGNORECASE,
-        )
-        if hint_m:
-            name = hint_m.group(1).strip()
-            if name not in seen:
-                seen.add(name)
-                transids.append(name)
-    return transids
+    """Extract START TRANSID names from program."""
+    return _extract_cics_entities(
+        _collect_cics_texts(program),
+        [_START_TRANSID_RE],
+        r"CICS\s+TRANSID:\s*(\S+)",
+    )
 
 
 def _extract_commareas(program: CobolProgram) -> list[str]:
-    """Scan statements and raw lines for COMMAREA(name) patterns.
-
-    Returns a deduplicated list of COMMAREA names in discovery order.
-    Also checks preprocessor hint lines (``* CICS PROGRAM: X, COMMAREA: Y``).
-    """
-    seen: set[str] = set()
-    commareas: list[str] = []
-
-    texts: list[str] = []
-    for para in program.paragraphs:
-        for stmt in para.statements:
-            texts.append(stmt.raw_text)
-    texts.extend(program.raw_lines)
-
-    for text in texts:
-        m = _COMMAREA_RE.search(text)
-        if m:
-            name = m.group(1).strip()
-            if name not in seen:
-                seen.add(name)
-                commareas.append(name)
-        # Preprocessor hint: * CICS PROGRAM: X, COMMAREA: Y
-        hint_m = re.search(
-            r"COMMAREA:\s*(\S+)", text, re.IGNORECASE,
-        )
-        if hint_m:
-            name = hint_m.group(1).strip()
-            if name not in seen:
-                seen.add(name)
-                commareas.append(name)
-    return commareas
+    """Extract COMMAREA names from program."""
+    return _extract_cics_entities(
+        _collect_cics_texts(program),
+        [_COMMAREA_RE],
+        r"COMMAREA:\s*(\S+)",
+    )
 
 
 def _generate_html_from_screen(screen: ScreenField) -> list[str]:

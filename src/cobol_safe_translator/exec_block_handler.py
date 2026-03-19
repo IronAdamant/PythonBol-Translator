@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 
 from .models import SqlBlock
+from .utils import _to_python_name as _cobol_to_python_name
 
 # ── EXEC start / end detection ───────────────────────────────────────────
 
@@ -72,11 +73,6 @@ _CICS_RESP2_RE = re.compile(r"RESP2\s*\(\s*'?([^')]+)'?\s*\)", re.IGNORECASE)
 
 
 # ── Helper functions ─────────────────────────────────────────────────────
-
-
-def _cobol_to_python_name(name: str) -> str:
-    """Convert a COBOL variable name to a Python-compatible name."""
-    return name.strip().replace("-", "_").lower()
 
 
 def _parse_sql_block(sql_text: str) -> SqlBlock | None:

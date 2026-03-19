@@ -12,12 +12,11 @@ Pipeline position: Called by mapper.py during paragraph method generation.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from .models import CobolStatement
-import re
-
-from .utils import resolve_operand as _fallback_resolve, _to_python_name, _upper_ops
+from .utils import _has_code, _indent_line, resolve_operand as _fallback_resolve, _to_python_name, _upper_ops
 
 # Verbs that indicate an inline IF/EVALUATE (body packed into operands)
 _KNOWN_BODY_VERBS = frozenset({
@@ -29,10 +28,6 @@ _KNOWN_BODY_VERBS = frozenset({
     "SEARCH", "SORT", "MERGE", "RELEASE", "RETURN", "DELETE", "START",
     "INITIATE", "GENERATE", "TERMINATE",
 })
-
-
-def _indent_line(line: str, indent: int) -> str:
-    return ("    " * indent) + line
 
 
 def _try_nested_block(
@@ -69,11 +64,6 @@ def _try_nested_block(
         target.extend(nested)
         return new_i
     return None
-
-
-def _has_code(body: list[str]) -> bool:
-    """Check if body has any non-comment executable lines."""
-    return any(ln.strip() and not ln.strip().startswith("#") for ln in body)
 
 
 def translate_if_block(
@@ -223,7 +213,7 @@ def translate_inline_if(
     return lines
 
 
-# Re-export EVALUATE translators for backward compatibility
+# Re-export EVALUATE translators (mapper_codegen imports them via block_translator)
 from .evaluate_translator import translate_evaluate_block, is_inline_evaluate, translate_inline_evaluate  # noqa: F401,E402
 
 

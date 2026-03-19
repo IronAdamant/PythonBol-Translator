@@ -11,6 +11,16 @@ import keyword
 import re
 
 
+def _indent_line(line: str, indent: int) -> str:
+    """Indent a line by *indent* levels (4 spaces each)."""
+    return ("    " * indent) + line
+
+
+def _has_code(body: list[str]) -> bool:
+    """Check if body has any non-comment executable lines."""
+    return any(ln.strip() and not ln.strip().startswith("#") for ln in body)
+
+
 def _upper_ops(ops: list[str]) -> list[str]:
     """Uppercase operand list for case-insensitive keyword matching."""
     return [o.upper() for o in ops]

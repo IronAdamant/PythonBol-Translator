@@ -18,7 +18,7 @@ import pytest
 
 from cobol_safe_translator.analyzer import analyze
 from cobol_safe_translator.mapper import generate_python
-from cobol_safe_translator.parser import parse_cobol, parse_cobol_file
+from cobol_safe_translator.parser import parse_cobol_file
 from cobol_safe_translator.preprocessor import resolve_copies
 
 # Base path for all sample test projects.

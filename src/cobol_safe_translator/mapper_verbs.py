@@ -26,6 +26,7 @@ from .utils import (
     _to_python_name,
     _upper_ops,
     resolve_operand as _resolve_operand_base,
+    resolve_target as _resolve_target,
 )
 
 _FD_RE = re.compile(r"^\s*(?:FD|SD)\s+([\w-]+)", re.IGNORECASE)
@@ -244,7 +245,6 @@ class VerbTranslationMixin:
             else:
                 # Group-to-elementary MOVE — treat source as alphanumeric
                 results.append(f"# Group-to-elementary MOVE: {src_name} TO {tgt}")
-                from .utils import resolve_target as _resolve_target
                 results.append(
                     f"{_resolve_target(tgt)}.set({src_concat})"
                 )

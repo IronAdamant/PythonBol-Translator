@@ -10,11 +10,7 @@ cx_Oracle, pyodbc, and any other DB-API compliant driver.
 from __future__ import annotations
 
 from .models import SqlBlock
-
-
-def _cobol_to_python_name(name: str) -> str:
-    """Convert a COBOL variable name to a Python-compatible name."""
-    return name.strip().replace("-", "_").lower()
+from .utils import _to_python_name as _cobol_to_python_name
 
 
 def generate_sql_imports() -> list[str]:

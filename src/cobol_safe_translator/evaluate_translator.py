@@ -12,23 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from .models import CobolStatement
-from .utils import _upper_ops
-
-
-def _indent_line(line: str, indent: int) -> str:
-    """Indent a line by *indent* levels (4 spaces each).
-
-    Duplicated from block_translator to avoid a circular import.
-    """
-    return ("    " * indent) + line
-
-
-def _has_code(body: list[str]) -> bool:
-    """Check if body has any non-comment executable lines.
-
-    Duplicated from block_translator to avoid a circular import.
-    """
-    return any(ln.strip() and not ln.strip().startswith("#") for ln in body)
+from .utils import _has_code, _indent_line, _upper_ops
 
 
 def _split_on_also(tokens: list[str]) -> list[list[str]]:

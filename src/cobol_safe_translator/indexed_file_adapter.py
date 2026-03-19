@@ -6,6 +6,8 @@ RECORD KEY and ALTERNATE RECORD KEY lookups.
 
 from __future__ import annotations
 
+import sqlite3
+
 
 class IndexedFileAdapter:
     """Indexed file adapter using SQLite for COBOL VSAM-style keyed access.
@@ -63,7 +65,6 @@ class IndexedFileAdapter:
 
     def open_input(self) -> None:
         """OPEN INPUT -- read-only sequential or random access."""
-        import sqlite3
         try:
             self._db = sqlite3.connect(self._db_path())
             self._ensure_table()
@@ -76,7 +77,6 @@ class IndexedFileAdapter:
 
     def open_output(self) -> None:
         """OPEN OUTPUT -- create/replace the file."""
-        import sqlite3
         try:
             self._db = sqlite3.connect(self._db_path())
             self._db.execute("DROP TABLE IF EXISTS records")
@@ -89,7 +89,6 @@ class IndexedFileAdapter:
 
     def open_io(self) -> None:
         """OPEN I-O -- read and write."""
-        import sqlite3
         try:
             self._db = sqlite3.connect(self._db_path())
             self._ensure_table()
@@ -102,7 +101,6 @@ class IndexedFileAdapter:
 
     def open_extend(self) -> None:
         """OPEN EXTEND -- append mode."""
-        import sqlite3
         try:
             self._db = sqlite3.connect(self._db_path())
             self._ensure_table()
