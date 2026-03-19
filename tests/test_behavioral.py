@@ -726,14 +726,48 @@ class TestSearchTable:
 # 19. SORT verb — file-based sorting
 # ---------------------------------------------------------------------------
 class TestSortVerb:
-    @pytest.mark.skip(
-        reason="SORT requires file I/O setup with USING/GIVING and "
-               "SELECT/ASSIGN clauses; generated code references "
-               "FileAdapter instances not present in a minimal program"
-    )
-    def test_sort_verb(self):
-        """SORT with USING/GIVING on inline file data."""
-        pass
+    def test_sort_input_output_procedure(self):
+        """SORT with INPUT/OUTPUT PROCEDURE: CHERRY,APPLE,BANANA → sorted."""
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. SORT-TEST.\n"
+            "       ENVIRONMENT DIVISION.\n"
+            "       INPUT-OUTPUT SECTION.\n"
+            "       FILE-CONTROL.\n"
+            "           SELECT SORT-FILE ASSIGN TO SORTWORK.\n"
+            "       DATA DIVISION.\n"
+            "       FILE SECTION.\n"
+            "       SD SORT-FILE.\n"
+            "       01 SORT-REC PIC X(10).\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-OUT PIC X(10) VALUE SPACES.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           SORT SORT-FILE ON ASCENDING KEY SORT-REC\n"
+            "               INPUT PROCEDURE IS LOAD-DATA\n"
+            "               OUTPUT PROCEDURE IS SHOW-DATA.\n"
+            "           STOP RUN.\n"
+            "       LOAD-DATA.\n"
+            '           MOVE "CHERRY" TO SORT-REC.\n'
+            "           RELEASE SORT-REC.\n"
+            '           MOVE "APPLE" TO SORT-REC.\n'
+            "           RELEASE SORT-REC.\n"
+            '           MOVE "BANANA" TO SORT-REC.\n'
+            "           RELEASE SORT-REC.\n"
+            "       SHOW-DATA.\n"
+            "           RETURN SORT-FILE INTO WS-OUT.\n"
+            "           DISPLAY WS-OUT.\n"
+            "           RETURN SORT-FILE INTO WS-OUT.\n"
+            "           DISPLAY WS-OUT.\n"
+            "           RETURN SORT-FILE INTO WS-OUT.\n"
+            "           DISPLAY WS-OUT.\n"
+        )
+        stdout = _run_cobol_program(src)
+        lines = stdout.strip().splitlines()
+        assert len(lines) == 3
+        assert "APPLE" in lines[0]
+        assert "BANANA" in lines[1]
+        assert "CHERRY" in lines[2]
 
 
 # ---------------------------------------------------------------------------

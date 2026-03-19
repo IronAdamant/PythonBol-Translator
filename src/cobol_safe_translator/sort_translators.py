@@ -114,17 +114,19 @@ def _parse_sort_merge_clauses(ops: list[str]) -> dict[str, object]:
 
 
 def _build_key_lambda(keys: list[tuple[str, list[str]]]) -> str:
-    """Build a Python lambda for sorted() key from ASCENDING/DESCENDING keys."""
+    """Build a Python lambda for sorted() key from ASCENDING/DESCENDING keys.
+
+    Records may be strings (from RELEASE/FileAdapter) or dicts, so the
+    lambda falls back to str(r) for non-dict records.
+    """
     if not keys:
         return ""
     parts: list[str] = []
     for direction, fields in keys:
         for f in fields:
             py = _to_python_name(f)
-            if direction == "DESCENDING":
-                parts.append(f"-r.get('{py}', 0)")
-            else:
-                parts.append(f"r.get('{py}', '')")
+            accessor = f"(r['{py}'] if isinstance(r, dict) else str(r))"
+            parts.append(accessor)
     if len(parts) == 1:
         return f"key=lambda r: {parts[0]}"
     return f"key=lambda r: ({', '.join(parts)})"
@@ -218,25 +220,25 @@ def translate_sort(ops: list[str], resolve: Callable[[str], str]) -> list[str]:
         for uf in using:
             lines.extend(_emit_read_loop(_to_python_name(uf), rec_var))
         lines.extend(_emit_sort_call(keys, rec_var))
-        lines.append(f"self._{sf}_sorted = list({rec_var})")
+        lines.append(f"self._sort_sorted = list({rec_var})")
         lines.extend(_emit_proc_call(out_proc, "OUTPUT PROCEDURE"))  # type: ignore[arg-type]
         return lines
 
     # INPUT PROCEDURE + GIVING
     if in_proc and giving:
-        lines.append(f"self._{sf}_work = []")
+        lines.append(f"self._sort_work = []")
         lines.extend(_emit_proc_call(in_proc, "INPUT PROCEDURE"))  # type: ignore[arg-type]
-        lines.extend(_emit_sort_call(keys, f"self._{sf}_work"))
+        lines.extend(_emit_sort_call(keys, f"self._sort_work"))
         for gf in giving:
-            lines.extend(_emit_write_loop(_to_python_name(gf), f"self._{sf}_work"))
+            lines.extend(_emit_write_loop(_to_python_name(gf), f"self._sort_work"))
         return lines
 
     # INPUT PROCEDURE + OUTPUT PROCEDURE
     if in_proc and out_proc:
-        lines.append(f"self._{sf}_work = []")
+        lines.append(f"self._sort_work = []")
         lines.extend(_emit_proc_call(in_proc, "INPUT PROCEDURE"))  # type: ignore[arg-type]
-        lines.extend(_emit_sort_call(keys, f"self._{sf}_work"))
-        lines.append(f"self._{sf}_sorted = list(self._{sf}_work)")
+        lines.extend(_emit_sort_call(keys, f"self._sort_work"))
+        lines.append(f"self._sort_sorted = list(self._sort_work)")
         lines.extend(_emit_proc_call(out_proc, "OUTPUT PROCEDURE"))  # type: ignore[arg-type]
         return lines
 
@@ -324,11 +326,6 @@ def translate_release(ops: list[str]) -> list[str]:
     py_rec = _to_python_name(record)
     upper_ops = _upper_ops(ops)
 
-    # Derive sort work file name from record name
-    hint = py_rec.replace("_record", "").replace("_rec", "")
-    if not hint or hint == py_rec:
-        hint = py_rec
-
     from_expr = None
     if "FROM" in upper_ops:
         idx = upper_ops.index("FROM")
@@ -337,9 +334,9 @@ def translate_release(ops: list[str]) -> list[str]:
 
     lines = [f"# RELEASE {record}"]
     if from_expr:
-        lines.append(f"self._{hint}_work.append({from_expr})")
+        lines.append(f"self._sort_work.append({from_expr})")
     else:
-        lines.append(f"self._{hint}_work.append(self.data.{py_rec}.value)")
+        lines.append(f"self._sort_work.append(self.data.{py_rec}.value)")
     return lines
 
 
@@ -361,18 +358,28 @@ def translate_return_verb(ops: list[str], raw: str) -> list[str]:
         if idx + 1 < len(ops):
             into_target = _to_python_name(ops[idx + 1])
 
-    at_end = ""
+    at_end_stmts: list[str] = []
     if "AT" in upper_ops and "END" in upper_ops:
         end_idx = upper_ops.index("END")
         parts = [p for p in ops[end_idx + 1:] if p.upper() != "END-RETURN"]
         if parts:
-            at_end = f"  # AT END: {' '.join(parts)}"
+            # Reconstruct AT END body as inline statements
+            at_end_stmts = parts
 
-    lines = [f"# RETURN {ops[0]}", f"if self._{sf}_sorted:"]
+    lines = [f"# RETURN {ops[0]}", f"if self._sort_sorted:"]
     if into_target:
-        lines.append(f"    self.data.{into_target}.set(self._{sf}_sorted.pop(0))")
+        lines.append(f"    self.data.{into_target}.set(self._sort_sorted.pop(0))")
     else:
-        lines.append(f"    _record = self._{sf}_sorted.pop(0)")
+        lines.append(f"    _record = self._sort_sorted.pop(0)")
     lines.append("else:")
-    lines.append(f"    pass  # AT END — no more records{at_end}")
+    if at_end_stmts:
+        # AT END body — only runs when no more records
+        verb = at_end_stmts[0].upper()
+        if verb == "DISPLAY":
+            disp_args = " ".join(at_end_stmts[1:])
+            lines.append(f"    print({disp_args}, sep='')")
+        else:
+            lines.append(f"    pass  # AT END: {' '.join(at_end_stmts)}")
+    else:
+        lines.append("    pass  # AT END — no more records")
     return lines
