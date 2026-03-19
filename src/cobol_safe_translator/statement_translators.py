@@ -12,7 +12,7 @@ and the return value is a list of Python source lines.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from .models import CobolStatement
 from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _sanitize_numeric, _to_method_name, _to_python_name, _upper_ops, resolve_operand as _resolve_operand, resolve_target as _resolve_target
@@ -69,9 +69,6 @@ def translate_display(
 
 def translate_move(ops: list[str]) -> list[str]:
     """Translate MOVE verb."""
-    if ops and ops[0].upper() in ("CORRESPONDING", "CORR"):
-        # Handled by mapper._translate_move_corresponding() which has AST access
-        return [f"# MOVE CORRESPONDING: routed to mapper (should not reach here)"]
     if ops and ops[0].upper() == "ALL":
         # MOVE ALL "X" TO WS-FIELD — fill field with repeated character
         if len(ops) >= 4 and ops[2].upper() == "TO":
@@ -692,23 +689,18 @@ def translate_perform(
     return [f"self.{target}()"]
 
 
+_OPEN_MODES: dict[str, str] = {
+    "INPUT": "open_input", "OUTPUT": "open_output",
+    "EXTEND": "open_extend", "I-O": "open_io", "IO": "open_io",
+}
+
+
 def translate_open(ops: list[str]) -> list[str]:
     """Translate OPEN verb."""
     if len(ops) >= 2:
-        mode = ops[0].upper()
-        file_names = ops[1:]
-        results: list[str] = []
-        for fn in file_names:
-            py_name = _to_python_name(fn)
-            if mode == "INPUT":
-                results.append(f"self.{py_name}.open_input()")
-            elif mode == "OUTPUT":
-                results.append(f"self.{py_name}.open_output()")
-            elif mode == "EXTEND":
-                results.append(f"self.{py_name}.open_extend()")
-            elif mode in ("I-O", "IO"):
-                results.append(f"self.{py_name}.open_io()")
-        return results if results else [f"# OPEN: could not parse: {' '.join(ops)}"]
+        method = _OPEN_MODES.get(ops[0].upper())
+        if method:
+            return [f"self.{_to_python_name(fn)}.{method}()" for fn in ops[1:]]
     return [f"# OPEN: could not parse: {' '.join(ops)}"]
 
 
@@ -739,13 +731,7 @@ def translate_write(ops: list[str]) -> list[str]:
 
 def translate_close(ops: list[str]) -> list[str]:
     """Translate CLOSE verb."""
-    results: list[str] = []
-    for op in ops:
-        if op.upper() in _CLOSE_KEYWORDS:
-            continue
-        py_name = _to_python_name(op)
-        results.append(f"self.{py_name}.close()")
-    return results
+    return [f"self.{_to_python_name(op)}.close()" for op in ops if op.upper() not in _CLOSE_KEYWORDS]
 
 
 def translate_read(ops: list[str], raw: str) -> list[str]:

@@ -34,7 +34,7 @@ def _field_value_expr(field: ReportField) -> str:
         if "(" in src:
             base, rest = src.split("(", 1)
             idx = rest.rstrip(")")
-            return f"str(self.data.{_to_python_name(base)}.value[self.data.{_to_python_name(idx)}.value])"
+            return f"str(self.data.{_to_python_name(base)}[int(self.data.{_to_python_name(idx)}.value) - 1].value)"
         if src.upper() == "PAGE-COUNTER":
             return "str(self._rw_page_counter)"
         return f"str(self.data.{_to_python_name(src)}.value)"
@@ -57,7 +57,7 @@ def _format_line_expr(group: ReportGroup, line_idx: int) -> list[str]:
     lines: list[str] = []
 
     if not rline.fields:
-        lines.append("_rw_line = ''")
+        lines.append("self._rw_output.append('')")
         return lines
 
     # Find maximum column to determine line width

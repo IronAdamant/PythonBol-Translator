@@ -55,8 +55,8 @@ class MarkdownExporter:
         lines = [
             "## Overview\n",
             f"COBOL program `{self.program.program_id}` analysis report.",
-            f"This document provides a structural breakdown, sensitivity analysis,",
-            f"and dependency mapping for modernization planning.\n",
+            "This document provides a structural breakdown, sensitivity analysis,",
+            "and dependency mapping for modernization planning.\n",
         ]
         return "\n".join(lines)
 

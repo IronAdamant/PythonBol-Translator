@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 # Extensions treated as COBOL source files (.cpy copybooks are excluded)
 COBOL_EXTENSIONS = frozenset({".cob", ".cbl", ".cobol"})

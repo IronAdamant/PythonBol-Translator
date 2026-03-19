@@ -23,10 +23,5 @@ def ebcdic_compare(a: str, b: str) -> int:
 
     Returns: negative if a < b, zero if equal, positive if a > b.
     """
-    ka = ebcdic_key(a)
-    kb = ebcdic_key(b)
-    if ka < kb:
-        return -1
-    if ka > kb:
-        return 1
-    return 0
+    ka, kb = ebcdic_key(a), ebcdic_key(b)
+    return (ka > kb) - (ka < kb)

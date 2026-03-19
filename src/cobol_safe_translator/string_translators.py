@@ -12,7 +12,7 @@ and the return value is a list of Python source lines.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from .utils import _to_python_name, _upper_ops
 
@@ -308,33 +308,38 @@ def translate_set(
             return [f"self.data.{py_target}.subtract({amount})"]
         return [f"# SET {target} DOWN BY: missing amount"]
 
-    # SET flag TO TRUE/FALSE or SET idx TO value
+    # SET flag1 [flag2 ...] TO TRUE/FALSE or SET idx TO value
     if "TO" in upper_ops:
         to_idx = upper_ops.index("TO")
-        target = ops[0]
-        target_upper = target.upper()
+        targets = ops[:to_idx]
 
         if to_idx + 1 < len(ops):
             value_tok = ops[to_idx + 1]
 
-            # SET flag TO TRUE — 88-level condition
+            # SET flag(s) TO TRUE — 88-level condition
             if value_tok.upper() == "TRUE":
-                lookup_key = target_upper
-                if lookup_key in condition_lookup:
-                    py_parent, first_val = condition_lookup[lookup_key]
-                    return [f"self.data.{py_parent}.set({first_val})"]
-                # Fallback — condition not found in lookup
-                py_target = _to_python_name(target)
-                return [f"# SET {target} TO TRUE — 88-level not found in data division",
-                        f"# TODO(high): locate parent field for condition {target}",
-                        f"# self.data.{py_target}_parent.set(...)"]
+                results: list[str] = []
+                for target in targets:
+                    lookup_key = target.upper()
+                    if lookup_key in condition_lookup:
+                        py_parent, first_val = condition_lookup[lookup_key]
+                        results.append(f"self.data.{py_parent}.set({first_val})")
+                    else:
+                        py_target = _to_python_name(target)
+                        results.extend([
+                            f"# SET {target} TO TRUE — 88-level not found in data division",
+                            f"# TODO(high): locate parent field for condition {target}",
+                            f"# self.data.{py_target}_parent.set(...)",
+                        ])
+                return results
 
             # SET flag TO FALSE — non-standard
             if value_tok.upper() == "FALSE":
-                return [f"# SET {target} TO FALSE",
+                return [f"# SET {' '.join(targets)} TO FALSE",
                         "# TODO(high): SET TO FALSE is non-standard — manual translation required"]
 
-            # SET idx TO value
+            # SET idx TO value (single target only)
+            target = targets[0] if targets else ops[0]
             py_target = _to_python_name(target)
             val_expr = resolve(value_tok)
             return [f"self.data.{py_target}.set({val_expr})"]

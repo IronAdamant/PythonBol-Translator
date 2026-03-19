@@ -27,7 +27,7 @@ def _is_numeric_literal(s: str) -> bool:
     if len(parts) == 1:
         return parts[0].isdigit()
     if len(parts) == 2:
-        return (parts[0].isdigit() or parts[0] == "") and (parts[1].isdigit() or parts[1] == "")
+        return (parts[0].isdigit() or parts[0] == "") and (parts[1].isdigit() or parts[1] == "") and bool(parts[0] or parts[1])
     return False
 
 

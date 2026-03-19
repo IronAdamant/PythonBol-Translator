@@ -9,7 +9,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -98,9 +97,8 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
 
 def _to_python_filename(program_id: str) -> str:
     """Convert COBOL program ID to a safe Python filename."""
-    name = program_id.lower().replace("-", "_")
-    name = re.sub(r"[^\w]", "_", name)
-    return (name or "unnamed") + ".py"
+    from .utils import _to_python_name
+    return (_to_python_name(program_id) or "unnamed") + ".py"
 
 
 # --- Single-file workers ---

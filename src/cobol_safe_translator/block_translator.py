@@ -9,10 +9,10 @@ Pipeline position: Called by mapper.py during paragraph method generation.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from .models import CobolStatement
-import re as _re
+import re
 
 from .utils import resolve_operand as _fallback_resolve, _to_python_name, _upper_ops
 
@@ -317,8 +317,6 @@ def translate_evaluate_block(
             if new_i is not None:
                 i = new_i
                 continue
-
-        if current_when_ops is not None:
             translated = translate_stmt_fn(stmt)
             for tl in translated:
                 current_body.append(_indent_line(tl, indent + 1))
@@ -650,7 +648,7 @@ def translate_search_block(
     # Detect index variable from WHEN conditions (subscript patterns like NAME(IDX))
     _idx_var = None
     for cond_text, _ in when_clauses:
-        m = _re.search(r'\w[\w-]*\((\w[\w-]*)\)', cond_text)
+        m = re.search(r'\w[\w-]*\((\w[\w-]*)\)', cond_text)
         if m and not m.group(1).isdigit():
             _idx_var = _to_python_name(m.group(1))
             break

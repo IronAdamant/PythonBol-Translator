@@ -82,7 +82,7 @@ def _detect_free_format(raw_text: str) -> bool:
             if leading < 7:
                 free_score += 2
 
-        # Fixed-format indicator: col 7 is */- and cols 1-6 are digits or spaces
+        # Fixed-format indicators: col 7 markers and cols 1-6 content
         if len(line) > 6:
             cols16 = line[:6]
             col7 = line[6]
@@ -90,13 +90,7 @@ def _detect_free_format(raw_text: str) -> bool:
                 fixed_score += 2
             elif cols16.strip().isdigit() and col7 == " ":
                 fixed_score += 1
-
-        # Fixed-format indicator: cols 1-6 have a non-digit label (e.g. "debug")
-        # and col 7 is a space — this is a sequence area tag
-        if len(line) > 6:
-            cols16 = line[:6]
-            col7 = line[6]
-            if col7 == " " and cols16.strip() and not cols16.strip().isdigit():
+            elif col7 == " " and cols16.strip() and not cols16.strip().isdigit():
                 # Non-digit content in cols 1-6 with space in col 7
                 fixed_score += 1
 
@@ -150,7 +144,7 @@ def _preprocess_free_format(raw_text: str) -> list[str]:
 
         # Skip full-line comments
         stripped = content.lstrip()
-        if stripped.startswith("*>") or stripped.startswith("*"):
+        if stripped.startswith("*"):
             continue
 
         logical.append(stripped)

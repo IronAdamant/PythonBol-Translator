@@ -21,10 +21,9 @@ def validate_generated_python(
 ) -> tuple[bool, str]:
     """Validate generated Python beyond syntax.
 
-    Performs three progressively deeper checks:
+    Performs two progressively deeper checks:
       1. ast.parse()  — syntax check
-      2. compile()    — bytecode compilation
-      3. Simulated import with real adapters — catches NameError, ImportError
+      2. Simulated import with real adapters — catches NameError, ImportError
 
     The generated code imports from cobol_safe_translator.adapters, which is
     part of this project (zero-dep), so the adapters are available at import

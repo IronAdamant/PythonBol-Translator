@@ -215,7 +215,8 @@ def _validate_dir(path_str: str) -> Path:
 def _parse_and_analyze_file(params: dict):
     """Parse and analyze a COBOL file from tool params. Returns the SoftwareMap."""
     p = _validate_file(params["path"])
-    program = parse_cobol_file(p)
+    copy_paths = params.get("copybook_paths")
+    program = parse_cobol_file(p, copybook_paths=copy_paths)
     return analyze(program)
 
 
@@ -380,9 +381,7 @@ class CobolMcpServer:
             self._send_result(req_id, {
                 "content": [{"type": "text", "text": result_text}],
             })
-        except FileNotFoundError as exc:
-            self._send_error(req_id, -32000, str(exc))
-        except (IsADirectoryError, NotADirectoryError) as exc:
+        except (FileNotFoundError, IsADirectoryError, NotADirectoryError) as exc:
             self._send_error(req_id, -32000, str(exc))
         except Exception as exc:
             tb = traceback.format_exc()
