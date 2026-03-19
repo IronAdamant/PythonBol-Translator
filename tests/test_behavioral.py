@@ -1513,6 +1513,24 @@ class TestInlinePerformVarying:
         stdout = _run_cobol_program(src)
         assert stdout.strip() == "4"
 
+    def test_inline_perform_until(self):
+        """Inline PERFORM UNTIL ... END-PERFORM executes body in loop."""
+        src = make_cobol(
+            [
+                "PERFORM UNTIL WS-I > 3",
+                "    ADD 1 TO WS-I",
+                "    DISPLAY WS-I",
+                "END-PERFORM.",
+                "STOP RUN.",
+            ],
+            data_lines=["       01 WS-I PIC 9(5) VALUE 0."],
+        )
+        stdout = _run_cobol_program(src)
+        lines = stdout.strip().splitlines()
+        assert len(lines) == 4
+        assert lines[0].strip() == "1"
+        assert lines[3].strip() == "4"
+
     def test_inline_perform_varying_with_arithmetic(self):
         """Inline PERFORM VARYING with ADD inside loop body."""
         src = make_cobol(

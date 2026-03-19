@@ -391,10 +391,10 @@ class PythonMapper:
                 lines.extend(block_lines)
                 continue
 
-            # Inline PERFORM VARYING — consume body until END-PERFORM
+            # Inline PERFORM VARYING/UNTIL — consume body until END-PERFORM
             if (stmt.verb == "PERFORM" and stmt.operands
-                    and stmt.operands[0].upper() == "VARYING"):
-                block_lines, i = self._translate_inline_perform_varying(
+                    and stmt.operands[0].upper() in ("VARYING", "UNTIL", "WITH")):
+                block_lines, i = self._translate_inline_perform_block(
                     para.statements, i,
                 )
                 lines.extend(block_lines)
@@ -474,8 +474,17 @@ class PythonMapper:
             return [f"# {verb} (scope terminator)"]
         if verb in ("NOT", "AT"):
             return [f"# {stmt.raw_text}"]
+        if verb == "END":
+            return []  # END PROGRAM / END METHOD — silently consumed
         if verb.startswith("END-"):
             return []  # scope terminators — silently consumed
+        # ENTRY — alternate program entry point
+        if verb == "ENTRY":
+            entry_name = stmt.operands[0] if stmt.operands else "UNKNOWN"
+            return [f"# ENTRY {entry_name} — alternate entry point (use as separate function if needed)"]
+        # MicroFocus directives ($REGION, $END-REGION, etc.)
+        if verb.startswith("$"):
+            return []
         return [f"# TODO(high): unsupported verb {verb}", f"# {stmt.raw_text}"]
 
     def _translate_move(self, ops: list[str]) -> list[str]:
@@ -576,10 +585,10 @@ class PythonMapper:
             return [start]  # inverted range: fallback
         return [self.program.paragraphs[i].name for i in range(s_idx, e_idx + 1)]
 
-    def _translate_inline_perform_varying(
+    def _translate_inline_perform_block(
         self, statements: list[CobolStatement], start: int,
     ) -> tuple[list[str], int]:
-        """Handle inline PERFORM VARYING ... END-PERFORM as a block."""
+        """Handle inline PERFORM VARYING/UNTIL ... END-PERFORM as a block."""
         stmt = statements[start]
         # Generate the loop header via the normal PERFORM translator
         header_lines = st.translate_perform(
@@ -591,7 +600,7 @@ class PythonMapper:
         depth = 0
         for hl in header_lines:
             stripped = hl.lstrip()
-            if stripped.startswith("while not "):
+            if stripped.startswith("while not ") or stripped.startswith("while True"):
                 depth = (len(hl) - len(stripped)) // 4 + 1
 
         # Collect body statements until END-PERFORM
@@ -611,12 +620,16 @@ class PythonMapper:
             for tl in self._translate_statement(bs):
                 body_lines.append(f"{'    ' * depth}{tl}")
 
+        # Ensure body has at least one executable statement (not just comments)
+        if body_lines and all(bl.lstrip().startswith("#") for bl in body_lines):
+            body_lines.insert(0, f"{'    ' * depth}pass")
+
         # Rebuild: header lines, replacing the pass/TODO with actual body,
         # then step increments
         result: list[str] = []
         for hl in header_lines:
             stripped = hl.lstrip()
-            if stripped.startswith("pass  # TODO(high): inline PERFORM VARYING"):
+            if stripped.startswith("pass  # TODO(high): inline PERFORM"):
                 if body_lines:
                     for bl in body_lines:
                         result.append(f"        {bl}")
