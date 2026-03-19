@@ -306,7 +306,7 @@ class JsonExporter:
         }
         return json.dumps(data, indent=2)
 
-    def _stats_dict(self) -> dict:
+    def _stats_dict(self) -> dict[str, int]:
         s = self.smap.stats
         return {
             "total_lines": s.total_lines,

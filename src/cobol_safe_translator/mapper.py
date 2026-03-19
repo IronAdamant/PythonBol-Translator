@@ -215,7 +215,7 @@ class PythonMapper:
     @staticmethod
     def _translate_figurative(value: str, numeric: bool = True) -> str:
         """Translate COBOL figurative constants to Python values."""
-        upper = value.upper().strip()
+        upper = value.strip().upper()
         if upper in ("ZEROS", "ZEROES", "ZERO"):
             return "0"
         if upper in ("SPACES", "SPACE"):

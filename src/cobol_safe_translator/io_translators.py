@@ -127,9 +127,8 @@ def wrap_on_size_error(
 
     # Find NOT ON SIZE ERROR
     not_on_size_idx = None
-    for i in range(on_size_idx + 3, max(on_size_idx + 3, len(upper_ops) - 3)):
-        if (i + 3 < len(upper_ops)
-                and upper_ops[i] == "NOT" and upper_ops[i + 1] == "ON"
+    for i in range(on_size_idx + 3, len(upper_ops) - 3):
+        if (upper_ops[i] == "NOT" and upper_ops[i + 1] == "ON"
                 and upper_ops[i + 2] == "SIZE" and upper_ops[i + 3] == "ERROR"):
             not_on_size_idx = i
             break

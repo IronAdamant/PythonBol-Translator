@@ -85,6 +85,17 @@ def _pic_display_size(pic: str) -> int:
     return max(len(expanded), 1)
 
 
+def _iter_sum_fields(rd: ReportDescription):
+    """Yield (py_sum, py_name_or_None, field) for every SUM field in the report."""
+    for group in rd.groups:
+        for rline in group.lines:
+            for field in rline.fields:
+                if field.sum_field:
+                    py_sum = _to_python_name(field.sum_field)
+                    py_name = _to_python_name(field.name) if field.name else None
+                    yield py_sum, py_name, field
+
+
 def _groups_by_type(rd: ReportDescription, type_prefix: str) -> list[ReportGroup]:
     """Return report groups whose type starts with the given prefix."""
     prefix = type_prefix.upper()
@@ -112,16 +123,10 @@ def translate_initiate(ops: list[str], reports: list[ReportDescription]) -> list
 
     if rd:
         # Initialize SUM fields to 0
-        for group in rd.groups:
-            for rline in group.lines:
-                for field in rline.fields:
-                    if field.sum_field:
-                        py_sum = _to_python_name(field.sum_field)
-                        lines.append(f"self._rw_sums['{py_sum}'] = 0")
-                        # Also track the named field for roll-forward
-                        if field.name:
-                            py_name = _to_python_name(field.name)
-                            lines.append(f"self._rw_sums['{py_name}'] = 0")
+        for py_sum, py_name, _ in _iter_sum_fields(rd):
+            lines.append(f"self._rw_sums['{py_sum}'] = 0")
+            if py_name:
+                lines.append(f"self._rw_sums['{py_name}'] = 0")
 
         # Print REPORT HEADING groups
         rh_groups = _groups_by_type(rd, "REPORT HEADING")
@@ -214,17 +219,11 @@ def translate_generate(ops: list[str], reports: list[ReportDescription]) -> list
             lines.append(f"self.{prev_attr} = self.data.{py_ctrl}.value")
 
     # Accumulate SUM fields from the detail data
-    for group in rd.groups:
-        for rline in group.lines:
-            for field in rline.fields:
-                if field.sum_field:
-                    py_sum = _to_python_name(field.sum_field)
-                    val_expr = resolve_operand(field.sum_field)
-                    lines.append(f"self._rw_sums['{py_sum}'] = self._rw_sums.get('{py_sum}', 0) + {val_expr}")
-                    # Also update named field accumulator
-                    if field.name:
-                        py_name = _to_python_name(field.name)
-                        lines.append(f"self._rw_sums['{py_name}'] = self._rw_sums.get('{py_name}', 0) + {val_expr}")
+    for py_sum, py_name, field in _iter_sum_fields(rd):
+        val_expr = resolve_operand(field.sum_field)
+        lines.append(f"self._rw_sums['{py_sum}'] = self._rw_sums.get('{py_sum}', 0) + {val_expr}")
+        if py_name:
+            lines.append(f"self._rw_sums['{py_name}'] = self._rw_sums.get('{py_name}', 0) + {val_expr}")
 
     # --- Page break detection ---
     if rd.page_limit > 0 or rd.last_detail > 0:

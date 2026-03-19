@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 from . import __version__
@@ -19,20 +20,16 @@ from .exporters import export_json, export_markdown
 from .mapper import generate_python
 from .parser import parse_cobol_file
 from .prompt_generator import generate_prompt
+from .models import CobolProgram, SoftwareMap
 from .validation import validate_generated_python
 
 
 # --- ANSI color helpers (no rich dependency) ---
 
-_COLOR_SUPPORTED: bool | None = None
-
-
+@lru_cache(maxsize=1)
 def _supports_color() -> bool:
     """Check if the terminal supports ANSI colors (cached)."""
-    global _COLOR_SUPPORTED
-    if _COLOR_SUPPORTED is None:
-        _COLOR_SUPPORTED = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
-    return _COLOR_SUPPORTED
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
 
 def _c(code: str, text: str) -> str:
@@ -59,7 +56,7 @@ def bold(text: str) -> str:
 
 # --- Shared helpers ---
 
-def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
+def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple[int, CobolProgram | None, SoftwareMap | None]:
     """Parse and analyze a COBOL source file. Returns (exit_code, program, smap)."""
     source_path = Path(args.path)
 

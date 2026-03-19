@@ -85,7 +85,11 @@ def tokenize_condition(cond: str) -> list[str]:
         if ch in (' ', '\t'):
             i += 1
         elif ch in ('"', "'"):
-            j = cond.index(ch, i + 1) + 1
+            j = cond.find(ch, i + 1)
+            if j == -1:
+                tokens.append(cond[i:])
+                break
+            j += 1
             tokens.append(cond[i:j])
             # Merge hex/binary/national prefix: X"FF" → X"FF", H'0F' → H'0F'
             if (len(tokens) >= 2 and len(tokens[-2]) == 1
@@ -149,7 +153,7 @@ def translate_condition(cond: str, condition_lookup: dict[str, tuple[str, str]])
     """
     try:
         return _translate_inner(cond.strip(), condition_lookup)
-    except Exception:
+    except (ValueError, IndexError, KeyError):
         return "True"
 
 
