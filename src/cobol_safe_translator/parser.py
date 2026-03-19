@@ -190,7 +190,7 @@ def preprocess_lines(raw_text: str) -> list[str]:
     logical: list[str] = []
     i = 0
     while i < len(physical):
-        line = physical[i]
+        line = physical[i].expandtabs(8) if "\t" in physical[i] else physical[i]
         if len(line) < 7:
             # Too short to have content area
             i += 1
