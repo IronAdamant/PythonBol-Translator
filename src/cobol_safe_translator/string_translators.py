@@ -202,8 +202,21 @@ def translate_inspect(
     field_expr = f"self.data.{py_field}"
 
     if "CONVERTING" in upper_ops:
+        conv_idx = upper_ops.index("CONVERTING")
+        # INSPECT field CONVERTING old-chars TO new-chars
+        if conv_idx + 1 < len(ops) and "TO" in upper_ops[conv_idx:]:
+            to_offset = upper_ops[conv_idx:].index("TO")
+            to_abs_idx = conv_idx + to_offset
+            old_val = ops[conv_idx + 1]
+            new_val = ops[to_abs_idx + 1] if to_abs_idx + 1 < len(ops) else '""'
+            old_expr = resolve(old_val)
+            new_expr = resolve(new_val)
+            lines = [f"# INSPECT {field} CONVERTING"]
+            lines.append(f"_tbl = str.maketrans(str({old_expr}), str({new_expr}))")
+            lines.append(f"{field_expr}.set(str({field_expr}.value).translate(_tbl))")
+            return lines
         return [f"# INSPECT {field} CONVERTING",
-                "# TODO(high): INSPECT CONVERTING requires manual translation (maketrans)"]
+                f"# TODO(high): INSPECT CONVERTING — incomplete clause: {' '.join(ops)}"]
 
     if "TALLYING" in upper_ops:
         tally_idx = upper_ops.index("TALLYING")

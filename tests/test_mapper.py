@@ -123,7 +123,7 @@ class TestValueIsSyntax:
             "WORKING-STORAGE SECTION.",
             '01 WS-X PIC X(5) VALUE IS "HELLO".',
         ]
-        _, ws, _, _ = parse_data_division(lines)
+        _, ws, _, _, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "HELLO"
 
@@ -134,7 +134,7 @@ class TestValueIsSyntax:
             "WORKING-STORAGE SECTION.",
             '01 WS-Y PIC X(5) VALUE "WORLD".',
         ]
-        _, ws, _, _ = parse_data_division(lines)
+        _, ws, _, _, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "WORLD"
 
@@ -206,16 +206,17 @@ class TestArithmeticOverflow:
 
 class TestHighValuesLowValues:
     def test_high_values_string_init(self):
-        """HIGH-VALUES in string field should produce single-char value, not escaped literal."""
-        val = PythonMapper._translate_figurative("HIGH-VALUES", numeric=False)
-        assert len(val) == 1
-        assert val == "\xff"
+        """HIGH-VALUES in string field should produce the escape sequence for code gen."""
+        from cobol_safe_translator.utils import resolve_figurative
+        val = resolve_figurative("HIGH-VALUES", numeric=False)
+        # resolve_figurative returns code-gen string (Python escape notation)
+        assert val == "\\xff"
 
     def test_low_values_string_init(self):
-        """LOW-VALUES in string field should produce null character."""
-        val = PythonMapper._translate_figurative("LOW-VALUES", numeric=False)
-        assert len(val) == 1
-        assert val == "\x00"
+        """LOW-VALUES in string field should produce the escape sequence for code gen."""
+        from cobol_safe_translator.utils import resolve_figurative
+        val = resolve_figurative("LOW-VALUES", numeric=False)
+        assert val == "\\x00"
 
     def test_high_values_in_generated_code(self):
         """HIGH-VALUES field init should generate valid Python with correct char."""
@@ -266,7 +267,7 @@ class TestValueDecimalLiteral:
             "WORKING-STORAGE SECTION.",
             "01 WS-C PIC 9(3)V99 VALUE 12.34.",
         ]
-        _, ws, _, _ = parse_data_division(lines)
+        _, ws, _, _, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "12.34"
 
@@ -277,7 +278,7 @@ class TestValueDecimalLiteral:
             "WORKING-STORAGE SECTION.",
             "01 WS-D PIC S9(5)V99 VALUE -3.50.",
         ]
-        _, ws, _, _ = parse_data_division(lines)
+        _, ws, _, _, _ = parse_data_division(lines)
         assert len(ws) == 1
         assert ws[0].value == "-3.50"
 
@@ -380,7 +381,7 @@ class TestParagraphWhitespace:
             "MAIN-PARA .",
             "    DISPLAY WS-A.",
         ]
-        paragraphs = parse_procedure(lines)
+        paragraphs, _ = parse_procedure(lines)
         assert len(paragraphs) == 1
         assert paragraphs[0].name == "MAIN-PARA"
 

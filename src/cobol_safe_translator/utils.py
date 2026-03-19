@@ -67,6 +67,33 @@ FIGURATIVE_RESOLVE: dict[str, str] = {
     "LOW-VALUE": "'\\x00'", "LOW-VALUES": "'\\x00'",
 }
 
+# Numeric-context figurative constants (for data item initial values)
+_FIGURATIVE_NUMERIC: dict[str, str] = {
+    "ZERO": "0", "ZEROS": "0", "ZEROES": "0",
+    "SPACE": "", "SPACES": "",
+    "HIGH-VALUE": "0", "HIGH-VALUES": "0",
+    "LOW-VALUE": "0", "LOW-VALUES": "0",
+}
+
+
+def resolve_figurative(value: str, numeric: bool = True) -> str:
+    """Translate COBOL figurative constants to Python values.
+
+    When numeric=True (data init context), SPACE→"", HIGH/LOW-VALUE→"0".
+    When numeric=False (string context), uses the string representations.
+    """
+    upper = value.strip().upper()
+    if numeric:
+        result = _FIGURATIVE_NUMERIC.get(upper)
+        if result is not None:
+            return result
+    else:
+        result = FIGURATIVE_RESOLVE.get(upper)
+        if result is not None:
+            # Strip surrounding quotes for direct value use
+            return result.strip("'")
+    return value
+
 _REFMOD_RE = re.compile(r'^([A-Za-z][\w-]*)\((\d+):(\d+)\)$')
 
 # Subscript access: TABLE(IDX) or TABLE(1) — no colon

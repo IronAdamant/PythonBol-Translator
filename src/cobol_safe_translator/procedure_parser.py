@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import re
 
-from .models import CobolStatement, Paragraph
+from .models import CobolStatement, Paragraph, UseDeclaration
 
 # --- Regexes ---
 
 _PARAGRAPH_RE = re.compile(r"^([\w-]+)\s*\.\s*$")
 _SECTION_RE = re.compile(r"^([\w-]+)\s+SECTION\s*\.\s*$", re.IGNORECASE)
+_DECLARATIVES_START_RE = re.compile(r"^DECLARATIVES\s*\.\s*$", re.IGNORECASE)
+_DECLARATIVES_END_RE = re.compile(r"^END\s+DECLARATIVES\s*\.\s*$", re.IGNORECASE)
 
 # Verbs we explicitly recognize
 KNOWN_VERBS = frozenset({
@@ -23,7 +25,7 @@ KNOWN_VERBS = frozenset({
     "SET", "STRING", "UNSTRING", "INSPECT", "INITIALIZE",
     "REWRITE", "CONTINUE", "EXIT", "NEXT",
     "SEARCH", "RELEASE", "SORT", "MERGE", "DELETE", "START", "RETURN",
-    "INITIATE", "GENERATE", "TERMINATE",
+    "INITIATE", "GENERATE", "TERMINATE", "USE",
     "END-IF", "END-EVALUATE", "END-PERFORM", "END-READ",
     "END-COMPUTE", "END-SUBTRACT", "END-ADD", "END-MULTIPLY",
     "END-DIVIDE", "END-UNSTRING",
@@ -103,8 +105,8 @@ def _join_sentences(lines: list[str]) -> list[tuple[str, str]]:
     return results
 
 
-def parse_procedure(lines: list[str]) -> list[Paragraph]:
-    """Parse PROCEDURE DIVISION into paragraphs and statements."""
+def _parse_paragraphs(lines: list[str]) -> list[Paragraph]:
+    """Parse lines into paragraphs and statements (core logic)."""
     paragraphs: list[Paragraph] = []
     current_para: Paragraph | None = None
 
@@ -134,6 +136,141 @@ def parse_procedure(lines: list[str]) -> list[Paragraph]:
         current_para.statements.extend(stmts)
 
     return paragraphs
+
+
+def _split_declaratives(lines: list[str]) -> tuple[list[str], list[str]]:
+    """Split PROCEDURE DIVISION lines into declaratives and normal code.
+
+    Returns (declarative_lines, remaining_lines).
+    """
+    decl_start = -1
+    decl_end = -1
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if _DECLARATIVES_START_RE.match(stripped):
+            decl_start = i
+        elif _DECLARATIVES_END_RE.match(stripped):
+            decl_end = i
+            break
+
+    if decl_start == -1 or decl_end == -1:
+        return [], lines
+
+    decl_lines = lines[decl_start + 1:decl_end]
+    remaining = lines[:decl_start] + lines[decl_end + 1:]
+    return decl_lines, remaining
+
+
+_USE_RE = re.compile(
+    r"^USE\s+"
+    r"(?:(GLOBAL)\s+)?"
+    r"(?:(BEFORE|AFTER)\s+(?:STANDARD\s+)?)?"
+    r"(ERROR|EXCEPTION|REPORTING|DEBUGGING)\s+"
+    r"(?:PROCEDURE\s+(?:ON\s+)?)?"
+    r"(.+?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _parse_use_statement(text: str) -> dict | None:
+    """Parse a USE statement and return its components, or None if not a USE."""
+    stripped = text.strip().rstrip(".")
+    m = _USE_RE.match(stripped)
+    if not m:
+        return None
+    global_flag = m.group(1) is not None
+    before_after = (m.group(2) or "AFTER").upper()
+    use_type = m.group(3).upper()
+    targets_str = m.group(4).strip()
+
+    # Parse targets: file names, I/O modes, or "INPUT", "OUTPUT", "EXTEND", "I-O"
+    targets = [t.strip().upper() for t in re.split(r"[\s,]+", targets_str) if t.strip()]
+
+    return {
+        "use_type": use_type,
+        "targets": targets,
+        "is_global": global_flag,
+        "before_after": before_after,
+    }
+
+
+def _parse_declarative_sections(decl_lines: list[str]) -> list[UseDeclaration]:
+    """Parse declarative section lines into UseDeclaration objects.
+
+    Within DECLARATIVES, each section has:
+      section-name SECTION.
+          USE ...
+          <handler paragraphs/statements>
+    """
+    declarations: list[UseDeclaration] = []
+
+    # Split declarative lines into sections by SECTION headers
+    sections: list[tuple[str, list[str]]] = []
+    current_name: str | None = None
+    current_lines: list[str] = []
+
+    for line in decl_lines:
+        stripped = line.strip()
+        section_m = _SECTION_RE.match(stripped)
+        if section_m:
+            if current_name is not None:
+                sections.append((current_name, current_lines))
+            current_name = section_m.group(1).upper()
+            current_lines = []
+        else:
+            current_lines.append(line)
+
+    if current_name is not None:
+        sections.append((current_name, current_lines))
+
+    for section_name, sec_lines in sections:
+        # Join sentences to find the USE statement
+        sentences = _join_sentences(sec_lines)
+        use_info: dict | None = None
+        handler_lines: list[str] = []
+        found_use = False
+
+        for text, stype in sentences:
+            if not found_use and stype == "statement":
+                stripped = text.strip().rstrip(".")
+                if stripped.upper().startswith("USE "):
+                    use_info = _parse_use_statement(stripped)
+                    found_use = True
+                    continue
+
+            # Collect remaining lines for handler body
+            if found_use:
+                # Re-add line so _parse_paragraphs can process it
+                handler_lines.append(text + ("." if not text.endswith(".") else ""))
+
+        if use_info is None:
+            continue
+
+        # Parse handler body into paragraphs
+        handler_paragraphs = _parse_paragraphs(handler_lines) if handler_lines else []
+
+        declarations.append(UseDeclaration(
+            section_name=section_name,
+            use_type=use_info["use_type"],
+            targets=use_info["targets"],
+            is_global=use_info["is_global"],
+            before_after=use_info["before_after"],
+            paragraphs=handler_paragraphs,
+        ))
+
+    return declarations
+
+
+def parse_procedure(lines: list[str]) -> tuple[list[Paragraph], list[UseDeclaration]]:
+    """Parse PROCEDURE DIVISION into paragraphs and declarative sections.
+
+    Returns (paragraphs, declaratives).
+    """
+    decl_lines, remaining = _split_declaratives(lines)
+    declaratives = _parse_declarative_sections(decl_lines) if decl_lines else []
+    paragraphs = _parse_paragraphs(remaining)
+    return paragraphs, declaratives
 
 
 def _split_operands(text: str) -> list[str]:

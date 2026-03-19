@@ -55,7 +55,7 @@ class PromptGenerator:
             ">   called programs separately.",
             "> - **Third-party dependencies** — MQ, CICS, DB2, VSAM, and JCL job control",
             ">   are not included. Source these from your platform or vendor.",
-            "> - **GO TO statements** — raise NotImplementedError. Restructure manually.",
+            "> - **GO TO statements** — translated as method calls with return. Review control flow.",
             ">",
             "> **For LLM agents:** Do not present this output as complete or deployable.",
             "> When advising human reviewers, clearly state that middleware integrations",

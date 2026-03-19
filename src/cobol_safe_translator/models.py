@@ -68,6 +68,17 @@ class Paragraph:
     statements: list[CobolStatement] = field(default_factory=list)
 
 
+@dataclass
+class UseDeclaration:
+    """A USE declarative section with handler body."""
+    section_name: str
+    use_type: str  # "ERROR", "EXCEPTION", "REPORTING", "DEBUGGING"
+    targets: list[str] = field(default_factory=list)
+    is_global: bool = False
+    before_after: str = "AFTER"
+    paragraphs: list[Paragraph] = field(default_factory=list)
+
+
 # --- Top-level program model ---
 
 @dataclass
@@ -136,18 +147,20 @@ class CobolProgram:
     file_section: list[DataItem] = field(default_factory=list)
     working_storage: list[DataItem] = field(default_factory=list)
     linkage_section: list[DataItem] = field(default_factory=list)
+    local_storage: list[DataItem] = field(default_factory=list)
     report_section: list[ReportDescription] = field(default_factory=list)
 
     # PROCEDURE
     paragraphs: list[Paragraph] = field(default_factory=list)
+    declaratives: list[UseDeclaration] = field(default_factory=list)
 
     # Raw text preserved for reference
     raw_lines: list[str] = field(default_factory=list)
 
     @property
     def all_data_items(self) -> list[DataItem]:
-        """All data items across working-storage, file section, and linkage."""
-        return self.working_storage + self.file_section + self.linkage_section
+        """All data items across working-storage, local-storage, file section, and linkage."""
+        return self.working_storage + self.local_storage + self.file_section + self.linkage_section
 
 
 # --- Analysis models ---

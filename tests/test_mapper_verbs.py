@@ -369,15 +369,25 @@ class TestMoveAll:
 
 
 class TestMoveFunction:
-    def test_move_function_emits_todo(self):
-        """MOVE FUNCTION should emit TODO for manual translation."""
+    def test_move_function_current_date(self):
+        """MOVE FUNCTION CURRENT-DATE should translate to datetime expression."""
         src = make_cobol(["MOVE FUNCTION CURRENT-DATE TO WS-A."])
         program = parse_cobol(src)
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
+        assert "datetime" in source
+        assert ".set(" in source
+
+    def test_move_function_unknown_emits_todo(self):
+        """MOVE FUNCTION with unknown intrinsic should emit TODO."""
+        src = make_cobol(["MOVE FUNCTION UNKNOWN-FUNC TO WS-A."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
         assert "TODO(high)" in source
-        assert "FUNCTION" in source
+        assert "UNKNOWN-FUNC" in source
 
 
 class TestMoveWithoutTo:
@@ -580,26 +590,63 @@ class TestRewriteSkeleton:
         assert ".write(" in source
 
 
-class TestGoToNewlineEscape:
+class TestGoToTranslation:
     def _make_mapper(self):
         from cobol_safe_translator.models import CobolProgram, SoftwareMap
         from cobol_safe_translator.mapper import PythonMapper
         return PythonMapper(SoftwareMap(program=CobolProgram()))
 
-    def test_goto_with_newline_in_raw_text_produces_valid_python(self):
-        """GO TO with embedded newline in raw_text must produce valid Python (no SyntaxError)."""
+    def test_simple_goto_produces_method_call_and_return(self):
+        """Simple GO TO paragraph produces self.method() + return."""
+        from cobol_safe_translator.models import CobolStatement
+        stmt = CobolStatement(verb="GO", operands=["TO", "SOME-PARA"], raw_text="GO TO SOME-PARA")
+        mapper = self._make_mapper()
+        lines = mapper._translate_statement(stmt)
+        assert lines[0] == "self.some_para()  # GO TO SOME-PARA"
+        assert lines[1] == "return"
+
+    def test_goto_valid_python(self):
+        """GO TO output must be valid Python."""
         from cobol_safe_translator.models import CobolStatement
         stmt = CobolStatement(verb="GO", operands=["TO", "SOME-PARA"], raw_text="GO TO SOME-PARA\nEXTRA")
         mapper = self._make_mapper()
         lines = mapper._translate_statement(stmt)
-        ast.parse(f"def f():\n    {lines[0]}")  # must be valid Python
-        assert "\\n" in lines[0]
+        # Must parse as valid Python inside a method
+        code = "def f(self):\n" + "\n".join(f"    {l}" for l in lines)
+        ast.parse(code)
 
-    def test_goto_with_carriage_return_produces_valid_python(self):
-        """GO TO with embedded \\r in raw_text must not break the raise string."""
+    def test_goto_no_target_raises(self):
+        """GO TO with no operands raises NotImplementedError (ALTER-modified)."""
         from cobol_safe_translator.models import CobolStatement
-        stmt = CobolStatement(verb="GO", operands=["TO", "PARA"], raw_text="GO TO PARA\rMORE")
+        stmt = CobolStatement(verb="GO", operands=[], raw_text="GO TO")
         mapper = self._make_mapper()
         lines = mapper._translate_statement(stmt)
-        ast.parse(f"def f():\n    {lines[0]}")
-        assert "\\r" in lines[0]
+        assert "NotImplementedError" in lines[0]
+
+    def test_goto_depending_on(self):
+        """GO TO ... DEPENDING ON produces if/elif dispatch."""
+        from cobol_safe_translator.models import CobolStatement
+        stmt = CobolStatement(
+            verb="GO", operands=["TO", "PARA-A", "PARA-B", "DEPENDING", "ON", "WS-IDX"],
+            raw_text="GO TO PARA-A PARA-B DEPENDING ON WS-IDX",
+        )
+        mapper = self._make_mapper()
+        lines = mapper._translate_statement(stmt)
+        joined = "\n".join(lines)
+        assert "if int(" in joined
+        assert "elif int(" in joined
+        assert "self.para_a()" in joined
+        assert "self.para_b()" in joined
+
+    def test_goto_multiple_targets_without_depending(self):
+        """GO TO with multiple targets but no DEPENDING defaults to first."""
+        from cobol_safe_translator.models import CobolStatement
+        stmt = CobolStatement(
+            verb="GO", operands=["TO", "PARA-X", "PARA-Y"],
+            raw_text="GO TO PARA-X PARA-Y",
+        )
+        mapper = self._make_mapper()
+        lines = mapper._translate_statement(stmt)
+        joined = "\n".join(lines)
+        assert "TODO(high)" in joined
+        assert "self.para_x()" in joined

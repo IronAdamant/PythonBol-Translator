@@ -59,12 +59,14 @@ def find_copybook(
     """Find a copybook file by name in search paths.
 
     Tries the name as-is first, then appends each copybook extension.
+    Falls back to case-insensitive matching on Linux when exact case fails.
     Returns the first match found, or None.
     """
     # Strip any extension the user may have included
     base = Path(name).stem
     name_with_ext = Path(name).suffix != ""
 
+    # --- Pass 1: exact-case lookups (fast, no directory listing) ---
     for directory in search_paths:
         if not directory.is_dir():
             continue
@@ -83,6 +85,33 @@ def find_copybook(
             candidate = directory / name
             if candidate.is_file():
                 return candidate
+
+    # --- Pass 2: case-insensitive fallback (handles Linux case mismatch) ---
+    base_lower = base.lower()
+    for directory in search_paths:
+        if not directory.is_dir():
+            continue
+        try:
+            for entry in directory.iterdir():
+                if not entry.is_file():
+                    continue
+                entry_stem = entry.stem.lower()
+                entry_suffix = entry.suffix.lower()
+                if entry_stem != base_lower:
+                    continue
+                # If the COPY name had an extension, match it case-insensitively
+                if name_with_ext:
+                    if entry_suffix == Path(name).suffix.lower():
+                        return entry
+                else:
+                    # Match against known copybook extensions
+                    if entry_suffix in {e.lower() for e in _COPYBOOK_EXTENSIONS}:
+                        return entry
+                    # Also match bare filename (no extension)
+                    if entry.name.lower() == base_lower:
+                        return entry
+        except OSError:
+            continue
 
     return None
 
@@ -142,8 +171,18 @@ def _is_copy_line(line: str) -> re.Match | None:
 def _resolve_copy_statements(
     raw_text: str,
     search_paths: list[Path],
+    _seen: frozenset[str] | None = None,
 ) -> str:
-    """Resolve all COPY statements in the source, inlining copybook content."""
+    """Resolve all COPY statements in the source, inlining copybook content.
+
+    Recursively resolves nested COPYs within copybooks before applying
+    REPLACING, so the outer REPLACING operates on fully-expanded content
+    (correct per COBOL standard).  Uses *_seen* (canonical paths) for
+    cycle detection.
+    """
+    if _seen is None:
+        _seen = frozenset()
+
     lines = raw_text.splitlines()
     result: list[str] = []
     i = 0
@@ -173,12 +212,26 @@ def _resolve_copy_statements(
             )
             result.append(comment)
         else:
-            content = copybook_path.read_text(encoding="utf-8", errors="replace")
-            if replacements:
-                content = _apply_replacements(content, replacements)
-            # Inline the copybook content (each line as-is)
-            for cb_line in content.splitlines():
-                result.append(cb_line)
+            canon = str(copybook_path.resolve())
+            if canon in _seen:
+                # Circular dependency — skip to avoid infinite recursion
+                result.append(
+                    f"      * COPY {copybook_name} "
+                    f"-- CIRCULAR DEPENDENCY (skipped)"
+                )
+            else:
+                content = copybook_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+                # Recursively resolve nested COPYs BEFORE applying REPLACING
+                content = _resolve_copy_statements(
+                    content, search_paths, _seen | {canon}
+                )
+                if replacements:
+                    content = _apply_replacements(content, replacements)
+                # Inline the copybook content (each line as-is)
+                for cb_line in content.splitlines():
+                    result.append(cb_line)
 
         i = end_idx + 1
 
@@ -363,13 +416,9 @@ def resolve_copies(
     search = _build_search_paths(src_dir, merged_copy or None)
 
     # Resolve COPY statements if any search paths are available
-    # Loop to handle nested COPYs (copybooks that contain COPY statements)
+    # Recursion inside _resolve_copy_statements handles nested COPYs
     if search:
-        for _ in range(10):  # max 10 passes to prevent infinite cycles
-            resolved = _resolve_copy_statements(result, search)
-            if resolved == result:
-                break  # no more changes
-            result = resolved
+        result = _resolve_copy_statements(result, search)
 
     # Always strip EXEC blocks
     result = strip_exec_blocks(result)

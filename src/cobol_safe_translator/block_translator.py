@@ -344,21 +344,39 @@ def translate_evaluate_block(
             len(ops) == 1 and ops[0].upper() == "OTHER" for ops in when_ops_list
         )
 
-        # THRU/THROUGH — emit TODO
+        # THRU/THROUGH — generate range comparison
         has_thru = any(
             any(o.upper() in ("THRU", "THROUGH") for o in ops)
             for ops in when_ops_list
         )
         if has_thru:
-            # Emit placeholder if/elif so subsequent clauses don't orphan elif
-            prefix = "if" if clause_idx == 0 else "elif"
-            lines.append(_indent_line(f"{prefix} True:  # TODO(high): WHEN THRU/THROUGH — manual translation required", indent))
+            thru_cond_parts: list[str] = []
             for ops in when_ops_list:
-                lines.append(_indent_line(f"    # WHEN {' '.join(ops)}", indent))
+                upper_when = _upper_ops(ops)
+                thru_idx = None
+                for ti, tok in enumerate(upper_when):
+                    if tok in ("THRU", "THROUGH"):
+                        thru_idx = ti
+                        break
+                if thru_idx is not None and thru_idx > 0 and thru_idx + 1 < len(ops):
+                    lo_val = resolve_operand_fn(ops[0]) if not is_true_subject else ops[0]
+                    hi_val = resolve_operand_fn(ops[thru_idx + 1]) if not is_true_subject else ops[thru_idx + 1]
+                    if subject_expr:
+                        thru_cond_parts.append(f"{lo_val} <= {subject_expr} <= {hi_val}")
+                    else:
+                        thru_cond_parts.append(f"{lo_val} <= {hi_val}")
+                else:
+                    # Non-THRU value in the same WHEN list — equality check
+                    if is_true_subject:
+                        thru_cond_parts.append(translate_cond_fn(" ".join(ops)))
+                    elif subject_expr:
+                        thru_cond_parts.append(f"{subject_expr} == {resolve_operand_fn(ops[0])}")
+            cond = " or ".join(thru_cond_parts) if thru_cond_parts else "True"
+            prefix = "if" if clause_idx == 0 else "elif"
+            lines.append(_indent_line(f"{prefix} {cond}:", indent))
             if not _has_code(body):
-                lines.append(_indent_line("    pass", indent))
-            else:
-                lines.extend(body)
+                body.append(_indent_line("pass", indent + 1))
+            lines.extend(body)
             continue
 
         if is_other:

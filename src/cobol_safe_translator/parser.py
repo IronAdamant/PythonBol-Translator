@@ -375,12 +375,13 @@ _USAGE_RE = re.compile(
 )
 
 
-def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem], list[DataItem], list[ReportDescription]]:
-    """Parse DATA DIVISION into file, working-storage, linkage items, and report descriptions."""
+def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem], list[DataItem], list[ReportDescription], list[DataItem]]:
+    """Parse DATA DIVISION into file, working-storage, linkage items, report descriptions, and local-storage items."""
     section = "UNKNOWN"
     file_items: list[DataItem] = []
     ws_items: list[DataItem] = []
     linkage_items: list[DataItem] = []
+    local_items: list[DataItem] = []
 
     # Detect and extract REPORT SECTION lines for the dedicated parser
     report_lines: list[str] = []
@@ -417,6 +418,9 @@ def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem
         elif "WORKING-STORAGE SECTION" in upper:
             section = "WS"
             continue
+        elif "LOCAL-STORAGE SECTION" in upper:
+            section = "LOCAL"
+            continue
         elif "LINKAGE SECTION" in upper:
             section = "LINKAGE"
             continue
@@ -442,6 +446,8 @@ def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem
             file_items.append(item)
         elif section == "WS":
             ws_items.append(item)
+        elif section == "LOCAL":
+            local_items.append(item)
         elif section == "LINKAGE":
             linkage_items.append(item)
 
@@ -449,7 +455,8 @@ def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem
     file_items = _build_hierarchy(file_items)
     ws_items = _build_hierarchy(ws_items)
     linkage_items = _build_hierarchy(linkage_items)
-    return file_items, ws_items, linkage_items, reports
+    local_items = _build_hierarchy(local_items)
+    return file_items, ws_items, linkage_items, reports, local_items
 
 
 def _parse_88_condition(line: str) -> ConditionName | None:
@@ -639,8 +646,8 @@ def parse_cobol(
 
     program_id, author = parse_identification(divisions["IDENTIFICATION"])
     file_controls = parse_environment(divisions["ENVIRONMENT"])
-    file_section, working_storage, linkage_section, report_section = parse_data_division(divisions["DATA"])
-    paragraphs = parse_procedure(divisions["PROCEDURE"])
+    file_section, working_storage, linkage_section, report_section, local_storage = parse_data_division(divisions["DATA"])
+    paragraphs, declaratives = parse_procedure(divisions["PROCEDURE"])
 
     return CobolProgram(
         program_id=program_id,
@@ -650,8 +657,10 @@ def parse_cobol(
         file_section=file_section,
         working_storage=working_storage,
         linkage_section=linkage_section,
+        local_storage=local_storage,
         report_section=report_section,
         paragraphs=paragraphs,
+        declaratives=declaratives,
         raw_lines=source.splitlines(),
     )
 

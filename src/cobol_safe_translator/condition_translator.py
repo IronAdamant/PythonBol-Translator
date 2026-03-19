@@ -341,21 +341,30 @@ def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) ->
             last_subject = resolved
         result.append(resolved)
         i += 1
-    # Post-process: wrap "not X op Y" into "not (X op Y)"
+    fixed = _fix_not_grouping(result)
+    joined = " ".join(fixed)
+    return _validate_condition(joined)
+
+
+def _fix_not_grouping(tokens: list[str]) -> list[str]:
+    """Wrap 'not X op Y' patterns into 'not (X op Y)' for correct precedence."""
     fixed: list[str] = []
     j = 0
-    while j < len(result):
-        if (result[j] == "not" and j + 3 < len(result)
-                and result[j + 2] in _CMP_OPS and result[j + 1] != '('):
-            fixed.extend(["not", "(", result[j + 1], result[j + 2], result[j + 3], ")"])
+    while j < len(tokens):
+        if (tokens[j] == "not" and j + 3 < len(tokens)
+                and tokens[j + 2] in _CMP_OPS and tokens[j + 1] != '('):
+            fixed.extend(["not", "(", tokens[j + 1], tokens[j + 2], tokens[j + 3], ")"])
             j += 4
         else:
-            fixed.append(result[j])
+            fixed.append(tokens[j])
             j += 1
-    joined = " ".join(fixed)
+    return fixed
+
+
+def _validate_condition(joined: str) -> str:
+    """Validate that a translated condition is syntactically valid Python."""
     if joined.count("(") != joined.count(")"):
         return "True"
-    # Safety valve: ensure the condition is valid Python syntax
     if joined and joined != "True":
         try:
             compile(joined, '<cond>', 'eval')

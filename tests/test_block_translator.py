@@ -277,7 +277,7 @@ class TestTranslateEvaluateBlock:
         assert "if" in combined  # Should generate if/elif chain
         assert next_i == 4
 
-    def test_when_thru_emits_todo(self):
+    def test_when_thru_generates_range_comparison(self):
         stmts = [
             _make("EVALUATE", "WS-STATUS"),
             _make("WHEN", "1", "THRU", "5"),
@@ -285,7 +285,10 @@ class TestTranslateEvaluateBlock:
             _make("END-EVALUATE"),
         ]
         lines, next_i = translate_evaluate_block(stmts, 0, _stmt_fn, _cond, _resolve, indent=0)
-        assert any("TODO(high)" in line for line in lines)
+        combined = "\n".join(lines)
+        # Should generate range comparison, not TODO
+        assert "<=" in combined
+        assert "if" in combined
 
     def test_missing_end_evaluate(self):
         stmts = [

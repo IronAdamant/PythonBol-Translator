@@ -27,6 +27,7 @@ from .models import (
     PicCategory,
     SensitivityFlag,
     SoftwareMap,
+    UseDeclaration,
 )
 from . import statement_translators as st
 from .io_translators import wrap_on_size_error
@@ -39,6 +40,7 @@ from .utils import (
     _to_method_name,
     _to_python_name,
     _upper_ops,
+    resolve_figurative,
     resolve_operand as _resolve_operand_base,
 )
 
@@ -92,6 +94,7 @@ class PythonMapper:
             "INITIATE": lambda s: rpt_t.translate_initiate(s.operands, self.program.report_section),
             "GENERATE": lambda s: rpt_t.translate_generate(s.operands, self.program.report_section),
             "TERMINATE": lambda s: rpt_t.translate_terminate(s.operands, self.program.report_section),
+            "USE": lambda s: [f"# USE declarative (handled via DECLARATIVES section): {s.raw_text}"],
         }
 
     def _build_condition_lookup(self, items: list[DataItem]) -> None:
@@ -148,7 +151,8 @@ class PythonMapper:
             "    called programs separately.",
             "  - Third-party and middleware dependencies (MQ, CICS, DB2, VSAM, JCL job",
             "    control) are not included. Source these from your platform or vendor.",
-            "  - GO TO statements raise NotImplementedError. Restructure control flow manually.",
+            "  - GO TO statements are translated as method calls with return. Review control",
+            "    flow for correctness, especially GO TO DEPENDING ON and ALTER-modified targets.",
             "  - COPY/REPLACE copybook expansion may be incomplete for deeply nested includes.",
             "",
             "Required actions before production use:",
@@ -205,20 +209,6 @@ class PythonMapper:
         lines.append("")
         return "\n".join(lines)
 
-    @staticmethod
-    def _translate_figurative(value: str, numeric: bool = True) -> str:
-        """Translate COBOL figurative constants to Python values."""
-        upper = value.strip().upper()
-        if upper in ("ZEROS", "ZEROES", "ZERO"):
-            return "0"
-        if upper in ("SPACES", "SPACE"):
-            return "" if numeric else " "
-        if upper in ("HIGH-VALUES", "HIGH-VALUE"):
-            return "0" if numeric else "\xff"
-        if upper in ("LOW-VALUES", "LOW-VALUE"):
-            return "0" if numeric else "\x00"
-        return value
-
     def _data_item_fields(
         self, item: DataItem, indent: int = 1, parent_occurs: list[int] | None = None,
     ) -> list[str]:
@@ -258,10 +248,10 @@ class PythonMapper:
                 dec = item.pic.decimals
                 int_digits = item.pic.size - dec
                 signed = "True" if item.pic.signed else "False"
-                init = self._translate_figurative(item.value, numeric=True) if item.value else "0"
+                init = resolve_figurative(item.value, numeric=True) if item.value else "0"
                 inner = f"CobolDecimal({int_digits}, {dec}, {signed}, {init!r})"
             else:
-                init = self._translate_figurative(item.value, numeric=False) if item.value else ""
+                init = resolve_figurative(item.value, numeric=False) if item.value else ""
                 inner = f"CobolString({item.pic.size}, {init!r})"
 
             if occurs_chain:
@@ -300,7 +290,20 @@ class PythonMapper:
             safe_path = fc.assign_to.replace("\\", "\\\\")
             lines.append(f'        self.{py_name} = FileAdapter("{safe_path}")')
 
+        # Register USE declarative handlers
+        for decl in self.program.declaratives:
+            handler_name = _to_method_name(decl.section_name)
+            targets_str = ", ".join(decl.targets) if decl.targets else "ALL"
+            lines.append(
+                f"        self._use_{handler_name} = self.{handler_name}"
+                f"  # USE {decl.use_type} ON {targets_str}"
+            )
+
         lines.append("")
+
+        # Generate methods for declarative sections
+        for decl in self.program.declaratives:
+            lines.append(self._declarative_method(decl))
 
         # Generate methods for each paragraph
         for para in self.program.paragraphs:
@@ -401,6 +404,37 @@ class PythonMapper:
         lines.append("")
         return "\n".join(lines)
 
+    def _declarative_method(self, decl: UseDeclaration) -> str:
+        """Generate a method for a USE declarative section."""
+        method_name = _to_method_name(decl.section_name)
+        targets_str = ", ".join(decl.targets) if decl.targets else "ALL"
+        global_str = " GLOBAL" if decl.is_global else ""
+        lines = [f"    def {method_name}(self) -> None:"]
+        lines.append(
+            f'        """USE{global_str} {decl.before_after} {decl.use_type}'
+            f' ON {targets_str}"""'
+        )
+
+        # Translate handler body paragraphs
+        has_body = False
+        for para in decl.paragraphs:
+            if para.statements:
+                has_body = True
+                lines.append(f"        # --- {para.name} ---")
+                for stmt in para.statements:
+                    translated = self._translate_statement(stmt)
+                    for tl in translated:
+                        lines.append(f"        {tl}")
+
+        if not has_body:
+            lines.append(
+                f"        pass  # TODO(high): implement USE {decl.use_type}"
+                f" handler for {targets_str}"
+            )
+
+        lines.append("")
+        return "\n".join(lines)
+
     def _translate_statement(self, stmt: CobolStatement) -> list[str]:
         """Translate a single COBOL statement to Python line(s)."""
         verb = stmt.verb
@@ -422,21 +456,9 @@ class PythonMapper:
                 return ["break  # EXIT PERFORM"]
             return ["pass  # EXIT"]
 
-        # GO TO — requires escape-safe string
+        # GO TO — translate to method call + return
         if verb == "GO":
-            safe_text = (
-                stmt.raw_text
-                .replace("\\", "\\\\")
-                .replace("'", "\\'")
-                .replace("{", "{{")
-                .replace("}", "}}")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-            )
-            return [
-                f"raise NotImplementedError('GO TO not supported: {safe_text}')",
-                f"# TODO(high): GO TO requires manual restructuring",
-            ]
+            return self._translate_goto(stmt.operands, stmt.raw_text)
 
         # Fallback IF/EVALUATE (when block translator can't handle them)
         if verb == "IF":
@@ -631,6 +653,61 @@ class PythonMapper:
             ops, raw, self._translate_condition,
             get_paragraph_range=self._get_paragraph_range,
         )
+
+    def _translate_goto(self, ops: list[str], raw: str) -> list[str]:
+        """Translate GO TO verb to Python."""
+        if not ops:
+            return [
+                "raise NotImplementedError('GO TO with no target (ALTER-modified)')",
+                "# TODO(high): ALTER-modified GO TO requires manual restructuring",
+            ]
+        upper_ops = _upper_ops(ops)
+
+        # Filter out the "TO" keyword if present
+        filtered = [o for i, o in enumerate(ops) if upper_ops[i] != "TO"]
+        upper_filtered = [u for u in upper_ops if u != "TO"]
+
+        if not filtered:
+            return [
+                "raise NotImplementedError('GO TO with no target')",
+                "# TODO(high): GO TO requires manual restructuring",
+            ]
+
+        # GO TO ... DEPENDING ON variable
+        if "DEPENDING" in upper_filtered:
+            dep_idx = upper_filtered.index("DEPENDING")
+            targets = filtered[:dep_idx]
+            # Find the variable after DEPENDING [ON]
+            var_idx = dep_idx + 1
+            if var_idx < len(filtered) and upper_filtered[var_idx] == "ON":
+                var_idx += 1
+            if var_idx >= len(filtered):
+                return [f"# GO TO DEPENDING: missing variable: {raw}"]
+            dep_var = _resolve_operand_base(filtered[var_idx])
+            lines = [f"# GO TO DEPENDING ON {filtered[var_idx]}"]
+            for i, target in enumerate(targets, 1):
+                method = _to_method_name(target)
+                prefix = "if" if i == 1 else "elif"
+                lines.append(f"{prefix} int({dep_var}) == {i}:")
+                lines.append(f"    self.{method}()")
+                lines.append(f"    return")
+            return lines
+
+        # Simple GO TO paragraph-name (possibly multiple targets from ALTER)
+        if len(filtered) == 1:
+            method = _to_method_name(filtered[0])
+            return [
+                f"self.{method}()  # GO TO {filtered[0]}",
+                "return",
+            ]
+
+        # Multiple targets without DEPENDING — list of possible targets (from ALTER)
+        lines = [f"# GO TO with multiple targets: {' '.join(filtered)}"]
+        lines.append(f"# TODO(high): multiple GO TO targets suggest ALTER usage — pick the correct target")
+        method = _to_method_name(filtered[0])
+        lines.append(f"self.{method}()  # defaulting to first target")
+        lines.append("return")
+        return lines
 
     def _translate_condition(self, cond: str) -> str:
         """Two-pass COBOL condition to Python expression translator.

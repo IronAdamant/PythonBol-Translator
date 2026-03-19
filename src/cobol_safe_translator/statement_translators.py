@@ -97,8 +97,39 @@ def translate_move(ops: list[str]) -> list[str]:
         src_expr = f'{source[0]}{inner}{source[0]}'
     elif _is_numeric_literal(source):
         src_expr = _sanitize_numeric(source)
-    elif source.upper().startswith("FUNCTION"):
-        return ["# TODO(high): MOVE FUNCTION — manual translation required"]
+    elif source.upper() == "FUNCTION":
+        # MOVE FUNCTION name[(args)] TO target
+        # Parser tokenizes as ops: [FUNCTION, name, ..., TO, target]
+        if to_idx >= 2:
+            func_token = ops[1]
+            paren_pos = func_token.find("(")
+            if paren_pos >= 0:
+                func_name = func_token[:paren_pos]
+                raw_inner = func_token[paren_pos + 1:]
+                if raw_inner.endswith(")"):
+                    raw_inner = raw_inner[:-1]
+                extra_args = ops[2:to_idx]
+                if extra_args:
+                    raw_args = (raw_inner + " " + " ".join(extra_args)).strip().rstrip(")")
+                else:
+                    raw_args = raw_inner.strip()
+            else:
+                func_name = func_token
+                arg_tokens = ops[2:to_idx]
+                raw_args_str = " ".join(arg_tokens)
+                if raw_args_str.startswith("(") and raw_args_str.endswith(")"):
+                    raw_args = raw_args_str[1:-1].strip()
+                elif raw_args_str.startswith("("):
+                    raw_args = raw_args_str[1:].rstrip(")").strip()
+                else:
+                    raw_args = raw_args_str
+            translated = translate_function_intrinsic(func_name, raw_args, _resolve_operand)
+            if translated is not None:
+                src_expr = translated
+            else:
+                return [f"# TODO(high): MOVE FUNCTION {func_name} — unknown intrinsic, manual translation required"]
+        else:
+            return ["# TODO(high): MOVE FUNCTION — could not parse function name"]
     else:
         fig = FIGURATIVE_RESOLVE.get(source.upper())
         src_expr = fig if fig is not None else _resolve_operand(source)
@@ -726,9 +757,40 @@ def translate_write(ops: list[str]) -> list[str]:
     # Check for FROM clause: WRITE record FROM data-name
     from_expr = extract_from_expr(ops, upper_ops)
 
-    if from_expr:
-        return [f"self.{file_hint}.write(str({from_expr}))"]
-    return [f"self.{file_hint}.write(str(self.data.{py_record}.value))"]
+    # Parse AFTER/BEFORE ADVANCING clause
+    advancing_prefix = ""
+    advancing_suffix = ""
+    for adv_kw in ("AFTER", "BEFORE"):
+        if adv_kw in upper_ops:
+            adv_idx = upper_ops.index(adv_kw)
+            # Skip optional ADVANCING keyword
+            next_idx = adv_idx + 1
+            if next_idx < len(upper_ops) and upper_ops[next_idx] == "ADVANCING":
+                next_idx += 1
+            if next_idx < len(upper_ops):
+                adv_value = upper_ops[next_idx]
+                if adv_value == "PAGE":
+                    if adv_kw == "AFTER":
+                        advancing_prefix = "'\\f' + "
+                    else:
+                        advancing_suffix = " + '\\f'"
+                elif _is_numeric_literal(ops[next_idx]):
+                    n = int(float(ops[next_idx]))
+                    if adv_kw == "AFTER":
+                        advancing_prefix = f"'\\n' * {n} + " if n > 0 else ""
+                    else:
+                        advancing_suffix = f" + '\\n' * {n}" if n > 0 else ""
+                else:
+                    # Variable number of lines
+                    py_var = _to_python_name(ops[next_idx])
+                    if adv_kw == "AFTER":
+                        advancing_prefix = f"'\\n' * int(self.data.{py_var}.value) + "
+                    else:
+                        advancing_suffix = f" + '\\n' * int(self.data.{py_var}.value)"
+            break  # Only process the first AFTER or BEFORE found
+
+    write_data = f"str({from_expr})" if from_expr else f"str(self.data.{py_record}.value)"
+    return [f"self.{file_hint}.write({advancing_prefix}{write_data}{advancing_suffix})"]
 
 
 def translate_close(ops: list[str]) -> list[str]:
