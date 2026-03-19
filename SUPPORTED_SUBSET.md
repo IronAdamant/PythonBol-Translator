@@ -101,9 +101,14 @@ The parser auto-detects format by examining the first 80 lines. Ambiguous files 
 | `GENERATE detail` | SUM accumulation + formatted detail line | REPORT WRITER verb |
 | `TERMINATE report` | Control footings + report footing + write | REPORT WRITER verb |
 | `STRING` | `target.set(src1 + src2)` | DELIMITED BY SIZE and literal delimiters |
+| `STRING WITH POINTER` | Pointer-tracking concatenation | Tracks position, updates pointer, overflow detection |
 | `UNSTRING` | `str.split()` into targets | Single and multiple delimiters |
+| `UNSTRING WITH POINTER` | Source sliced from pointer | Pointer position tracking and update |
+| `UNSTRING TALLYING` | Counter set to field count | Number of populated target fields |
 | `INSPECT TALLYING` | `str.count()` | ALL, LEADING, CHARACTERS |
 | `INSPECT REPLACING` | `str.replace()` | ALL, LEADING, FIRST |
+| `INSPECT CONVERTING` | `str.maketrans/translate` | Character-level conversion |
+| `INSPECT BEFORE/AFTER` | Bounded region operations | BEFORE/AFTER INITIAL with all INSPECT forms |
 | `SET flag TO TRUE` | `self.data.parent.set(val)` | 88-level condition lookup |
 | `SET idx UP/DOWN BY` | `self.data.idx.add/subtract(n)` | Index increment/decrement |
 | `ACCEPT var` | `input()` | Plain user input |
@@ -122,7 +127,7 @@ The parser auto-detects format by examining the first 80 lines. Ambiguous files 
 | `EXIT PROGRAM/PERFORM` | `return` / `break` | |
 | `GO TO` | `raise NotImplementedError` | Requires manual restructuring |
 
-### COMPUTE FUNCTION Intrinsics (30+)
+### COMPUTE FUNCTION Intrinsics (41)
 
 | COBOL Function | Python | Notes |
 |---------------|--------|-------|
@@ -146,6 +151,19 @@ The parser auto-detects format by examining the first 80 lines. Ambiguous files 
 | `FUNCTION ANNUITY(r, n)` | Annuity formula | |
 | `FUNCTION MEAN/MEDIAN(...)` | `statistics.mean/median(...)` | Variadic |
 | `FUNCTION ORD/CHAR(x)` | `ord(x)` / `chr(x)` | |
+| `FUNCTION SIGN(x)` | `1 if x > 0 else (-1 if x < 0 else 0)` | |
+| `FUNCTION INTEGER-OF-DATE(d)` | Days since epoch | YYYYMMDD input |
+| `FUNCTION DATE-OF-INTEGER(n)` | `YYYYMMDD` from days | Inverse of above |
+| `FUNCTION INTEGER-OF-DAY(d)` | Days since epoch | YYYYDDD input |
+| `FUNCTION DAY-OF-INTEGER(n)` | `YYYYDDD` from days | Inverse of above |
+| `FUNCTION YEAR-TO-YYYY(yy)` | 4-digit year | Windowed (50 cutoff) |
+| `FUNCTION DATE-TO-YYYYMMDD(d)` | 8-digit date | Windowed (50 cutoff) |
+| `FUNCTION DAY-TO-YYYYDDD(d)` | 7-digit date | Windowed (50 cutoff) |
+| `FUNCTION TEST-NUMVAL(x)` | `0` if numeric, `1` otherwise | |
+| `FUNCTION TEST-NUMVAL-C(x)` | `0` if currency-numeric | Currency stripping |
+| `FUNCTION PI` | `3.14159...` | No-arg constant |
+| `FUNCTION E` | `2.71828...` | No-arg constant |
+| `FUNCTION CONCATENATE(...)` | `''.join(...)` | Variadic |
 
 Expression arguments are fully supported, including nested `FUNCTION` calls, comma-separated args, and arithmetic inside function arguments.
 

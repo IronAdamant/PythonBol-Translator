@@ -95,13 +95,13 @@ The prompt brief is 3-4x more token-efficient than raw COBOL source, containing 
 | **Data attributes** | EXTERNAL, GLOBAL, JUSTIFIED RIGHT, BLANK WHEN ZERO, OCCURS DEPENDING ON, SYNCHRONIZED |
 | **Arithmetic** | ADD, SUBTRACT, MULTIPLY, DIVIDE (INTO/BY/GIVING/REMAINDER), COMPUTE (complex expressions), ON SIZE ERROR, ROUNDED (ROUND_HALF_UP) |
 | **Control flow** | IF/ELSE (multi-line + inline), EVALUATE TRUE/variable/ALSO with WHEN THRU, PERFORM (simple/UNTIL/TIMES/VARYING/THRU), nested loops, GO TO (method call + return), GO TO DEPENDING ON, EXIT PERFORM |
-| **String ops** | STRING (DELIMITED BY), UNSTRING (multi-delimiter), INSPECT (TALLYING/REPLACING/CONVERTING), MOVE (simple/ALL/CORRESPONDING/FUNCTION/group-level) |
+| **String ops** | STRING (DELIMITED BY, WITH POINTER), UNSTRING (multi-delimiter, WITH POINTER, TALLYING), INSPECT (TALLYING/REPLACING/CONVERTING with BEFORE/AFTER INITIAL), MOVE (simple/ALL/CORRESPONDING/FUNCTION/group-level) |
 | **Table ops** | SEARCH/SEARCH ALL, SORT/MERGE (USING/GIVING, INPUT/OUTPUT PROCEDURE), RELEASE, RETURN |
 | **File I/O** | OPEN (INPUT/OUTPUT/EXTEND/I-O), CLOSE, READ (INTO + AT END/NOT AT END body), WRITE (FROM + AFTER/BEFORE ADVANCING), REWRITE, DELETE, START (KEY IS) |
 | **FILE STATUS** | Tracked on FileAdapter ("00"/"10"/"35"/"30"), auto-updated after every I/O operation |
 | **Report Writer** | RD, TYPE IS, LINE/COLUMN, SOURCE, SUM, GROUP INDICATE, INITIATE, GENERATE, TERMINATE |
 | **Screen Section** | LINE, COL, PIC, VALUE, USING, FROM, TO, BLANK SCREEN, display attributes, ACCEPT/DISPLAY with screen names |
-| **Intrinsics** | 30+ FUNCTION intrinsics: LENGTH, NUMVAL, UPPER-CASE, LOWER-CASE, REVERSE, TRIM, MAX, MIN, MOD, ABS, SQRT, LOG, SIN, COS, CURRENT-DATE, RANDOM, MEAN, MEDIAN, FACTORIAL, and more |
+| **Intrinsics** | 41 FUNCTION intrinsics: LENGTH, NUMVAL, UPPER-CASE, LOWER-CASE, REVERSE, TRIM, MAX, MIN, MOD, ABS, SQRT, LOG, SIN, COS, CURRENT-DATE, RANDOM, MEAN, MEDIAN, FACTORIAL, SIGN, INTEGER-OF-DATE, DATE-OF-INTEGER, CONCATENATE, TEST-NUMVAL, PI, E, and more |
 | **Preprocessing** | COPY resolution with recursive expansion, REPLACING (pseudo-text + LEADING/TRAILING + non-pseudo-text), cycle detection, case-insensitive copybook lookup |
 | **EXEC SQL** | DB-API 2.0 code generation: DECLARE/OPEN/FETCH/CLOSE cursors, SELECT INTO, INSERT/UPDATE/DELETE, COMMIT/ROLLBACK, SQLCA/SQLCODE, host variable parameterization |
 | **EXEC CICS** | Enhanced hints: MAP, TRANSID, COMMAREA, RESP/RESP2 extraction |
@@ -137,13 +137,13 @@ cobol2py test program.cob
 #   Result: 6/6 checks passed
 ```
 
-**Corpus validation: 4,705/4,705 files produce valid Python (100.00%)** across 42 test projects including NIST conformance suites, IBM CICS banking, enterprise DB2, French government tax code, GnuCOBOL test suite, AS/400 ILE, and a Minecraft server written in COBOL.
+**Corpus validation: 5,282/5,282 files produce valid Python (100.00%)** across 44 test projects including NIST CCVS85 conformance suite (459 files), IBM CICS banking, enterprise DB2, French government tax code, GnuCOBOL test suite, AS/400 ILE, COBOL-in-24-Hours (118 files), and a Minecraft server written in COBOL.
 
 ## Test suite
 
 ```bash
 pytest tests/ -v
-# 889 tests covering parser, analyzer, mapper, conditions, blocks, SEARCH,
+# 1,004 tests covering parser, analyzer, mapper, conditions, blocks, SEARCH,
 # SORT/MERGE, FUNCTION intrinsics, REPORT WRITER, SCREEN SECTION, COPY expansion,
 # nested programs, group MOVE, SQL translation, adapters, CLI, batch, validation,
 # and 60+ behavioral end-to-end tests
@@ -164,7 +164,7 @@ src/cobol_safe_translator/
   mapper_verbs.py          — Verb translation mixin (MOVE, GO TO, PERFORM, arithmetic)
   condition_translator.py  — Two-pass COBOL condition → Python expression
   statement_translators.py — Arithmetic, PERFORM, READ, WRITE, I/O verbs
-  function_translators.py  — 30+ FUNCTION intrinsic mappings
+  function_translators.py  — 41 FUNCTION intrinsic mappings
   sql_translator.py        — EXEC SQL → DB-API 2.0 Python code generator
   sort_translators.py      — SORT, MERGE, RELEASE, RETURN
   report_parser.py         — REPORT SECTION parser
