@@ -148,6 +148,8 @@ def translate_add(
     if not ops:
         return ["# ADD: no operands"]
     upper_ops = _upper_ops(ops)
+    has_rounded = "ROUNDED" in upper_ops
+    rounded_arg = ", rounded=True" if has_rounded else ""
     if "GIVING" in upper_ops:
         giving_idx = upper_ops.index("GIVING")
         giving_targets = ops[giving_idx + 1:]
@@ -166,7 +168,7 @@ def translate_add(
         for t in giving_targets:
             if t.upper() in _ARITHMETIC_KEYWORDS:
                 break
-            results.append(f"{_resolve_target(t)}.set({sum_expr})")
+            results.append(f"{_resolve_target(t)}.set({sum_expr}{rounded_arg})")
         if not results:
             return [f"# ADD GIVING: no valid target found: {' '.join(ops)}"]
         return results
@@ -193,6 +195,8 @@ def translate_subtract(
     if not ops:
         return ["# SUBTRACT: no operands"]
     upper_ops = _upper_ops(ops)
+    has_rounded = "ROUNDED" in upper_ops
+    rounded_arg = ", rounded=True" if has_rounded else ""
     if "GIVING" in upper_ops:
         giving_idx = upper_ops.index("GIVING")
         giving_targets = ops[giving_idx + 1:]
@@ -213,7 +217,7 @@ def translate_subtract(
         for t in giving_targets:
             if t.upper() in _ARITHMETIC_KEYWORDS:
                 break
-            results.append(f"{_resolve_target(t)}.set({expr})")
+            results.append(f"{_resolve_target(t)}.set({expr}{rounded_arg})")
         if not results:
             return [f"# SUBTRACT GIVING: no valid target found: {' '.join(ops)}"]
         return results
@@ -238,6 +242,8 @@ def translate_multiply(
 ) -> list[str]:
     """Translate MULTIPLY verb."""
     upper_ops = _upper_ops(ops)
+    has_rounded = "ROUNDED" in upper_ops
+    rounded_arg = ", rounded=True" if has_rounded else ""
     if "BY" in upper_ops:
         by_idx = upper_ops.index("BY")
         if by_idx == 0:
@@ -250,7 +256,7 @@ def translate_multiply(
             for t in ops[giving_idx + 1:]:
                 if t.upper() in _ARITHMETIC_KEYWORDS:
                     break
-                results.append(f"{_resolve_target(t)}.set({source} * {multiplicand})")
+                results.append(f"{_resolve_target(t)}.set({source} * {multiplicand}{rounded_arg})")
             if not results:
                 return [f"# MULTIPLY GIVING: no valid target found: {' '.join(ops)}"]
             return results
@@ -267,6 +273,7 @@ def translate_multiply(
 
 def _divide_giving_results(
     ops: list[str], giving_idx: int, dividend: str, divisor: str,
+    rounded_arg: str = "",
 ) -> list[str]:
     """Parse GIVING targets and optional REMAINDER, returning translated lines."""
     giving_targets: list[str] = []
@@ -289,7 +296,7 @@ def _divide_giving_results(
         i += 1
     results = ["# TODO: verify divisor is non-zero before division (COBOL EC-SIZE-ZERO-DIVIDE)"]
     for t in giving_targets:
-        results.append(f"{_resolve_target(t)}.set({dividend} / {divisor})")
+        results.append(f"{_resolve_target(t)}.set({dividend} / {divisor}{rounded_arg})")
     if has_remainder and remainder_target:
         results.append(f"{_resolve_target(remainder_target)}.set(int({dividend}) % int({divisor}))")
     return results
@@ -301,6 +308,8 @@ def translate_divide(
 ) -> list[str]:
     """Translate DIVIDE verb."""
     upper_ops = _upper_ops(ops)
+    has_rounded = "ROUNDED" in upper_ops
+    rounded_arg = ", rounded=True" if has_rounded else ""
     if "INTO" in upper_ops:
         into_idx = upper_ops.index("INTO")
         if into_idx == 0:
@@ -309,7 +318,7 @@ def translate_divide(
         if "GIVING" in upper_ops:
             giving_idx = upper_ops.index("GIVING")
             dividend = resolve(ops[into_idx + 1]) if into_idx + 1 < len(ops) and into_idx + 1 < giving_idx else "0"
-            return _divide_giving_results(ops, giving_idx, dividend, divisor)
+            return _divide_giving_results(ops, giving_idx, dividend, divisor, rounded_arg)
         raw_targets = ops[into_idx + 1:]
         targets = [t for t in raw_targets if t.upper() not in _ARITHMETIC_KEYWORDS]
         if not targets:
@@ -326,7 +335,7 @@ def translate_divide(
         if "GIVING" in upper_ops:
             giving_idx = upper_ops.index("GIVING")
             divisor = resolve(ops[by_idx + 1]) if by_idx + 1 < len(ops) and by_idx + 1 < giving_idx else "1"
-            return _divide_giving_results(ops, giving_idx, dividend, divisor)
+            return _divide_giving_results(ops, giving_idx, dividend, divisor, rounded_arg)
         if by_idx + 1 >= len(ops):
             return [f"# DIVIDE BY: missing divisor: {' '.join(ops)}"]
         divisor = resolve(ops[by_idx + 1])
@@ -390,9 +399,11 @@ def translate_compute(
     """Translate COMPUTE verb."""
     if "=" in ops:
         # Pre-process: merge space-separated subscripts into identifiers
-        # e.g., TABLE ( 1 2 ) → TABLE(1 2)
+        # e.g., TABLE ( 1 2 ) -> TABLE(1 2)
         ops = _merge_spaced_subscripts(ops)
         eq_idx = ops.index("=")
+        has_rounded = any(t.upper() == "ROUNDED" for t in ops[:eq_idx])
+        rounded_arg = ", rounded=True" if has_rounded else ""
         targets = [t for t in ops[:eq_idx] if t.upper() != "ROUNDED"]
         expr_parts = ops[eq_idx + 1:]
 
@@ -483,7 +494,7 @@ def translate_compute(
         results = [f"# COMPUTE: {' '.join(ops)}"]
         for t in targets:
             results.append(
-                f"{_resolve_target(t)}.set({expr})  # TODO(high): verify expression translation"
+                f"{_resolve_target(t)}.set({expr}{rounded_arg})  # TODO(high): verify expression translation"
             )
         return results
     return [f"# COMPUTE: could not parse operands: {' '.join(ops)}"]
@@ -798,23 +809,210 @@ def translate_close(ops: list[str]) -> list[str]:
     return [f"self.{_to_python_name(op)}.close()" for op in ops if op.upper() not in _CLOSE_KEYWORDS]
 
 
+def _translate_read_body_verb(tokens: list[str]) -> list[str] | None:
+    """Translate a simple verb inside an AT END / NOT AT END clause.
+
+    Returns translated Python lines, or None if the verb is too complex
+    for inline translation.
+    """
+    if not tokens:
+        return None
+    verb = tokens[0].upper()
+    rest = tokens[1:]
+
+    if verb == "DISPLAY":
+        parts = [_resolve_operand(t) for t in rest]
+        if parts:
+            return [f"print({', '.join(parts)}, sep='')"]
+        return ["print()"]
+    if verb == "MOVE":
+        lines = translate_move(rest)
+        return lines if lines else None
+    if verb == "SET":
+        upper_rest = _upper_ops(rest)
+        if "TO" in upper_rest:
+            to_idx = upper_rest.index("TO")
+            targets = rest[:to_idx]
+            value = rest[to_idx + 1] if to_idx + 1 < len(rest) else None
+            if targets and value:
+                results: list[str] = []
+                for t in targets:
+                    results.append(f"{_resolve_target(t)}.set({_resolve_operand(value)})")
+                return results
+        return None
+    if verb == "STOP" and rest and rest[0].upper() == "RUN":
+        return ["return"]
+    if verb == "PERFORM":
+        if rest:
+            return [f"self.{_to_method_name(rest[0])}()"]
+        return None
+    return None
+
+
+def _split_at_end_body(tokens: list[str]) -> list[list[str]]:
+    """Split AT END body tokens into individual verb statements.
+
+    Recognizes verb boundaries by looking for known COBOL verbs.
+    Returns a list of token-lists, one per verb.
+    """
+    _BODY_VERBS = frozenset({
+        "DISPLAY", "MOVE", "SET", "STOP", "PERFORM", "ADD", "SUBTRACT",
+        "COMPUTE", "GO", "STRING", "UNSTRING", "CALL", "EVALUATE",
+        "IF", "CLOSE", "OPEN", "WRITE", "READ", "INITIALIZE",
+    })
+    stmts: list[list[str]] = []
+    current: list[str] = []
+    for tok in tokens:
+        if tok.upper() in _BODY_VERBS and current:
+            stmts.append(current)
+            current = [tok]
+        else:
+            current.append(tok)
+    if current:
+        stmts.append(current)
+    return stmts
+
+
 def translate_read(ops: list[str], raw: str) -> list[str]:
-    """Translate READ verb."""
-    if ops:
-        file_name = _to_python_name(ops[0])
-        upper_ops = _upper_ops(ops)
-        at_end_action = ""
-        if "AT" in upper_ops and "END" in upper_ops:
-            end_idx = upper_ops.index("END")
-            at_end_parts = ops[end_idx + 1:]
-            if at_end_parts:
-                at_end_action = f"  # AT END action: {' '.join(at_end_parts)}"
-        return [
-            f"_record = self.{file_name}.read()",
-            f"if _record is None:",
-            f"    pass  # TODO(high): AT END — implement EOF handling{at_end_action}",
-        ]
-    return [f"# READ: could not parse: {raw}"]
+    """Translate READ verb.
+
+    Handles:
+    - READ file-name
+    - READ file-name INTO data-name
+    - READ file-name KEY IS field-name
+    - READ file-name AT END body
+    - READ file-name NOT AT END body
+    - Combinations of the above
+    """
+    if not ops:
+        return [f"# READ: could not parse: {raw}"]
+
+    file_name = _to_python_name(ops[0])
+    upper_ops = _upper_ops(ops)
+
+    # -- Extract INTO target --
+    into_target: str | None = None
+    if "INTO" in upper_ops:
+        into_idx = upper_ops.index("INTO")
+        if into_idx + 1 < len(ops):
+            into_target = ops[into_idx + 1]
+
+    # -- Extract KEY IS field --
+    key_field: str | None = None
+    if "KEY" in upper_ops:
+        key_idx = upper_ops.index("KEY")
+        # KEY IS field-name  or  KEY field-name
+        offset = key_idx + 1
+        if offset < len(upper_ops) and upper_ops[offset] == "IS":
+            offset += 1
+        if offset < len(ops):
+            key_field = ops[offset]
+
+    # -- Locate AT END and NOT AT END boundaries --
+    at_end_tokens: list[str] = []
+    not_at_end_tokens: list[str] = []
+
+    # Find all positions where "AT" + "END" appear as consecutive tokens
+    # Also find "NOT" + "AT" + "END" sequences
+    not_at_end_start: int | None = None
+    at_end_start: int | None = None
+
+    i = 0
+    while i < len(upper_ops):
+        if (upper_ops[i] == "NOT"
+                and i + 2 < len(upper_ops)
+                and upper_ops[i + 1] == "AT"
+                and upper_ops[i + 2] == "END"):
+            not_at_end_start = i + 3
+            i += 3
+        elif (upper_ops[i] == "AT"
+                and i + 1 < len(upper_ops)
+                and upper_ops[i + 1] == "END"):
+            at_end_start = i + 2
+            i += 2
+        else:
+            i += 1
+
+    # Collect body tokens for each clause
+    if at_end_start is not None and not_at_end_start is not None:
+        if at_end_start < not_at_end_start:
+            # AT END ... NOT AT END ...
+            # AT END body is from at_end_start to (not_at_end_start - 3)
+            not_prefix = not_at_end_start - 3
+            at_end_tokens = ops[at_end_start:not_prefix]
+            not_at_end_tokens = ops[not_at_end_start:]
+        else:
+            # NOT AT END ... AT END ...
+            at_prefix = at_end_start - 2
+            not_at_end_tokens = ops[not_at_end_start:at_prefix]
+            at_end_tokens = ops[at_end_start:]
+    elif at_end_start is not None:
+        at_end_tokens = ops[at_end_start:]
+    elif not_at_end_start is not None:
+        not_at_end_tokens = ops[not_at_end_start:]
+
+    # Strip trailing END-READ from body tokens
+    for token_list in (at_end_tokens, not_at_end_tokens):
+        while token_list and token_list[-1].upper() == "END-READ":
+            token_list.pop()
+
+    # -- Build the read call --
+    key_comment = f"  # KEY IS {key_field}" if key_field else ""
+    lines: list[str] = [f"_record = self.{file_name}.read(){key_comment}"]
+
+    has_at_end = bool(at_end_tokens)
+    has_not_at_end = bool(not_at_end_tokens) or into_target is not None
+
+    if has_at_end or has_not_at_end:
+        # -- AT END branch (record is None) --
+        lines.append("if _record is None:")
+        if has_at_end:
+            at_end_stmts = _split_at_end_body(at_end_tokens)
+            at_end_lines: list[str] = []
+            for stmt_tokens in at_end_stmts:
+                translated = _translate_read_body_verb(stmt_tokens)
+                if translated is not None:
+                    at_end_lines.extend(translated)
+                else:
+                    at_end_lines.append(
+                        f"pass  # TODO(high): AT END body — {' '.join(stmt_tokens)}"
+                    )
+            for line in at_end_lines:
+                lines.append(f"    {line}")
+        else:
+            lines.append("    pass")
+
+        # -- NOT AT END branch (else) --
+        lines.append("else:")
+        not_at_end_lines: list[str] = []
+        if into_target is not None:
+            py_target = _to_python_name(into_target)
+            not_at_end_lines.append(f"self.data.{py_target}.set(_record)")
+        if not_at_end_tokens:
+            not_stmts = _split_at_end_body(not_at_end_tokens)
+            for stmt_tokens in not_stmts:
+                translated = _translate_read_body_verb(stmt_tokens)
+                if translated is not None:
+                    not_at_end_lines.extend(translated)
+                else:
+                    not_at_end_lines.append(
+                        f"pass  # TODO(high): NOT AT END body — {' '.join(stmt_tokens)}"
+                    )
+        if not_at_end_lines:
+            for line in not_at_end_lines:
+                lines.append(f"    {line}")
+        else:
+            lines.append("    pass")
+    else:
+        # No AT END clause — simple read with optional INTO
+        lines.append("if _record is None:")
+        lines.append("    pass  # end of file")
+        if into_target is not None:
+            py_target = _to_python_name(into_target)
+            lines.append("else:")
+            lines.append(f"    self.data.{py_target}.set(_record)")
+
+    return lines
 
 
 def translate_call(ops: list[str]) -> list[str]:
@@ -832,10 +1030,59 @@ def translate_call(ops: list[str]) -> list[str]:
 
 
 def translate_initialize(ops: list[str]) -> list[str]:
-    """Translate INITIALIZE verb."""
+    """Translate INITIALIZE verb, including REPLACING clause."""
+    if not ops:
+        return ["# INITIALIZE: no operands"]
+    upper_ops = _upper_ops(ops)
+
+    # Split targets from REPLACING clause
+    replacing_idx = None
+    if "REPLACING" in upper_ops:
+        replacing_idx = upper_ops.index("REPLACING")
+
+    targets = ops[:replacing_idx] if replacing_idx is not None else ops
     results: list[str] = []
-    for op in ops:
-        py_name = _to_python_name(op)
-        results.append(f"# INITIALIZE {op}")
-        results.append(f"# self.data.{py_name}.set(0)  # or '' for alphanumeric")
+
+    if replacing_idx is not None:
+        # Parse REPLACING clause: REPLACING NUMERIC BY value ALPHANUMERIC BY value ...
+        replacing_parts = ops[replacing_idx + 1:]
+        upper_replacing = _upper_ops(replacing_parts)
+        numeric_val = None
+        alpha_val = None
+        i = 0
+        while i < len(upper_replacing):
+            category = upper_replacing[i]
+            if i + 2 < len(upper_replacing) and upper_replacing[i + 1] == "BY":
+                val = replacing_parts[i + 2]
+                upper_val = val.upper()
+                if category == "NUMERIC":
+                    if upper_val in ("ZERO", "ZEROS", "ZEROES"):
+                        numeric_val = "0"
+                    else:
+                        numeric_val = val
+                elif category in ("ALPHANUMERIC", "ALPHABETIC"):
+                    if upper_val in ("SPACE", "SPACES"):
+                        alpha_val = "' '"
+                    elif val.startswith('"') or val.startswith("'"):
+                        alpha_val = val
+                    else:
+                        alpha_val = f"'{val}'"
+                i += 3
+            else:
+                i += 1
+
+        for op in targets:
+            py_name = _to_python_name(op)
+            results.append(f"# INITIALIZE {op} REPLACING ...")
+            if numeric_val is not None:
+                results.append(f"self.data.{py_name}.set({numeric_val})  # numeric fields")
+            if alpha_val is not None:
+                results.append(f"self.data.{py_name}.set({alpha_val})  # alphanumeric fields")
+            if numeric_val is None and alpha_val is None:
+                results.append(f"# self.data.{py_name}.set(0)  # or '' for alphanumeric")
+    else:
+        for op in targets:
+            py_name = _to_python_name(op)
+            results.append(f"# INITIALIZE {op}")
+            results.append(f"# self.data.{py_name}.set(0)  # or '' for alphanumeric")
     return results

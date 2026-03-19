@@ -356,7 +356,7 @@ class TestExecHints:
     def test_sql_select_hint(self):
         raw = "       EXEC SQL SELECT * FROM CUSTOMER END-EXEC."
         result = strip_exec_blocks(raw)
-        assert "Hint:" in result
+        assert "EXEC SQL hint:" in result
         assert "cursor.execute" in result
 
     def test_cics_return_hint(self):

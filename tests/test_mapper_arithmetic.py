@@ -247,14 +247,28 @@ class TestDivideMultipleTargets:
 
 
 class TestRoundedFiltering:
-    def test_add_giving_rounded_filtered(self):
+    def test_add_giving_rounded_passes_through(self):
         src = make_cobol(["ADD WS-A TO WS-B GIVING WS-C ROUNDED."])
         program = parse_cobol(src)
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
         assert "ws_c" in source
-        assert "rounded" not in source.lower().split("# ")[0]  # not in active code
+        # ROUNDED keyword is not kept as a data reference but passed as kwarg
+        assert "self.data.rounded" not in source
+        set_lines = [l for l in source.split("\n") if "ws_c.set(" in l and "field(" not in l]
+        assert len(set_lines) >= 1
+        assert "rounded=True" in set_lines[0]
+
+    def test_add_giving_without_rounded_omits_kwarg(self):
+        src = make_cobol(["ADD WS-A TO WS-B GIVING WS-C."])
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        set_lines = [l for l in source.split("\n") if "ws_c.set(" in l and "field(" not in l]
+        assert len(set_lines) >= 1
+        assert "rounded=True" not in set_lines[0]
 
 
 class TestOnSizeErrorFiltering:

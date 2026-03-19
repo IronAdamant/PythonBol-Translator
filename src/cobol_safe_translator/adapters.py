@@ -8,7 +8,7 @@ and fixed-point arithmetic.
 from __future__ import annotations
 
 import warnings
-from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation
+from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal, InvalidOperation
 from functools import total_ordering
 
 
@@ -36,8 +36,14 @@ class CobolDecimal:
         self._max_digits = integer_digits + decimal_digits
         self._value = self._coerce(initial)
 
-    def _coerce(self, value: int | float | str | Decimal) -> Decimal:
-        """Convert and truncate a value to fit the PIC specification."""
+    def _coerce(self, value: int | float | str | Decimal, rounded: bool = False) -> Decimal:
+        """Convert and truncate a value to fit the PIC specification.
+
+        Args:
+            value: The value to coerce.
+            rounded: If True, use ROUND_HALF_UP (COBOL ROUNDED) instead of
+                truncation toward zero.
+        """
         try:
             d = Decimal(str(value))
             if not d.is_finite():
@@ -58,14 +64,18 @@ class CobolDecimal:
             modulus = Decimal(10) ** self.integer_digits
             d = sign * (abs(d) % modulus)
 
-        # Quantize to decimal_digits — truncate toward zero (COBOL TRUNCATE)
+        # Quantize to decimal_digits
         if self.decimal_digits > 0:
             quant = Decimal(10) ** -self.decimal_digits
         else:
             quant = Decimal(1)
-        # ROUND_DOWN rounds toward zero in Python >=3.3 but to be explicit:
-        # positive -> ROUND_FLOOR, negative -> ROUND_CEILING (both truncate toward zero)
-        rounding = ROUND_FLOOR if d >= 0 else ROUND_CEILING
+        if rounded:
+            # COBOL ROUNDED: round half up (away from zero for .5)
+            rounding = ROUND_HALF_UP
+        else:
+            # Default COBOL TRUNCATE: truncate toward zero
+            # positive -> ROUND_FLOOR, negative -> ROUND_CEILING
+            rounding = ROUND_FLOOR if d >= 0 else ROUND_CEILING
         d = d.quantize(quant, rounding=rounding)
         if d == 0:
             d = d.copy_abs()  # prevent -0 from overflow at exact modulus boundary
@@ -76,9 +86,14 @@ class CobolDecimal:
     def value(self) -> Decimal:
         return self._value
 
-    def set(self, value: int | float | str | Decimal) -> None:
-        """MOVE equivalent — set the value with COBOL truncation rules."""
-        self._value = self._coerce(value)
+    def set(self, value: int | float | str | Decimal, rounded: bool = False) -> None:
+        """MOVE equivalent — set the value with COBOL truncation rules.
+
+        Args:
+            value: The value to store.
+            rounded: If True, use ROUND_HALF_UP instead of truncation.
+        """
+        self._value = self._coerce(value, rounded=rounded)
 
     def _to_decimal(self, other: int | float | str | Decimal | CobolDecimal) -> Decimal | None:
         """Convert operand to Decimal, returning None on invalid input."""
@@ -230,42 +245,68 @@ class FileAdapter:
         self._file = None
         self._eof = False
         self._mode: str | None = None
+        self._status: str = "00"
 
     @property
     def eof(self) -> bool:
         return self._eof
 
+    @property
+    def status(self) -> str:
+        """COBOL FILE STATUS code: "00"=success, "10"=EOF, "35"=not found, "30"=I/O error."""
+        return self._status
+
     def open_input(self) -> None:
         """OPEN INPUT equivalent — sequential read."""
         if self._file is not None:
             self.close()
-        self._file = open(self.path, "r", encoding=self.encoding)
-        self._eof = False
-        self._mode = "INPUT"
+        try:
+            self._file = open(self.path, "r", encoding=self.encoding)
+            self._eof = False
+            self._mode = "INPUT"
+            self._status = "00"
+        except FileNotFoundError:
+            self._status = "35"
+        except OSError:
+            self._status = "30"
 
     def open_output(self) -> None:
         """OPEN OUTPUT equivalent — create/truncate for writing."""
         if self._file is not None:
             self.close()
-        self._file = open(self.path, "w", encoding=self.encoding)
-        self._eof = False
-        self._mode = "OUTPUT"
+        try:
+            self._file = open(self.path, "w", encoding=self.encoding)
+            self._eof = False
+            self._mode = "OUTPUT"
+            self._status = "00"
+        except OSError:
+            self._status = "30"
 
     def open_extend(self) -> None:
         """OPEN EXTEND equivalent — append to existing file."""
         if self._file is not None:
             self.close()
-        self._file = open(self.path, "a", encoding=self.encoding)
-        self._eof = False
-        self._mode = "EXTEND"
+        try:
+            self._file = open(self.path, "a", encoding=self.encoding)
+            self._eof = False
+            self._mode = "EXTEND"
+            self._status = "00"
+        except OSError:
+            self._status = "30"
 
     def open_io(self) -> None:
         """OPEN I-O equivalent — read and write."""
         if self._file is not None:
             self.close()
-        self._file = open(self.path, "r+", encoding=self.encoding)
-        self._eof = False
-        self._mode = "I-O"
+        try:
+            self._file = open(self.path, "r+", encoding=self.encoding)
+            self._eof = False
+            self._mode = "I-O"
+            self._status = "00"
+        except FileNotFoundError:
+            self._status = "35"
+        except OSError:
+            self._status = "30"
 
     def read(self) -> str | None:
         """READ equivalent. Returns next line or None at EOF."""
@@ -274,7 +315,9 @@ class FileAdapter:
         line = self._file.readline()
         if not line:
             self._eof = True
+            self._status = "10"
             return None
+        self._status = "00"
         return line.rstrip("\r\n")
 
     def write(self, record: str) -> None:
@@ -284,6 +327,7 @@ class FileAdapter:
         if self._mode == "INPUT":
             raise RuntimeError("Cannot write to file opened for INPUT")
         self._file.write(record + "\n")
+        self._status = "00"
 
     def close(self) -> None:
         """CLOSE equivalent."""
@@ -292,6 +336,7 @@ class FileAdapter:
             self._file = None
             self._mode = None
             self._eof = False
+        self._status = "00"
 
     def __enter__(self) -> FileAdapter:
         self.open_input()

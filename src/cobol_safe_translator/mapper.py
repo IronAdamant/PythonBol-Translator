@@ -50,7 +50,7 @@ _ORPHAN_SCOPE_VERBS = frozenset({
     "END-IF", "END-EVALUATE", "END-PERFORM", "END-READ",
     "END-WRITE", "END-CALL", "END-STRING",
 })
-_TODO_VERBS = frozenset({"DELETE", "START"})
+_COMM_VERBS = frozenset({"ENABLE", "DISABLE", "SEND", "RECEIVE", "PURGE"})
 
 
 class PythonMapper:
@@ -67,14 +67,24 @@ class PythonMapper:
         }
         self._condition_lookup: dict[str, tuple[str, str]] = {}
         self._build_condition_lookup(software_map.program.all_data_items)
+        # Map python file names to their FILE STATUS variable python names
+        self._file_status_lookup: dict[str, str] = {}
+        for fc in self.program.file_controls:
+            if fc.file_status:
+                py_file = _to_python_name(fc.select_name)
+                py_status = _to_python_name(fc.file_status)
+                self._file_status_lookup[py_file] = py_status
+        # Map record python names to their file adapter python names (for WRITE)
+        self._record_to_file: dict[str, str] = {}
+        self._build_record_to_file_map()
         self._verb_handlers = {
             "DISPLAY": lambda s: st.translate_display(s, self._resolve_operand),
             "MOVE": lambda s: self._translate_move(s.operands),
             "PERFORM": lambda s: self._translate_perform(s.operands, s.raw_text),
-            "OPEN": lambda s: st.translate_open(s.operands),
-            "CLOSE": lambda s: st.translate_close(s.operands),
-            "READ": lambda s: st.translate_read(s.operands, s.raw_text),
-            "WRITE": lambda s: st.translate_write(s.operands),
+            "OPEN": lambda s: self._wrap_file_status(st.translate_open(s.operands), s.operands, "OPEN"),
+            "CLOSE": lambda s: self._wrap_file_status(st.translate_close(s.operands), s.operands, "CLOSE"),
+            "READ": lambda s: self._wrap_file_status(st.translate_read(s.operands, s.raw_text), s.operands, "READ"),
+            "WRITE": lambda s: self._wrap_file_status(st.translate_write(s.operands), s.operands, "WRITE"),
             "CALL": lambda s: st.translate_call(s.operands),
             "STOP": lambda _: ["return"],
             "GOBACK": lambda _: ["return"],
@@ -95,6 +105,9 @@ class PythonMapper:
             "GENERATE": lambda s: rpt_t.translate_generate(s.operands, self.program.report_section),
             "TERMINATE": lambda s: rpt_t.translate_terminate(s.operands, self.program.report_section),
             "USE": lambda s: [f"# USE declarative (handled via DECLARATIVES section): {s.raw_text}"],
+            "CANCEL": lambda s: self._translate_cancel(s.operands),
+            "DELETE": lambda s: self._translate_delete(s.operands),
+            "START": lambda s: self._translate_start(s.operands, s.raw_text),
         }
 
     def _build_condition_lookup(self, items: list[DataItem]) -> None:
@@ -113,6 +126,69 @@ class PythonMapper:
                     self._condition_lookup[cond.name.upper()] = (py_name, f"({lo_val}, {hi_val})")
             for child in item.children:
                 self._build_condition_lookup([child])
+
+    def _build_record_to_file_map(self) -> None:
+        """Build mapping from FD record names to SELECT file names.
+
+        Scans raw lines to find FD/SD declarations and their 01-level records.
+        This lets WRITE (which uses record names) find the correct file adapter.
+        """
+        import re
+        fd_re = re.compile(r"^\s*(?:FD|SD)\s+([\w-]+)", re.IGNORECASE)
+        level_re = re.compile(r"^\s*01\s+([\w-]+)", re.IGNORECASE)
+        current_fd: str | None = None
+        for line in self.program.raw_lines:
+            fd_m = fd_re.match(line)
+            if fd_m:
+                current_fd = fd_m.group(1).upper()
+                continue
+            if current_fd:
+                lev_m = level_re.match(line)
+                if lev_m:
+                    rec_name = lev_m.group(1).upper()
+                    py_rec = _to_python_name(rec_name)
+                    py_file = _to_python_name(current_fd)
+                    self._record_to_file[py_rec] = py_file
+                upper = line.strip().upper()
+                # End of FD scope when another section or FD starts
+                if any(kw in upper for kw in (
+                    "WORKING-STORAGE SECTION", "LINKAGE SECTION",
+                    "LOCAL-STORAGE SECTION", "PROCEDURE DIVISION",
+                    "REPORT SECTION",
+                )):
+                    current_fd = None
+
+    def _extract_file_names(self, ops: list[str], verb: str) -> list[str]:
+        """Extract python file adapter names from I/O verb operands."""
+        if verb == "OPEN" and len(ops) >= 2:
+            return [_to_python_name(fn) for fn in ops[1:]]
+        if verb == "CLOSE":
+            _close_kw = frozenset({"WITH", "LOCK", "NO", "REWIND"})
+            return [_to_python_name(op) for op in ops if op.upper() not in _close_kw]
+        if verb == "READ" and ops:
+            return [_to_python_name(ops[0])]
+        if verb == "WRITE" and ops:
+            py_record = _to_python_name(ops[0])
+            # Use record-to-file map if available, fall back to heuristic
+            if py_record in self._record_to_file:
+                return [self._record_to_file[py_record]]
+            from .utils import _file_hint_from_record
+            return [_file_hint_from_record(py_record)]
+        return []
+
+    def _wrap_file_status(self, lines: list[str], ops: list[str], verb: str) -> list[str]:
+        """Append FILE STATUS update lines after I/O operations when applicable."""
+        if not self._file_status_lookup:
+            return lines
+        file_names = self._extract_file_names(ops, verb)
+        status_lines: list[str] = []
+        for fn in file_names:
+            if fn in self._file_status_lookup:
+                status_var = self._file_status_lookup[fn]
+                status_lines.append(
+                    f"self.data.{status_var}.set(self.{fn}.status)"
+                )
+        return lines + status_lines
 
     def generate(self) -> str:
         """Generate the complete Python module source."""
@@ -236,6 +312,18 @@ class PythonMapper:
                 f"{flag.reason} — {flag.data_name} matches pattern '{flag.pattern_matched}'"
             )
 
+        # Data item attribute annotations
+        if item.is_external:
+            lines.append(f"{prefix}# EXTERNAL — shared across programs")
+        if item.is_global:
+            lines.append(f"{prefix}# GLOBAL — visible to nested programs")
+        if item.justified_right:
+            lines.append(f"{prefix}# JUSTIFIED RIGHT — value right-justified on MOVE")
+        if item.blank_when_zero:
+            lines.append(f"{prefix}# BLANK WHEN ZERO — display as spaces when value is zero")
+        if item.occurs_depending:
+            lines.append(f"{prefix}# OCCURS DEPENDING ON {item.occurs_depending} — dynamic array sizing")
+
         if item.children:
             # Group item — add a comment
             lines.append(f"{prefix}# Group: {item.name} (level {item.level:02d})")
@@ -244,15 +332,27 @@ class PythonMapper:
             for child in item.children:
                 lines.extend(self._data_item_fields(child, indent, occurs_chain))
         elif item.pic:
-            if item.pic.category in (PicCategory.NUMERIC, PicCategory.EDITED):
+            usage_upper = (item.usage or "").upper()
+
+            # COMP-1/COMP-2 -> float (single/double precision floating-point)
+            if usage_upper in ("COMP-1", "COMP-2", "COMPUTATIONAL-1", "COMPUTATIONAL-2"):
+                inner = "0.0"
+                type_name = "float"
+            # COMP-5 -> native binary int (no PIC-based truncation)
+            elif usage_upper in ("COMP-5", "COMPUTATIONAL-5"):
+                inner = "0"
+                type_name = "int"
+            elif item.pic.category in (PicCategory.NUMERIC, PicCategory.EDITED):
                 dec = item.pic.decimals
                 int_digits = item.pic.size - dec
                 signed = "True" if item.pic.signed else "False"
                 init = resolve_figurative(item.value, numeric=True) if item.value else "0"
                 inner = f"CobolDecimal({int_digits}, {dec}, {signed}, {init!r})"
+                type_name = "CobolDecimal"
             else:
                 init = resolve_figurative(item.value, numeric=False) if item.value else ""
                 inner = f"CobolString({item.pic.size}, {init!r})"
+                type_name = "CobolString"
 
             if occurs_chain:
                 # Wrap in nested list comprehensions (innermost OCCURS first)
@@ -263,10 +363,23 @@ class PythonMapper:
                     f"{prefix}{py_name}: list = field(default_factory=lambda: {expr})"
                 )
             else:
-                type_name = "CobolDecimal" if item.pic.category in (PicCategory.NUMERIC, PicCategory.EDITED) else "CobolString"
+                if type_name in ("float", "int"):
+                    lines.append(f"{prefix}{py_name}: {type_name} = {inner}")
+                else:
+                    lines.append(
+                        f"{prefix}{py_name}: {type_name} = field(default_factory=lambda: {inner})"
+                    )
+        elif item.usage and item.usage.upper() == "INDEX":
+            # INDEX usage -- 1-based index value (no PIC needed)
+            if occurs_chain:
+                expr = "1"
+                for n in reversed(occurs_chain):
+                    expr = f"[{expr} for _ in range({n})]"
                 lines.append(
-                    f"{prefix}{py_name}: {type_name} = field(default_factory=lambda: {inner})"
+                    f"{prefix}{py_name}: list = field(default_factory=lambda: {expr})"
                 )
+            else:
+                lines.append(f"{prefix}{py_name}: int = 1")
         else:
             # No PIC — group-level or filler
             lines.append(f"{prefix}# {item.name}: no PIC clause (group level)")
@@ -289,6 +402,12 @@ class PythonMapper:
             py_name = _to_python_name(fc.select_name)
             safe_path = fc.assign_to.replace("\\", "\\\\")
             lines.append(f'        self.{py_name} = FileAdapter("{safe_path}")')
+            if fc.file_status:
+                py_status = _to_python_name(fc.file_status)
+                lines.append(
+                    f'        # FILE STATUS linked: self.data.{py_status}'
+                    f' updated from self.{py_name}.status after each I/O'
+                )
 
         # Register USE declarative handlers
         for decl in self.program.declaratives:
@@ -482,9 +601,9 @@ class PythonMapper:
         if verb == "WHEN":
             return [f"# WHEN (orphaned — normally consumed by block translator): {stmt.raw_text}"]
 
-        # Stub verbs and scope terminators
-        if verb in _TODO_VERBS:
-            return [f"# TODO(high): {verb} requires manual translation", f"# {stmt.raw_text}"]
+        # Communication verbs (legacy)
+        if verb in _COMM_VERBS:
+            return [f"# {verb} — legacy communication verb (map to modern messaging)"]
         if verb in ("NOT", "AT"):
             return [f"# {stmt.raw_text}"]
         if verb == "END":
@@ -495,6 +614,12 @@ class PythonMapper:
         if verb == "ENTRY":
             entry_name = stmt.operands[0] if stmt.operands else "UNKNOWN"
             return [f"# ENTRY {entry_name} — alternate entry point (use as separate function if needed)"]
+        # JSON GENERATE/PARSE — Enterprise COBOL v6 extension
+        if verb == "JSON":
+            return self._translate_json(stmt.operands, stmt.raw_text)
+        # XML GENERATE/PARSE — Enterprise COBOL v4+ extension
+        if verb == "XML":
+            return self._translate_xml(stmt.operands, stmt.raw_text)
         # MicroFocus directives ($REGION, $END-REGION, etc.)
         if verb.startswith("$"):
             return []
@@ -551,6 +676,9 @@ class PythonMapper:
 
     def _translate_arithmetic(self, verb: str, ops: list[str]) -> list[str]:
         """Route arithmetic verb and wrap with ON SIZE ERROR if present."""
+        # ADD/SUBTRACT CORRESPONDING
+        if verb in ("ADD", "SUBTRACT") and ops and ops[0].upper() in ("CORRESPONDING", "CORR"):
+            return self._translate_arith_corresponding(verb, ops)
         # Strip ON SIZE ERROR ... from operands for the core translator
         upper_ops = _upper_ops(ops)
         has_size_error = False
@@ -580,6 +708,35 @@ class PythonMapper:
         if has_size_error:
             return wrap_on_size_error(result, ops)
         return result
+
+    def _translate_arith_corresponding(self, verb: str, ops: list[str]) -> list[str]:
+        """Translate ADD/SUBTRACT CORRESPONDING source TO/FROM target."""
+        upper_ops = _upper_ops(ops)
+        to_kw = "TO" if verb == "ADD" else "FROM"
+        if to_kw not in upper_ops:
+            return [f"# {verb} CORRESPONDING: missing {to_kw}: {' '.join(ops)}"]
+        kw_idx = upper_ops.index(to_kw)
+        src_name = ops[1] if len(ops) > 1 else "SOURCE"
+        tgt_name = ops[kw_idx + 1] if kw_idx + 1 < len(ops) else "TARGET"
+        src_items = self._find_group_children(src_name.upper())
+        tgt_items = self._find_group_children(tgt_name.upper())
+        if not src_items or not tgt_items:
+            return [
+                f"# {verb} CORRESPONDING {src_name} {to_kw} {tgt_name}",
+                f"# TODO(high): group items not found — manual field matching required",
+            ]
+        common = set(src_items) & set(tgt_items)
+        if not common:
+            return [f"# {verb} CORRESPONDING: no common field names between {src_name} and {tgt_name}"]
+        method = "add" if verb == "ADD" else "subtract"
+        results = [
+            f"# {verb} CORRESPONDING {src_name} {to_kw} {tgt_name}",
+            f"# TODO(high): flat data model cannot distinguish group-qualified fields — verify operations",
+        ]
+        for name in sorted(common):
+            py = _to_python_name(name)
+            results.append(f"self.data.{py}.{method}(self.data.{py}.value)")
+        return results
 
     def _get_paragraph_range(self, start: str, end: str) -> list[str]:
         """Return paragraph names from start to end (inclusive), preserving order."""
@@ -715,6 +872,111 @@ class PythonMapper:
         Delegates to condition_translator module, passing the 88-level lookup.
         """
         return _translate_condition_impl(cond, self._condition_lookup)
+
+    def _translate_cancel(self, ops: list[str]) -> list[str]:
+        """Translate CANCEL verb."""
+        program = ops[0].strip('"').strip("'") if ops else "UNKNOWN"
+        return [f"# CANCEL {program} — release subprogram resources (no-op in Python; garbage collected)"]
+
+    def _translate_delete(self, ops: list[str]) -> list[str]:
+        """Translate DELETE verb."""
+        if not ops:
+            return ["# DELETE: no file specified"]
+        file_name = _to_python_name(ops[0])
+        return [f"self.{file_name}.delete()  # TODO(high): implement DELETE for indexed/relative file"]
+
+    def _translate_start(self, ops: list[str], raw: str) -> list[str]:
+        """Translate START verb."""
+        if not ops:
+            return ["# START: no file specified"]
+        file_name = ops[0]
+        upper_ops = _upper_ops(ops)
+        comparison = "="
+        field = ""
+        if "KEY" in upper_ops:
+            key_idx = upper_ops.index("KEY")
+            next_idx = key_idx + 1
+            if next_idx < len(upper_ops) and upper_ops[next_idx] == "IS":
+                next_idx += 1
+            if next_idx < len(upper_ops):
+                comp = upper_ops[next_idx]
+                if comp in ("EQUAL", "=", "EQUALS"):
+                    comparison = "="
+                    next_idx += 1
+                elif comp in ("GREATER", ">"):
+                    comparison = ">"
+                    next_idx += 1
+                elif comp == "NOT" and next_idx + 1 < len(upper_ops) and upper_ops[next_idx + 1] in ("LESS", "<"):
+                    comparison = ">="
+                    next_idx += 2
+                elif comp in (">=",):
+                    comparison = ">="
+                    next_idx += 1
+                if next_idx < len(upper_ops) and upper_ops[next_idx] == "THAN":
+                    next_idx += 1
+            if next_idx < len(ops):
+                field = ops[next_idx]
+        return [f"# TODO(high): START {file_name} KEY IS {comparison} {field} — position file pointer"]
+
+    def _translate_json(self, ops: list[str], raw: str) -> list[str]:
+        """Translate JSON GENERATE/PARSE verb."""
+        if not ops:
+            return [
+                "import json",
+                "# TODO(high): JSON GENERATE/PARSE — use json.dumps() or json.loads()",
+            ]
+        sub = ops[0].upper()
+        if sub == "GENERATE":
+            target = ops[1] if len(ops) > 1 else "TARGET"
+            source = ""
+            upper_ops = _upper_ops(ops)
+            if "FROM" in upper_ops:
+                from_idx = upper_ops.index("FROM")
+                if from_idx + 1 < len(ops):
+                    source = ops[from_idx + 1]
+            return [
+                f"# JSON GENERATE {target} FROM {source}",
+                f"import json",
+                f"# TODO(high): {_to_python_name(target)} = json.dumps(field_mapping)",
+            ]
+        if sub == "PARSE":
+            source = ops[1] if len(ops) > 1 else "SOURCE"
+            return [
+                f"# JSON PARSE {source}",
+                f"import json",
+                f"# TODO(high): parsed = json.loads({_to_python_name(source)})",
+            ]
+        return [f"# TODO(high): unsupported JSON sub-verb {sub}", f"# {raw}"]
+
+    def _translate_xml(self, ops: list[str], raw: str) -> list[str]:
+        """Translate XML GENERATE/PARSE verb."""
+        if not ops:
+            return [
+                "import xml.etree.ElementTree as ET",
+                "# TODO(high): XML GENERATE/PARSE — use xml.etree.ElementTree",
+            ]
+        sub = ops[0].upper()
+        if sub == "GENERATE":
+            target = ops[1] if len(ops) > 1 else "TARGET"
+            source = ""
+            upper_ops = _upper_ops(ops)
+            if "FROM" in upper_ops:
+                from_idx = upper_ops.index("FROM")
+                if from_idx + 1 < len(ops):
+                    source = ops[from_idx + 1]
+            return [
+                f"# XML GENERATE {target} FROM {source}",
+                f"import xml.etree.ElementTree as ET",
+                f"# TODO(high): build XML from {_to_python_name(source or target)} fields using ET",
+            ]
+        if sub == "PARSE":
+            source = ops[1] if len(ops) > 1 else "SOURCE"
+            return [
+                f"# XML PARSE {source}",
+                f"import xml.etree.ElementTree as ET",
+                f"# TODO(high): tree = ET.fromstring({_to_python_name(source)})",
+            ]
+        return [f"# TODO(high): unsupported XML sub-verb {sub}", f"# {raw}"]
 
     def _main_block(self) -> str:
         return (

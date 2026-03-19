@@ -51,6 +51,11 @@ class DataItem:
     usage: str | None = None  # COMP, COMP-3, BINARY, etc.
     children: list[DataItem] = field(default_factory=list)
     conditions: list[ConditionName] = field(default_factory=list)  # 88-level items
+    is_external: bool = False
+    is_global: bool = False
+    justified_right: bool = False
+    blank_when_zero: bool = False
+    occurs_depending: str | None = None  # field name for variable-length
 
 
 # --- PROCEDURE DIVISION models ---
@@ -87,6 +92,9 @@ class FileControl:
     assign_to: str
     file_status: str | None = None
     organization: str | None = None  # SEQUENTIAL, INDEXED, RELATIVE
+    access_mode: str | None = None  # SEQUENTIAL, RANDOM, DYNAMIC
+    record_key: str | None = None
+    alternate_keys: list[str] = field(default_factory=list)
 
 
 # --- REPORT SECTION models ---

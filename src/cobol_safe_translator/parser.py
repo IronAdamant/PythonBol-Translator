@@ -326,10 +326,19 @@ _FILE_STATUS_RE = re.compile(
 _ORGANIZATION_RE = re.compile(
     r"ORGANIZATION\s+(?:IS\s+)?(SEQUENTIAL|INDEXED|RELATIVE)", re.IGNORECASE,
 )
+_ACCESS_MODE_RE = re.compile(
+    r"ACCESS\s+MODE\s+(?:IS\s+)?(SEQUENTIAL|RANDOM|DYNAMIC)", re.IGNORECASE,
+)
+_RECORD_KEY_RE = re.compile(
+    r"RECORD\s+KEY\s+(?:IS\s+)?([\w-]+)", re.IGNORECASE,
+)
+_ALT_KEY_RE = re.compile(
+    r"ALTERNATE\s+RECORD\s+KEY\s+(?:IS\s+)?([\w-]+)", re.IGNORECASE,
+)
 
 
 def parse_environment(lines: list[str]) -> list[FileControl]:
-    """Extract SELECT/ASSIGN file controls with FILE STATUS and ORGANIZATION."""
+    """Extract SELECT/ASSIGN file controls with FILE STATUS, ORGANIZATION, ACCESS MODE, and keys."""
     combined = " ".join(l.strip() for l in lines)
     controls: list[FileControl] = []
 
@@ -343,18 +352,32 @@ def parse_environment(lines: list[str]) -> list[FileControl]:
             continue
         file_status = None
         organization = None
+        access_mode = None
+        record_key = None
+        alternate_keys: list[str] = []
         fs_m = _FILE_STATUS_RE.search(block)
         if fs_m:
             file_status = fs_m.group(1).upper()
         org_m = _ORGANIZATION_RE.search(block)
         if org_m:
             organization = org_m.group(1).upper()
+        acc_m = _ACCESS_MODE_RE.search(block)
+        if acc_m:
+            access_mode = acc_m.group(1).upper()
+        rk_m = _RECORD_KEY_RE.search(block)
+        if rk_m:
+            record_key = rk_m.group(1).upper()
+        for ak_m in _ALT_KEY_RE.finditer(block):
+            alternate_keys.append(ak_m.group(1).upper())
         assign_to = m.group(2) or m.group(3) or m.group(4) or ""
         controls.append(FileControl(
             select_name=m.group(1).upper(),
             assign_to=assign_to,
             file_status=file_status,
             organization=organization,
+            access_mode=access_mode,
+            record_key=record_key,
+            alternate_keys=alternate_keys,
         ))
     return controls
 
@@ -366,13 +389,21 @@ _PIC_RE = re.compile(r"PIC(?:TURE)?\s+(?:IS\s+)?(S?[0-9XAVZBS().,+\-$CRDB*P/]+)"
 _VALUE_RE = re.compile(r'VALUE\s+(?:IS\s+)?("[^"]*"|\'[^\']*\'|[+\-]?\d+\.\d+|[^\s.]+)(?:\.|$|\s)', re.IGNORECASE)
 _VALUES_RE = re.compile(r'VALUE(?:S)?\s+(?:IS\s+|ARE\s+)?(.*?)(?:\.\s*$|$)', re.IGNORECASE)
 _OCCURS_RE = re.compile(r"OCCURS\s+(\d+)", re.IGNORECASE)
+_OCCURS_DEPENDING_RE = re.compile(
+    r"OCCURS\s+\d+\s+(?:TO\s+\d+\s+(?:TIMES\s+)?)?DEPENDING\s+(?:ON\s+)?([\w-]+)",
+    re.IGNORECASE,
+)
 _REDEFINES_RE = re.compile(r"REDEFINES\s+([\w-]+)", re.IGNORECASE)
 _USAGE_RE = re.compile(
     r"(?:USAGE\s+(?:IS\s+)?|(?<![A-Za-z0-9\"-]))"
-    r"(COMP(?:UTATIONAL)?(?:-[0-9])?|BINARY|PACKED-DECIMAL|DISPLAY)"
+    r"(COMP(?:UTATIONAL)?(?:-[0-9])?|BINARY|PACKED-DECIMAL|DISPLAY|INDEX)"
     r"(?=\s|\.|$)",
     re.IGNORECASE,
 )
+_EXTERNAL_RE = re.compile(r"\bEXTERNAL\b", re.IGNORECASE)
+_GLOBAL_RE = re.compile(r"\bGLOBAL\b", re.IGNORECASE)
+_JUSTIFIED_RE = re.compile(r"\bJUSTIFIED\b|\bJUST\b", re.IGNORECASE)
+_BLANK_WHEN_ZERO_RE = re.compile(r"\bBLANK\s+WHEN\s+ZERO(?:S|ES)?\b", re.IGNORECASE)
 
 
 def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem], list[DataItem], list[ReportDescription], list[DataItem]]:
@@ -560,6 +591,16 @@ def _parse_data_item(line: str) -> DataItem | None:
     if usage_m:
         usage = usage_m.group(1).upper()
 
+    is_external = bool(_EXTERNAL_RE.search(stripped))
+    is_global = bool(_GLOBAL_RE.search(stripped))
+    justified_right = bool(_JUSTIFIED_RE.search(stripped))
+    blank_when_zero = bool(_BLANK_WHEN_ZERO_RE.search(stripped))
+
+    occurs_depending: str | None = None
+    od_m = _OCCURS_DEPENDING_RE.search(stripped)
+    if od_m:
+        occurs_depending = od_m.group(1).upper()
+
     return DataItem(
         level=level,
         name=name,
@@ -568,6 +609,11 @@ def _parse_data_item(line: str) -> DataItem | None:
         occurs=occurs,
         redefines=redefines,
         usage=usage,
+        is_external=is_external,
+        is_global=is_global,
+        justified_right=justified_right,
+        blank_when_zero=blank_when_zero,
+        occurs_depending=occurs_depending,
     )
 
 
