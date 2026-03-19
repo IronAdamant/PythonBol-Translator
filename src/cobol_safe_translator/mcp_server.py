@@ -22,6 +22,7 @@ from .exporters import export_json, export_markdown
 from .mapper import generate_python
 from .parser import parse_cobol_file
 from .prompt_generator import generate_prompt
+from .utils import _to_python_name
 
 from . import __version__
 
@@ -211,16 +212,15 @@ def _validate_dir(path_str: str) -> Path:
     return p
 
 
-def _parse_and_analyze_file(params: dict) -> tuple:
-    """Parse and analyze a COBOL file from tool params. Returns (path, program, smap)."""
+def _parse_and_analyze_file(params: dict):
+    """Parse and analyze a COBOL file from tool params. Returns the SoftwareMap."""
     p = _validate_file(params["path"])
     program = parse_cobol_file(p)
-    smap = analyze(program)
-    return p, program, smap
+    return analyze(program)
 
 
 def _handle_translate_cobol(params: dict) -> str:
-    _, _, smap = _parse_and_analyze_file(params)
+    smap = _parse_and_analyze_file(params)
     python_source = generate_python(smap)
 
     output_path = params.get("output_path")
@@ -233,7 +233,7 @@ def _handle_translate_cobol(params: dict) -> str:
 
 
 def _handle_analyze_cobol(params: dict) -> str:
-    _, _, smap = _parse_and_analyze_file(params)
+    smap = _parse_and_analyze_file(params)
 
     fmt = params.get("format", "markdown")
     if fmt == "json":
@@ -242,13 +242,13 @@ def _handle_analyze_cobol(params: dict) -> str:
 
 
 def _handle_generate_brief(params: dict) -> str:
-    _, _, smap = _parse_and_analyze_file(params)
+    smap = _parse_and_analyze_file(params)
     python_source = generate_python(smap)
     return generate_prompt(smap, python_source)
 
 
 def _handle_list_sensitivities(params: dict) -> str:
-    _, _, smap = _parse_and_analyze_file(params)
+    smap = _parse_and_analyze_file(params)
 
     result = [
         {
@@ -291,8 +291,7 @@ def _handle_translate_directory(params: dict) -> str:
             out_dir = out_root / src.stem
             out_dir.mkdir(parents=True, exist_ok=True)
 
-            import re as _re
-            name = _re.sub(r"[^\w]", "_", program.program_id.lower()) or "unnamed"
+            name = _to_python_name(program.program_id) or "unnamed"
             out_file = out_dir / f"{name}.py"
             out_file.write_text(python_source, encoding="utf-8")
             successes += 1

@@ -52,7 +52,7 @@ _SCOPE_TERMINATORS = frozenset({
     "END-SEARCH", "END-DELETE", "END-START",
     "END-RETURN", "END-SORT", "END-MERGE",
 })
-_TODO_VERBS = frozenset({"SEARCH", "DELETE", "START"})
+_TODO_VERBS = frozenset({"DELETE", "START"})
 
 
 class PythonMapper:
@@ -92,8 +92,8 @@ class PythonMapper:
             "UNSTRING": lambda s: strt.translate_unstring(s.operands, self._resolve_operand),
             "INSPECT": lambda s: strt.translate_inspect(s.operands, self._resolve_operand),
             "INITIALIZE": lambda s: st.translate_initialize(s.operands),
-            "SORT": lambda s: sort_t.translate_sort(s.operands, self._resolve_operand),
-            "MERGE": lambda s: sort_t.translate_merge(s.operands, self._resolve_operand),
+            "SORT": lambda s: sort_t.translate_sort(s.operands),
+            "MERGE": lambda s: sort_t.translate_merge(s.operands),
             "RELEASE": lambda s: sort_t.translate_release(s.operands),
             "RETURN": lambda s: sort_t.translate_return_verb(s.operands, s.raw_text),
             "INITIATE": lambda s: rpt_t.translate_initiate(s.operands, self.program.report_section),
@@ -491,7 +491,10 @@ class PythonMapper:
         common = set(src_items) & set(tgt_items)
         if not common:
             return [f"# MOVE CORRESPONDING: no common field names between {src_name} and {tgt_name}"]
-        results = [f"# MOVE CORRESPONDING {src_name} TO {tgt_name}"]
+        results = [
+            f"# MOVE CORRESPONDING {src_name} TO {tgt_name}",
+            f"# TODO(high): flat data model cannot distinguish group-qualified fields — verify assignments",
+        ]
         for name in sorted(common):
             py = _to_python_name(name)
             results.append(f"self.data.{py}.set(self.data.{py}.value)")

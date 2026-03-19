@@ -252,17 +252,13 @@ def strip_exec_blocks(raw_text: str) -> str:
         exec_type = m.group(1).upper()
         # Collect lines until END-EXEC
         block_lines = []
-        found_end = False
         while i < len(lines):
             block_lines.append(lines[i].rstrip())
             check = lines[i][7:72] if len(lines[i]) > 7 else lines[i]
             if _END_EXEC_RE.search(check) or _END_EXEC_RE.search(lines[i]):
-                found_end = True
                 i += 1
                 break
             i += 1
-
-        # (if not found_end, we still replace what we collected)
 
         # Build the original text as a single line for the comment
         original_parts = []

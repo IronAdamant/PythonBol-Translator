@@ -11,8 +11,6 @@ where the return value is a list of Python source lines.
 
 from __future__ import annotations
 
-from typing import Callable
-
 from .utils import _to_method_name, _to_python_name, _upper_ops
 
 # Clause keywords that terminate field-name collection in KEY clauses
@@ -185,7 +183,7 @@ def _emit_proc_call(proc: tuple[str, str | None], label: str) -> list[str]:
 # ---- Public translators ------------------------------------------------
 
 
-def translate_sort(ops: list[str], resolve: Callable[[str], str]) -> list[str]:
+def translate_sort(ops: list[str]) -> list[str]:
     """Translate SORT verb to Python."""
     if not ops:
         return ["# SORT: no operands"]
@@ -248,7 +246,7 @@ def translate_sort(ops: list[str], resolve: Callable[[str], str]) -> list[str]:
     return lines
 
 
-def translate_merge(ops: list[str], resolve: Callable[[str], str]) -> list[str]:
+def translate_merge(ops: list[str]) -> list[str]:
     """Translate MERGE verb to Python."""
     if not ops:
         return ["# MERGE: no operands"]

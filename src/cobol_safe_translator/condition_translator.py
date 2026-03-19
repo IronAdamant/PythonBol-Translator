@@ -36,14 +36,6 @@ _CMP_PHRASES: list[tuple[list[str], str]] = [
     (["NOT", "="], "!="),
 ]
 
-_COBOL_KEYWORDS = frozenset({
-    'AND', 'OR', 'NOT', 'IS', 'THEN', 'THAN', 'TO', 'GREATER', 'LESS',
-    'EQUAL', 'NUMERIC', 'ALPHABETIC', 'POSITIVE', 'NEGATIVE',
-    'ZERO', 'ZEROS', 'ZEROES', 'SPACE', 'SPACES',
-    'HIGH-VALUE', 'HIGH-VALUES', 'LOW-VALUE', 'LOW-VALUES',
-    'OF', 'IN',
-})
-
 _ARITH_OPS = frozenset({'+', '-', '*', '/'})
 
 _OP_KEYWORDS = frozenset({
@@ -219,19 +211,6 @@ def _handle_conjunction(tokens: list[str], i: int, n: int, result: list[str],
     return i
 
 
-def _normalize_tokens(raw_tokens: list[str]) -> list[str]:
-    """Uppercase keyword tokens, leave others as-is."""
-    tokens: list[str] = []
-    for t in raw_tokens:
-        if _is_quoted(t):
-            tokens.append(t)
-        elif t.upper() in _COBOL_KEYWORDS or t in ('=', '>', '<', '>=', '<=', '!=', '(', ')'):
-            tokens.append(t.upper() if t.upper() in _COBOL_KEYWORDS else t)
-        else:
-            tokens.append(t)
-    return tokens
-
-
 def _is_lhs_subject(tokens: list[str], i: int, n: int) -> bool:
     """Check if token at i is a left-hand subject (followed by comparison)."""
     if i + 1 >= n:
@@ -245,10 +224,9 @@ def _is_lhs_subject(tokens: list[str], i: int, n: int) -> bool:
 
 def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) -> str:
     """Core translation logic."""
-    raw_tokens = tokenize_condition(cond)
-    if not raw_tokens:
+    tokens = tokenize_condition(cond)
+    if not tokens:
         return "True"
-    tokens = _normalize_tokens(raw_tokens)
     result: list[str] = []
     last_subject = ""
     last_op = ""

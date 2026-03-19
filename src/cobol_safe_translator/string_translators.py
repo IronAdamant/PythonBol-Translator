@@ -16,6 +16,9 @@ from typing import Callable
 
 from .utils import _to_python_name, _upper_ops
 
+# Keywords that terminate target collection in UNSTRING
+_UNSTRING_STOP_KEYWORDS = frozenset({"TALLYING", "ON", "OVERFLOW", "END-UNSTRING", "WITH", "COUNT"})
+
 
 def translate_string(
     ops: list[str],
@@ -135,11 +138,10 @@ def translate_unstring(
         i += 1
 
     # Parse targets after INTO (stop at TALLYING, ON, END-UNSTRING, WITH)
-    _STOP_KEYWORDS = {"TALLYING", "ON", "OVERFLOW", "END-UNSTRING", "WITH", "COUNT"}
     targets: list[str] = []
     j = into_idx + 1
     while j < len(ops):
-        if upper_ops[j] in _STOP_KEYWORDS:
+        if upper_ops[j] in _UNSTRING_STOP_KEYWORDS:
             break
         # Skip DELIMITER IN, COUNT IN sub-clauses
         if upper_ops[j] in ("DELIMITER", "IN"):

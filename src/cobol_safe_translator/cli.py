@@ -9,7 +9,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re as _re
+import re
 import sys
 from pathlib import Path
 
@@ -25,11 +25,15 @@ from .validation import validate_generated_python
 
 # --- ANSI color helpers (no rich dependency) ---
 
+_COLOR_SUPPORTED: bool | None = None
+
+
 def _supports_color() -> bool:
-    """Check if the terminal supports ANSI colors."""
-    if not hasattr(sys.stdout, "isatty"):
-        return False
-    return sys.stdout.isatty()
+    """Check if the terminal supports ANSI colors (cached)."""
+    global _COLOR_SUPPORTED
+    if _COLOR_SUPPORTED is None:
+        _COLOR_SUPPORTED = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+    return _COLOR_SUPPORTED
 
 
 def _c(code: str, text: str) -> str:
@@ -66,8 +70,7 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
 
     print(bold(f"{label}: {source_path}"))
 
-    # Collect copybook search paths (may be None or list of strings)
-    copy_paths = getattr(args, "copybook_path", None)
+    copy_paths = args.copybook_path
 
     # Parse
     try:
@@ -96,7 +99,7 @@ def _parse_and_analyze(args: argparse.Namespace, label: str) -> tuple:
 def _to_python_filename(program_id: str) -> str:
     """Convert COBOL program ID to a safe Python filename."""
     name = program_id.lower().replace("-", "_")
-    name = _re.sub(r"[^\w]", "_", name)
+    name = re.sub(r"[^\w]", "_", name)
     return (name or "unnamed") + ".py"
 
 
@@ -200,9 +203,9 @@ def cmd_translate(args: argparse.Namespace) -> int:
     """Parse, analyze, and generate Python translation."""
     p = Path(args.path)
     config = args.config or None
-    copy_paths = getattr(args, "copybook_path", None)
-    recursive = getattr(args, "recursive", False)
-    validate = getattr(args, "validate", False)
+    copy_paths = args.copybook_path
+    recursive = args.recursive
+    validate = args.validate
 
     if p.is_dir():
         base_out = Path(args.output)
@@ -219,8 +222,8 @@ def cmd_map(args: argparse.Namespace) -> int:
     """Parse, analyze, and export reports."""
     p = Path(args.path)
     config = args.config or None
-    copy_paths = getattr(args, "copybook_path", None)
-    recursive = getattr(args, "recursive", False)
+    copy_paths = args.copybook_path
+    recursive = args.recursive
 
     if p.is_dir():
         base_out = Path(args.output)
@@ -237,9 +240,9 @@ def cmd_prompt(args: argparse.Namespace) -> int:
     """Generate an LLM translation brief (stdout or file)."""
     p = Path(args.path)
     config = args.config or None
-    copy_paths = getattr(args, "copybook_path", None)
-    recursive = getattr(args, "recursive", False)
-    output = getattr(args, "output", None)
+    copy_paths = args.copybook_path
+    recursive = args.recursive
+    output = args.output
 
     if p.is_dir():
         if output is None:

@@ -45,13 +45,7 @@ def validate_generated_python(
     except SyntaxError as e:
         return False, f"SyntaxError: {e.msg} (line {e.lineno})"
 
-    # Step 2: bytecode compilation
-    try:
-        compile(source_code, filename, "exec")
-    except Exception as e:
-        return False, f"CompileError: {e}"
-
-    # Step 3: import test — write to temp file, import, instantiate Program
+    # Step 2: import test — write to temp file, import, instantiate Program
     tmp_path: str | None = None
     try:
         with tempfile.NamedTemporaryFile(

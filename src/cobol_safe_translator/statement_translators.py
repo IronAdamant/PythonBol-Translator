@@ -138,8 +138,7 @@ def translate_add(
         for t in giving_targets:
             if t.upper() in _ARITHMETIC_KEYWORDS:
                 break
-            if t.upper() != "ROUNDED":
-                results.append(f"{_resolve_target(t)}.set({sum_expr})")
+            results.append(f"{_resolve_target(t)}.set({sum_expr})")
         if not results:
             return [f"# ADD GIVING: no valid target found: {' '.join(ops)}"]
         return results
@@ -185,8 +184,7 @@ def translate_subtract(
         for t in giving_targets:
             if t.upper() in _ARITHMETIC_KEYWORDS:
                 break
-            if t.upper() != "ROUNDED":
-                results.append(f"{_resolve_target(t)}.set({expr})")
+            results.append(f"{_resolve_target(t)}.set({expr})")
         if not results:
             return [f"# SUBTRACT GIVING: no valid target found: {' '.join(ops)}"]
         return results
@@ -223,13 +221,12 @@ def translate_multiply(
             for t in ops[giving_idx + 1:]:
                 if t.upper() in _ARITHMETIC_KEYWORDS:
                     break
-                if t.upper() != "ROUNDED":
-                    results.append(f"{_resolve_target(t)}.set({source} * {multiplicand})")
+                results.append(f"{_resolve_target(t)}.set({source} * {multiplicand})")
             if not results:
                 return [f"# MULTIPLY GIVING: no valid target found: {' '.join(ops)}"]
             return results
         raw_targets = ops[by_idx + 1:]
-        targets = [t for t in raw_targets if t.upper() not in _ARITHMETIC_KEYWORDS and t.upper() != "ROUNDED"]
+        targets = [t for t in raw_targets if t.upper() not in _ARITHMETIC_KEYWORDS]
         if not targets:
             return [f"# MULTIPLY: missing target operand: {' '.join(ops)}"]
         results = []
@@ -259,8 +256,7 @@ def _divide_giving_results(
             continue
         if upper_op in _ARITHMETIC_KEYWORDS:
             break
-        if upper_op != "ROUNDED":
-            giving_targets.append(ops[i])
+        giving_targets.append(ops[i])
         i += 1
     results = ["# TODO: verify divisor is non-zero before division (COBOL EC-SIZE-ZERO-DIVIDE)"]
     for t in giving_targets:
@@ -286,7 +282,7 @@ def translate_divide(
             dividend = resolve(ops[into_idx + 1]) if into_idx + 1 < len(ops) and into_idx + 1 < giving_idx else "0"
             return _divide_giving_results(ops, giving_idx, dividend, divisor)
         raw_targets = ops[into_idx + 1:]
-        targets = [t for t in raw_targets if t.upper() not in _ARITHMETIC_KEYWORDS and t.upper() != "ROUNDED"]
+        targets = [t for t in raw_targets if t.upper() not in _ARITHMETIC_KEYWORDS]
         if not targets:
             return [f"# DIVIDE: missing target operand: {' '.join(ops)}"]
         results: list[str] = []
@@ -676,26 +672,21 @@ def translate_perform(
         times_idx = next(i for i, o in enumerate(ops) if o.upper() == "TIMES")
         if times_idx >= 2:
             times_op = ops[times_idx - 1]
-            target = _to_method_name(ops[0])
+            is_inline = False
         elif times_idx == 1:
             times_op = ops[0]
-            if _is_numeric_literal(times_op):
-                times_val = str(int(float(times_op)))
-            else:
-                times_val = f"int(self.data.{_to_python_name(times_op)}.value)"
+            is_inline = True
+        else:
+            return [f"# PERFORM TIMES: invalid syntax — {' '.join(ops)}"]
+        times_val = str(int(float(times_op))) if _is_numeric_literal(times_op) else f"int(self.data.{_to_python_name(times_op)}.value)"
+        if is_inline:
             return [
                 f"for _ in range({times_val}):",
                 f"    pass  # TODO(high): inline PERFORM TIMES — statements should be moved here",
             ]
-        else:
-            return [f"# PERFORM TIMES: invalid syntax — {' '.join(ops)}"]
-        if _is_numeric_literal(times_op):
-            times_val = str(int(float(times_op)))
-        else:
-            times_val = f"int(self.data.{_to_python_name(times_op)}.value)"
         return [
             f"for _ in range({times_val}):",
-            f"    self.{target}()",
+            f"    self.{_to_method_name(ops[0])}()",
         ]
 
     return [f"self.{target}()"]

@@ -228,7 +228,8 @@ def translate_generate(ops: list[str], reports: list[ReportDescription]) -> list
                     if "(" in src:
                         base, rest = src.split("(", 1)
                         idx = rest.rstrip(")")
-                        val_expr = f"self.data.{_to_python_name(base)}.value"
+                        py_idx = _to_python_name(idx)
+                        val_expr = f"self.data.{_to_python_name(base)}[int(self.data.{py_idx}.value) - 1].value"
                     else:
                         val_expr = f"self.data.{_to_python_name(src)}.value"
                     lines.append(f"self._rw_sums['{py_sum}'] = self._rw_sums.get('{py_sum}', 0) + {val_expr}")

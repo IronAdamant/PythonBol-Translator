@@ -32,6 +32,41 @@ def _indent_line(line: str, indent: int) -> str:
     return ("    " * indent) + line
 
 
+def _try_nested_block(
+    stmt: CobolStatement,
+    stmts: list[CobolStatement],
+    i: int,
+    translate_stmt_fn: Callable[[CobolStatement], list[str]],
+    translate_cond_fn: Callable[[str], str],
+    resolve_fn: Callable[[str], str],
+    indent: int,
+    target: list[str],
+) -> int | None:
+    """Dispatch nested IF/EVALUATE/SEARCH blocks.
+
+    Returns new index if the statement was handled, or None if not a nested block.
+    """
+    if stmt.verb == "IF":
+        nested, new_i = translate_if_block(
+            stmts, i, translate_stmt_fn, translate_cond_fn, indent,
+        )
+        target.extend(nested)
+        return new_i
+    if stmt.verb == "EVALUATE":
+        nested, new_i = translate_evaluate_block(
+            stmts, i, translate_stmt_fn, translate_cond_fn, resolve_fn, indent,
+        )
+        target.extend(nested)
+        return new_i
+    if stmt.verb == "SEARCH":
+        nested, new_i = translate_search_block(
+            stmts, i, translate_stmt_fn, translate_cond_fn, indent,
+        )
+        target.extend(nested)
+        return new_i
+    return None
+
+
 def _has_code(body: list[str]) -> bool:
     """Check if body has any non-comment executable lines."""
     return any(ln.strip() and not ln.strip().startswith("#") for ln in body)
@@ -74,24 +109,12 @@ def translate_if_block(
             continue
 
         target = else_body if in_else else then_body
-        if stmt.verb == "IF":
-            nested_lines, i = translate_if_block(
-                stmts, i, translate_stmt_fn, translate_cond_fn, indent + 1,
-            )
-            target.extend(nested_lines)
-            continue
-        if stmt.verb == "EVALUATE":
-            nested_lines, i = translate_evaluate_block(
-                stmts, i, translate_stmt_fn, translate_cond_fn,
-                _fallback_resolve, indent + 1,
-            )
-            target.extend(nested_lines)
-            continue
-        if stmt.verb == "SEARCH":
-            nested_lines, i = translate_search_block(
-                stmts, i, translate_stmt_fn, translate_cond_fn, indent + 1,
-            )
-            target.extend(nested_lines)
+        new_i = _try_nested_block(
+            stmt, stmts, i, translate_stmt_fn, translate_cond_fn,
+            _fallback_resolve, indent + 1, target,
+        )
+        if new_i is not None:
+            i = new_i
             continue
 
         # Regular statement — translate and add to current body
@@ -175,24 +198,12 @@ def _translate_evaluate_also(
             i += 1
             continue
         if current_when_ops is not None:
-            if stmt.verb == "IF":
-                nested, i = translate_if_block(
-                    stmts, i, translate_stmt_fn, translate_cond_fn, indent + 1,
-                )
-                current_body.extend(nested)
-                continue
-            if stmt.verb == "EVALUATE":
-                nested, i = translate_evaluate_block(
-                    stmts, i, translate_stmt_fn, translate_cond_fn,
-                    resolve_operand_fn, indent + 1,
-                )
-                current_body.extend(nested)
-                continue
-            if stmt.verb == "SEARCH":
-                nested, i = translate_search_block(
-                    stmts, i, translate_stmt_fn, translate_cond_fn, indent + 1,
-                )
-                current_body.extend(nested)
+            new_i = _try_nested_block(
+                stmt, stmts, i, translate_stmt_fn, translate_cond_fn,
+                resolve_operand_fn, indent + 1, current_body,
+            )
+            if new_i is not None:
+                i = new_i
                 continue
             translated = translate_stmt_fn(stmt)
             for tl in translated:
@@ -299,24 +310,12 @@ def translate_evaluate_block(
             continue
 
         if current_when_ops is not None:
-            if stmt.verb == "IF":
-                nested_lines, i = translate_if_block(
-                    stmts, i, translate_stmt_fn, translate_cond_fn, indent + 1,
-                )
-                current_body.extend(nested_lines)
-                continue
-            if stmt.verb == "EVALUATE":
-                nested_lines, i = translate_evaluate_block(
-                    stmts, i, translate_stmt_fn, translate_cond_fn,
-                    resolve_operand_fn, indent + 1,
-                )
-                current_body.extend(nested_lines)
-                continue
-            if stmt.verb == "SEARCH":
-                nested_lines, i = translate_search_block(
-                    stmts, i, translate_stmt_fn, translate_cond_fn, indent + 1,
-                )
-                current_body.extend(nested_lines)
+            new_i = _try_nested_block(
+                stmt, stmts, i, translate_stmt_fn, translate_cond_fn,
+                resolve_operand_fn, indent + 1, current_body,
+            )
+            if new_i is not None:
+                i = new_i
                 continue
 
         if current_when_ops is not None:
@@ -609,24 +608,12 @@ def translate_search_block(
             body_indent = indent + 1
 
         # Handle nested blocks
-        if stmt.verb == "IF":
-            nested, i = translate_if_block(
-                stmts, i, translate_stmt_fn, translate_cond_fn, body_indent,
-            )
-            target.extend(nested)
-            continue
-        if stmt.verb == "EVALUATE":
-            nested, i = translate_evaluate_block(
-                stmts, i, translate_stmt_fn, translate_cond_fn,
-                _fallback_resolve, body_indent,
-            )
-            target.extend(nested)
-            continue
-        if stmt.verb == "SEARCH":
-            nested, i = translate_search_block(
-                stmts, i, translate_stmt_fn, translate_cond_fn, body_indent,
-            )
-            target.extend(nested)
+        new_i = _try_nested_block(
+            stmt, stmts, i, translate_stmt_fn, translate_cond_fn,
+            _fallback_resolve, body_indent, target,
+        )
+        if new_i is not None:
+            i = new_i
             continue
 
         translated = translate_stmt_fn(stmt)

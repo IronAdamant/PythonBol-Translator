@@ -94,6 +94,28 @@ def _sanitize_numeric(s: str) -> str:
     return f"{sign}{val}"
 
 
+def _resolve_subscript_base(op: str) -> tuple[str, str] | None:
+    """Resolve subscript/qualification to (python_name, indices_str) or None.
+
+    Shared by resolve_operand and resolve_target to avoid duplication.
+    """
+    sm = _SUBSCRIPT_RE.match(op)
+    if sm:
+        name, idx_str = sm.group(1), sm.group(2).strip()
+        py = _to_python_name(name)
+        normalised = idx_str.replace(",", " ")
+        sub_parts = normalised.split()
+        indices: list[str] = []
+        for part in sub_parts:
+            if _is_numeric_literal(part):
+                indices.append(f"[{int(part) - 1}]")
+            else:
+                py_idx = _to_python_name(part)
+                indices.append(f"[int(self.data.{py_idx}.value) - 1]")
+        return py, "".join(indices)
+    return None
+
+
 def resolve_operand(op: str) -> str:
     """Resolve a COBOL operand to a Python expression.
 
@@ -139,22 +161,10 @@ def resolve_operand(op: str) -> str:
         py = _to_python_name(name)
         return f"str(self.data.{py}.value)[{start - 1}:{start - 1 + length}]"
     # Subscript access: TABLE(IDX) or TABLE(1) — no colon
-    sm = _SUBSCRIPT_RE.match(op)
-    if sm:
-        name, idx_str = sm.group(1), sm.group(2).strip()
-        py = _to_python_name(name)
-        # Normalise subscript separators: commas → spaces, then split
-        normalised = idx_str.replace(",", " ")
-        sub_parts = normalised.split()
-        # Build chained [] indexing for each subscript dimension
-        indices: list[str] = []
-        for part in sub_parts:
-            if _is_numeric_literal(part):
-                indices.append(f"[{int(part) - 1}]")
-            else:
-                py_idx = _to_python_name(part)
-                indices.append(f"[int(self.data.{py_idx}.value) - 1]")
-        return f"self.data.{py}{''.join(indices)}.value"
+    sub = _resolve_subscript_base(op)
+    if sub:
+        py, indices = sub
+        return f"self.data.{py}{indices}.value"
     # OF/IN qualification: FIELD OF GROUP → take field before OF
     if " OF " in upper or " IN " in upper:
         field = op.split()[0]
@@ -169,20 +179,10 @@ def resolve_target(op: str) -> str:
     Like resolve_operand but returns 'self.data.name[idx]' (no .value),
     suitable for use with .set()/.add()/.subtract() etc.
     """
-    sm = _SUBSCRIPT_RE.match(op)
-    if sm:
-        name, idx_str = sm.group(1), sm.group(2).strip()
-        py = _to_python_name(name)
-        normalised = idx_str.replace(",", " ")
-        sub_parts = normalised.split()
-        indices: list[str] = []
-        for part in sub_parts:
-            if _is_numeric_literal(part):
-                indices.append(f"[{int(part) - 1}]")
-            else:
-                py_idx = _to_python_name(part)
-                indices.append(f"[int(self.data.{py_idx}.value) - 1]")
-        return f"self.data.{py}{''.join(indices)}"
+    sub = _resolve_subscript_base(op)
+    if sub:
+        py, indices = sub
+        return f"self.data.{py}{indices}"
     if " OF " in op.upper() or " IN " in op.upper():
         fld = op.split()[0]
         return f"self.data.{_to_python_name(fld)}"
