@@ -152,6 +152,45 @@ class TestConfigOption:
         assert "Warning" in captured.err
 
 
+class TestTestCommand:
+    def test_test_hello_single(self, hello_cob, tmp_path):
+        out_dir = tmp_path / "test-output"
+        result = main(["test", str(hello_cob), "--output", str(out_dir)])
+        assert result == 0
+
+        # Should have written the generated Python to output dir
+        py_file = out_dir / "hello_world.py"
+        assert py_file.exists()
+
+    def test_test_hello_no_execute(self, hello_cob, tmp_path):
+        out_dir = tmp_path / "test-output"
+        result = main(["test", str(hello_cob), "--output", str(out_dir), "--no-execute"])
+        assert result == 0
+
+    def test_test_missing_file(self, tmp_path):
+        result = main(["test", "/nonexistent/file.cob", "--output", str(tmp_path)])
+        assert result == 1
+
+    def test_test_empty_directory(self, tmp_path):
+        result = main(["test", str(tmp_path), "--output", str(tmp_path / "out")])
+        assert result == 1
+
+    def test_test_directory_batch(self, samples_dir, tmp_path):
+        out_dir = tmp_path / "test-output"
+        result = main(["test", str(samples_dir), "--output", str(out_dir), "--no-execute"])
+        assert result == 0
+
+    def test_test_customer_report(self, customer_report_cob, tmp_path):
+        out_dir = tmp_path / "test-output"
+        result = main(["test", str(customer_report_cob), "--output", str(out_dir), "--no-execute"])
+        assert result == 0
+
+    def test_test_with_timeout(self, hello_cob, tmp_path):
+        out_dir = tmp_path / "test-output"
+        result = main(["test", str(hello_cob), "--output", str(out_dir), "--timeout", "5"])
+        assert result == 0
+
+
 class TestCLIMisc:
     def test_no_command(self):
         result = main([])

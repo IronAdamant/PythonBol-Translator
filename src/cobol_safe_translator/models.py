@@ -84,6 +84,27 @@ class UseDeclaration:
     paragraphs: list[Paragraph] = field(default_factory=list)
 
 
+# --- SQL block model ---
+
+@dataclass
+class SqlBlock:
+    """An extracted EXEC SQL block with parsed metadata.
+
+    Used by the preprocessor to capture SQL operations and by the
+    mapper to generate Python DB-API code.
+    """
+    sql_type: str  # DECLARE, OPEN, FETCH, CLOSE, SELECT, INSERT, UPDATE, DELETE, INCLUDE, WHENEVER, COMMIT, ROLLBACK
+    raw_sql: str  # Full SQL text (between EXEC SQL and END-EXEC)
+    cursor_name: str = ""
+    host_variables: list[str] = field(default_factory=list)  # :VAR-NAME references
+    into_variables: list[str] = field(default_factory=list)  # INTO :VAR targets
+    table_name: str = ""
+    paragraph_name: str = ""  # Which paragraph this was found in
+    sql_body: str = ""  # The SQL statement body (for DECLARE cursor)
+    whenever_condition: str = ""  # SQLERROR or NOT FOUND
+    whenever_action: str = ""  # CONTINUE, GO TO, etc.
+
+
 # --- Top-level program model ---
 
 @dataclass
@@ -181,6 +202,9 @@ class CobolProgram:
     # PROCEDURE
     paragraphs: list[Paragraph] = field(default_factory=list)
     declaratives: list[UseDeclaration] = field(default_factory=list)
+
+    # Extracted EXEC SQL blocks (structured metadata for code generation)
+    sql_blocks: list[SqlBlock] = field(default_factory=list)
 
     # Nested/concatenated programs within the same source file
     nested_programs: list[CobolProgram] = field(default_factory=list)

@@ -46,7 +46,7 @@ class TestResolveCopies:
             "       COPY MYBOOK.\n"
             "       PROCEDURE DIVISION.\n"
         )
-        result = resolve_copies(source, [copybook_dir])
+        result, _ = resolve_copies(source, [copybook_dir])
         assert "WS-COPIED-VAR" in result
         assert "COPY MYBOOK" not in result
 
@@ -55,13 +55,13 @@ class TestResolveCopies:
             "       COPY MYBOOK\n"
             "           REPLACING ==WS-COPIED-VAR== BY ==WS-NEW-VAR==.\n"
         )
-        result = resolve_copies(source, [copybook_dir])
+        result, _ = resolve_copies(source, [copybook_dir])
         assert "WS-NEW-VAR" in result
         assert "WS-COPIED-VAR" not in result
 
     def test_copy_not_found(self, tmp_path: Path) -> None:
         source = "       COPY MISSING-BOOK.\n"
-        result = resolve_copies(source, [tmp_path])
+        result, _ = resolve_copies(source, [tmp_path])
         assert "NOT FOUND" in result
         assert "MISSING-BOOK" in result
 
@@ -74,19 +74,19 @@ class TestResolveCopies:
             "       COPY MYBOOK.\n"
             "       COPY OTHERBOOK.\n"
         )
-        result = resolve_copies(source, [copybook_dir])
+        result, _ = resolve_copies(source, [copybook_dir])
         assert "WS-COPIED-VAR" in result
         assert "WS-OTHER" in result
 
     def test_no_paths_skips_resolution(self) -> None:
         source = "       COPY SOMETHING.\n"
         # No copybook_paths => COPY line preserved, but EXEC stripping runs
-        result = resolve_copies(source, None)
+        result, _ = resolve_copies(source, None)
         assert "COPY SOMETHING" in result
 
     def test_quoted_copybook_name(self, copybook_dir: Path) -> None:
         source = "       COPY 'MYBOOK'.\n"
-        result = resolve_copies(source, [copybook_dir])
+        result, _ = resolve_copies(source, [copybook_dir])
         assert "WS-COPIED-VAR" in result
 
 
@@ -107,7 +107,7 @@ class TestCopyPaths:
         )
 
         source = "       COPY SHARED.\n"
-        result = resolve_copies(
+        result, _ = resolve_copies(
             source, source_dir=src_dir, copy_paths=[cpy_dir]
         )
         assert "WS-SHARED" in result
@@ -129,7 +129,7 @@ class TestCopyPaths:
         )
 
         source = "       COPY DUPE.\n"
-        result = resolve_copies(
+        result, _ = resolve_copies(
             source, source_dir=src_dir, copy_paths=[cpy_dir]
         )
         # Source dir wins — its copybook is used
@@ -144,7 +144,7 @@ class TestCopyPaths:
         cpy_dir.mkdir()
 
         source = "       COPY NONEXISTENT.\n"
-        result = resolve_copies(
+        result, _ = resolve_copies(
             source, source_dir=src_dir, copy_paths=[cpy_dir]
         )
         assert "NOT FOUND" in result
@@ -171,7 +171,7 @@ class TestCopyPaths:
             "       COPY BOOK-A.\n"
             "       COPY BOOK-B.\n"
         )
-        result = resolve_copies(
+        result, _ = resolve_copies(
             source, source_dir=src_dir, copy_paths=[dir_a, dir_b]
         )
         assert "WS-A" in result
@@ -195,7 +195,7 @@ class TestCopyPaths:
         )
 
         source = "       COPY PRIO.\n"
-        result = resolve_copies(
+        result, _ = resolve_copies(
             source, source_dir=src_dir, copy_paths=[dir_first, dir_second]
         )
         assert "WS-FIRST" in result
@@ -221,7 +221,7 @@ class TestCopyPaths:
         )
 
         source = "       COPY SUBBOOK.\n"
-        result = resolve_copies(
+        result, _ = resolve_copies(
             source, source_dir=src_dir, copy_paths=[cpy_dir]
         )
         # copy_paths wins over subdirectory
@@ -239,7 +239,7 @@ class TestCopyPaths:
         )
 
         source = "       COPY INCL.\n"
-        result = resolve_copies(source, source_dir=src_dir)
+        result, _ = resolve_copies(source, source_dir=src_dir)
         assert "WS-INCL" in result
 
     def test_additional_extensions_found(self, tmp_path: Path) -> None:
@@ -257,7 +257,7 @@ class TestCopyPaths:
             "       COPY COBBOOK.\n"
             "       COPY COPYEXT.\n"
         )
-        result = resolve_copies(source, source_dir=src_dir)
+        result, _ = resolve_copies(source, source_dir=src_dir)
         assert "WS-COB" in result
         assert "WS-COPY" in result
 
@@ -265,7 +265,7 @@ class TestCopyPaths:
 class TestExecStripping:
     def test_exec_cics_single_line(self) -> None:
         source = "       EXEC CICS READ DATASET('ACCTFILE') END-EXEC\n"
-        result = resolve_copies(source)
+        result, _ = resolve_copies(source)
         assert "TODO(high): EXEC CICS" in result
         assert "Original:" in result
         assert "READ DATASET" in result
@@ -277,13 +277,13 @@ class TestExecStripping:
             "           INTO(WS-RECORD)\n"
             "       END-EXEC\n"
         )
-        result = resolve_copies(source)
+        result, _ = resolve_copies(source)
         assert "TODO(high): EXEC CICS" in result
         assert "READ DATASET" in result
 
     def test_exec_sql(self) -> None:
         source = "       EXEC SQL SELECT * FROM TABLE END-EXEC\n"
-        result = resolve_copies(source)
+        result, _ = resolve_copies(source)
         assert "TODO(high): EXEC SQL" in result
         assert "SELECT * FROM TABLE" in result
 
@@ -293,7 +293,7 @@ class TestExecStripping:
             "       EXEC CICS RETURN END-EXEC\n"
             "       DISPLAY WS-VAR.\n"
         )
-        result = resolve_copies(source)
+        result, _ = resolve_copies(source)
         assert "MOVE 1 TO WS-VAR" in result
         assert "DISPLAY WS-VAR" in result
         assert "TODO(high): EXEC CICS" in result
@@ -309,7 +309,7 @@ class TestCopyReplacingLeadingTrailing:
             "       COPY MYBOOK\n"
             "           REPLACING LEADING ==WS-== BY ==NEW-==.\n"
         )
-        result = resolve_copies(source, [copybook_dir])
+        result, _ = resolve_copies(source, [copybook_dir])
         # WS- at start of word should be replaced
         assert "NEW-COPIED-VAR" in result
         assert "WS-COPIED-VAR" not in result
@@ -326,7 +326,7 @@ class TestCopyReplacingLeadingTrailing:
             "       COPY MIDWORD\n"
             "           REPLACING LEADING ==WS-== BY ==NEW-==.\n"
         )
-        result = resolve_copies(source, [copybook_dir])
+        result, _ = resolve_copies(source, [copybook_dir])
         # WS- at start of word should be replaced
         assert "NEW-OTHER" in result
         # WS- in the middle of MY-WS-FIELD should NOT be replaced
@@ -343,7 +343,7 @@ class TestCopyReplacingLeadingTrailing:
             "       COPY TRAIL\n"
             "           REPLACING TRAILING ==-REC== BY ==-RECORD==.\n"
         )
-        result = resolve_copies(source, [copybook_dir])
+        result, _ = resolve_copies(source, [copybook_dir])
         # -REC at end of word should be replaced
         assert "IN-RECORD" in result
         # -REC in the middle of REC-TYPE should NOT be replaced
@@ -360,7 +360,7 @@ class TestCopyReplacingLeadingTrailing:
             "       COPY TRAIL2\n"
             "           REPLACING TRAILING ==REC== BY ==RECORD==.\n"
         )
-        result = resolve_copies(source, [copybook_dir])
+        result, _ = resolve_copies(source, [copybook_dir])
         # REC at end of MY-REC should be replaced
         assert "MY-RECORD" in result
         # REC at start of REC-FIELD should NOT be replaced
@@ -372,7 +372,7 @@ class TestCopyReplacingLeadingTrailing:
             "       COPY MYBOOK\n"
             "           REPLACING ==WS-COPIED-VAR== BY ==WS-NEW-VAR==.\n"
         )
-        result = resolve_copies(source, [copybook_dir])
+        result, _ = resolve_copies(source, [copybook_dir])
         assert "WS-NEW-VAR" in result
         assert "WS-COPIED-VAR" not in result
 
@@ -391,7 +391,7 @@ class TestCopyReplacingNonPseudoText:
             "       COPY WORDS\n"
             "           REPLACING OLD-FIELD BY NEW-FIELD.\n"
         )
-        result = resolve_copies(source, [copybook_dir])
+        result, _ = resolve_copies(source, [copybook_dir])
         assert "NEW-FIELD" in result
         # OLD-COUNT should remain unchanged (different word)
         assert "OLD-COUNT" in result
@@ -403,7 +403,7 @@ class TestCopyReplacingNonPseudoText:
             encoding="utf-8",
         )
         source = "       COPY SINGLE REPLACING ALPHA BY BETA.\n"
-        result = resolve_copies(source, [copybook_dir])
+        result, _ = resolve_copies(source, [copybook_dir])
         assert "BETA" in result
         assert "ALPHA" not in result
 
@@ -415,7 +415,7 @@ class TestCopyReplacingNonPseudoText:
             encoding="utf-8",
         )
         source = "       COPY PARTIAL REPLACING ABC BY XYZ.\n"
-        result = resolve_copies(source, [copybook_dir])
+        result, _ = resolve_copies(source, [copybook_dir])
         # ABC as standalone word should remain since FULL uses .replace()
         # which is literal text substitution. The standalone ABC is replaced.
         assert "XYZ" in result
@@ -426,6 +426,6 @@ class TestCopyReplacingNonPseudoText:
             "       COPY MYBOOK\n"
             "           REPLACING ==WS-COPIED-VAR== BY ==WS-REPLACED==.\n"
         )
-        result = resolve_copies(source, [copybook_dir])
+        result, _ = resolve_copies(source, [copybook_dir])
         assert "WS-REPLACED" in result
         assert "WS-COPIED-VAR" not in result

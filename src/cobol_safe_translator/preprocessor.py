@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from .models import SqlBlock
+
 # Copybook file extensions to try when searching (in order)
 _COPYBOOK_EXTENSIONS = (
     ".cpy", ".CPY",
@@ -337,6 +339,127 @@ def _cobol_to_python_name(name: str) -> str:
     return name.strip().replace("-", "_").lower()
 
 
+def _parse_sql_block(sql_text: str) -> SqlBlock | None:
+    """Parse EXEC SQL text into a structured SqlBlock.
+
+    Returns None if the text cannot be parsed.
+    """
+    try:
+        text = " ".join(sql_text.split())
+        text = re.sub(r"^EXEC\s+SQL\s+", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*END-EXEC\.?\s*$", "", text, flags=re.IGNORECASE)
+        upper = text.upper().strip()
+
+        if upper.startswith("INCLUDE") and "SQLCA" in upper:
+            return SqlBlock(sql_type="INCLUDE", raw_sql=text)
+
+        m = re.match(r"WHENEVER\s+(SQLERROR|NOT\s+FOUND)\s+(.*)", upper)
+        if m:
+            return SqlBlock(
+                sql_type="WHENEVER", raw_sql=text,
+                whenever_condition=m.group(1).strip(),
+                whenever_action=m.group(2).strip(),
+            )
+
+        m = re.match(
+            r"DECLARE\s+(\S+)\s+CURSOR\s+FOR\s+(.*)", text, re.IGNORECASE,
+        )
+        if m:
+            cursor_name = m.group(1).strip()
+            body = m.group(2).strip()
+            return SqlBlock(
+                sql_type="DECLARE", raw_sql=text,
+                cursor_name=cursor_name,
+                host_variables=_HOST_VAR_RE.findall(body),
+                sql_body=body,
+            )
+
+        m = re.match(r"OPEN\s+(\S+)\s*$", text, re.IGNORECASE)
+        if m:
+            return SqlBlock(
+                sql_type="OPEN", raw_sql=text,
+                cursor_name=m.group(1).strip(),
+            )
+
+        m = re.match(r"FETCH\s+(\S+)\s+INTO\s+(.*)", text, re.IGNORECASE)
+        if m:
+            return SqlBlock(
+                sql_type="FETCH", raw_sql=text,
+                cursor_name=m.group(1).strip(),
+                into_variables=_HOST_VAR_RE.findall(m.group(2)),
+            )
+
+        m = re.match(r"CLOSE\s+(\S+)\s*$", text, re.IGNORECASE)
+        if m:
+            return SqlBlock(
+                sql_type="CLOSE", raw_sql=text,
+                cursor_name=m.group(1).strip(),
+            )
+
+        m = re.match(
+            r"(SELECT\s+.+?)\s+INTO\s+(.+?)\s+FROM\s+(.*)",
+            text, re.IGNORECASE,
+        )
+        if m:
+            select_part = m.group(1).strip()
+            from_part = m.group(3).strip()
+            table_m = re.match(r"\S+", from_part)
+            return SqlBlock(
+                sql_type="SELECT", raw_sql=text,
+                into_variables=_HOST_VAR_RE.findall(m.group(2)),
+                host_variables=_HOST_VAR_RE.findall(from_part),
+                sql_body=f"{select_part} FROM {from_part}",
+                table_name=table_m.group(0) if table_m else "",
+            )
+
+        m = re.match(r"INSERT\s+INTO\s+(\S+)\b(.*)", text, re.IGNORECASE)
+        if m:
+            return SqlBlock(
+                sql_type="INSERT", raw_sql=text,
+                table_name=m.group(1).strip(),
+                host_variables=_HOST_VAR_RE.findall(text),
+                sql_body=text,
+            )
+
+        m = re.match(r"UPDATE\s+(\S+)\b(.*)", text, re.IGNORECASE)
+        if m:
+            return SqlBlock(
+                sql_type="UPDATE", raw_sql=text,
+                table_name=m.group(1).strip(),
+                host_variables=_HOST_VAR_RE.findall(text),
+                sql_body=text,
+            )
+
+        m = re.match(r"DELETE\s+FROM\s+(\S+)\b(.*)", text, re.IGNORECASE)
+        if m:
+            return SqlBlock(
+                sql_type="DELETE", raw_sql=text,
+                table_name=m.group(1).strip(),
+                host_variables=_HOST_VAR_RE.findall(text),
+                sql_body=text,
+            )
+
+        # Bare SELECT (without INTO — e.g. SELECT * FROM ...)
+        m = re.match(r"SELECT\b(.*)", text, re.IGNORECASE)
+        if m:
+            table_m = re.search(r"FROM\s+(\S+)", text, re.IGNORECASE)
+            return SqlBlock(
+                sql_type="SELECT", raw_sql=text,
+                host_variables=_HOST_VAR_RE.findall(text),
+                sql_body=text,
+                table_name=table_m.group(1) if table_m else "",
+            )
+
+        if upper.startswith("COMMIT"):
+            return SqlBlock(sql_type="COMMIT", raw_sql=text)
+        if upper.startswith("ROLLBACK"):
+            return SqlBlock(sql_type="ROLLBACK", raw_sql=text)
+
+        return None
+    except Exception:
+        return None
+
+
 def _sql_hint(sql_text: str) -> list[str]:
     """Parse EXEC SQL text and return enhanced hint lines.
 
@@ -506,10 +629,15 @@ def _cics_hint(cics_text: str) -> list[str]:
     return hints
 
 
-def strip_exec_blocks(raw_text: str) -> str:
-    """Replace EXEC CICS/SQL ... END-EXEC blocks with TODO comments."""
+def strip_exec_blocks(raw_text: str) -> tuple[str, list[SqlBlock]]:
+    """Replace EXEC CICS/SQL ... END-EXEC blocks with TODO comments.
+
+    Returns a tuple of (processed_text, sql_blocks) where sql_blocks
+    contains structured metadata for each EXEC SQL block found.
+    """
     lines = raw_text.splitlines()
     result: list[str] = []
+    sql_blocks: list[SqlBlock] = []
     i = 0
 
     while i < len(lines):
@@ -555,6 +683,9 @@ def strip_exec_blocks(raw_text: str) -> str:
 
         # Enhanced SQL metadata extraction
         if exec_type == "SQL":
+            sql_block = _parse_sql_block(original_text)
+            if sql_block is not None:
+                sql_blocks.append(sql_block)
             sql_hints = _sql_hint(original_text)
             if sql_hints:
                 for sh in sql_hints:
@@ -577,7 +708,7 @@ def strip_exec_blocks(raw_text: str) -> str:
             if hint:
                 result.append(f"      * Hint: {hint}")
 
-    return "\n".join(result)
+    return "\n".join(result), sql_blocks
 
 
 def _build_search_paths(
@@ -628,7 +759,7 @@ def resolve_copies(
     *,
     source_dir: str | Path | None = None,
     copy_paths: list[str | Path] | None = None,
-) -> str:
+) -> tuple[str, list[SqlBlock]]:
     """Resolve COPY statements and strip EXEC blocks from raw COBOL source.
 
     Args:
@@ -642,8 +773,10 @@ def resolve_copies(
             searched after *source_dir* and before its subdirectories.
 
     Returns:
-        Preprocessed source text with COPY statements resolved and
-        EXEC blocks replaced with TODO comments.
+        Tuple of (preprocessed_text, sql_blocks) where preprocessed_text
+        has COPY statements resolved and EXEC blocks replaced with TODO
+        comments, and sql_blocks contains structured metadata for each
+        EXEC SQL block found.
     """
     result = raw_text
 
@@ -664,7 +797,7 @@ def resolve_copies(
     if search:
         result = _resolve_copy_statements(result, search)
 
-    # Always strip EXEC blocks
-    result = strip_exec_blocks(result)
+    # Always strip EXEC blocks (also extracts SqlBlock metadata)
+    result, sql_blocks = strip_exec_blocks(result)
 
-    return result
+    return result, sql_blocks

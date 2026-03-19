@@ -955,7 +955,7 @@ def parse_cobol(
             source_dir = sp.parent
 
     # Always run preprocessor (handles both COPY resolution and EXEC stripping)
-    source = resolve_copies(
+    source, sql_blocks = resolve_copies(
         source,
         copybook_paths,
         source_dir=source_dir,
@@ -968,6 +968,9 @@ def parse_cobol(
 
     # Parse the first (or only) program
     main_program = _parse_single_program(segments[0], source_path, raw_lines)
+
+    # Attach extracted SQL blocks to the program
+    main_program.sql_blocks = sql_blocks
 
     # Parse any additional programs and attach as nested_programs
     for segment in segments[1:]:
