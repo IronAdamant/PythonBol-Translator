@@ -304,7 +304,8 @@ class PythonMapper:
         # File adapters
         for fc in self.program.file_controls:
             py_name = _to_python_name(fc.select_name)
-            lines.append(f'        self.{py_name} = FileAdapter("{fc.assign_to}")')
+            safe_path = fc.assign_to.replace("\\", "\\\\")
+            lines.append(f'        self.{py_name} = FileAdapter("{safe_path}")')
 
         lines.append("")
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 
+from conftest import make_cobol
 from cobol_safe_translator.analyzer import analyze
 from cobol_safe_translator.mapper import generate_python
 from cobol_safe_translator.parser import parse_cobol
@@ -14,22 +15,6 @@ from cobol_safe_translator.io_translators import (
     translate_rewrite,
     wrap_on_size_error,
 )
-
-
-def make_cobol(proc_lines: list[str], ws_lines: list[str] | None = None) -> str:
-    lines = [
-        "       IDENTIFICATION DIVISION.",
-        "       PROGRAM-ID. TEST-PROG.",
-        "       DATA DIVISION.",
-        "       WORKING-STORAGE SECTION.",
-    ]
-    for wl in (ws_lines or ["       01 WS-A PIC 9(5)."]):
-        lines.append(wl)
-    lines.append("       PROCEDURE DIVISION.")
-    lines.append("       MAIN-PARA.")
-    for pl in proc_lines:
-        lines.append(f"           {pl}")
-    return "\n".join(lines) + "\n"
 
 
 # ============================================================
@@ -213,7 +198,7 @@ class TestMoveCorresponding:
             "          05 FIELD-X PIC 9(5).",
             "          05 FIELD-Z PIC X(10).",
         ]
-        src = make_cobol(["MOVE CORRESPONDING GROUP-A TO GROUP-B."], ws_lines)
+        src = make_cobol(["MOVE CORRESPONDING GROUP-A TO GROUP-B."], data_lines=ws_lines)
         program = parse_cobol(src)
         source = generate_python(analyze(program))
         ast.parse(source)
@@ -229,7 +214,7 @@ class TestMoveCorresponding:
             "       01 GRP-2.",
             "          05 FLD-A PIC 9(5).",
         ]
-        src = make_cobol(["MOVE CORR GRP-1 TO GRP-2."], ws_lines)
+        src = make_cobol(["MOVE CORR GRP-1 TO GRP-2."], data_lines=ws_lines)
         program = parse_cobol(src)
         source = generate_python(analyze(program))
         ast.parse(source)

@@ -316,7 +316,8 @@ def _extract_value(line: str, keyword: str) -> str:
 # --- ENVIRONMENT DIVISION ---
 
 _SELECT_RE = re.compile(
-    r"SELECT\s+([\w-]+)\s+ASSIGN\s+TO\s+[\"']?([\w.\-]+)[\"']?",
+    r'SELECT\s+([\w-]+)\s+ASSIGN\s+(?:TO\s+)?'
+    r"""(?:"([^"]+)"|'([^']+)'|([\w\-]+(?:\.[\w\-]+)*))""",
     re.IGNORECASE,
 )
 _FILE_STATUS_RE = re.compile(
@@ -348,9 +349,10 @@ def parse_environment(lines: list[str]) -> list[FileControl]:
         org_m = _ORGANIZATION_RE.search(block)
         if org_m:
             organization = org_m.group(1).upper()
+        assign_to = m.group(2) or m.group(3) or m.group(4) or ""
         controls.append(FileControl(
             select_name=m.group(1).upper(),
-            assign_to=m.group(2),
+            assign_to=assign_to,
             file_status=file_status,
             organization=organization,
         ))

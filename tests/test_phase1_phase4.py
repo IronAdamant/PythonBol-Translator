@@ -8,6 +8,7 @@ import ast
 
 import pytest
 
+from conftest import make_cobol
 from cobol_safe_translator.adapters import CobolString, FileAdapter
 from cobol_safe_translator.analyzer import analyze
 from cobol_safe_translator.ebcdic import ebcdic_key
@@ -21,22 +22,6 @@ def _code_body(source: str) -> str:
     """Extract code body (after module docstring) for assertion checks."""
     idx = source.find("class ")
     return source[idx:] if idx != -1 else source
-
-
-def make_cobol(proc_lines: list[str], ws_lines: list[str] | None = None) -> str:
-    lines = [
-        "       IDENTIFICATION DIVISION.",
-        "       PROGRAM-ID. TEST-PROG.",
-        "       DATA DIVISION.",
-        "       WORKING-STORAGE SECTION.",
-    ]
-    for wl in (ws_lines or ["       01 WS-A PIC 9(5)."]):
-        lines.append(wl)
-    lines.append("       PROCEDURE DIVISION.")
-    lines.append("       MAIN-PARA.")
-    for pl in proc_lines:
-        lines.append(f"           {pl}")
-    return "\n".join(lines) + "\n"
 
 
 # ============================================================

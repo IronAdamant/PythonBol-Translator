@@ -1089,3 +1089,326 @@ class TestSearchWithAtEnd:
         stdout = _run_cobol_program(src)
         assert "MISS" in stdout
         assert "HIT" not in stdout
+
+
+# ---------------------------------------------------------------------------
+# 29. SORT USING/GIVING — file-based sort with real I/O
+# ---------------------------------------------------------------------------
+class TestSortUsingGiving:
+    def test_sort_using_giving_file(self, tmp_path):
+        """SORT with USING/GIVING: reads input file, sorts, writes output."""
+        (tmp_path / "in.dat").write_text("CHERRY\nAPPLE\nBANANA\n")
+
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. SORT-FILE.\n"
+            "       ENVIRONMENT DIVISION.\n"
+            "       INPUT-OUTPUT SECTION.\n"
+            "       FILE-CONTROL.\n"
+            "           SELECT INPUT-FILE ASSIGN TO 'in.dat'.\n"
+            "           SELECT OUTPUT-FILE ASSIGN TO 'out.dat'.\n"
+            "           SELECT SORT-FILE ASSIGN TO SORTWORK.\n"
+            "       DATA DIVISION.\n"
+            "       FILE SECTION.\n"
+            "       FD INPUT-FILE.\n"
+            "       01 INPUT-REC PIC X(10).\n"
+            "       FD OUTPUT-FILE.\n"
+            "       01 OUTPUT-REC PIC X(10).\n"
+            "       SD SORT-FILE.\n"
+            "       01 SORT-REC PIC X(10).\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-DUMMY PIC X.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           SORT SORT-FILE ON ASCENDING KEY SORT-REC\n"
+            "               USING INPUT-FILE\n"
+            "               GIVING OUTPUT-FILE.\n"
+            '           DISPLAY "SORT DONE".\n'
+            "           STOP RUN.\n"
+        )
+        # Run subprocess from tmp_path so relative file paths resolve
+        prog = parse_cobol(src)
+        smap = analyze(prog)
+        py_source = generate_python(smap)
+        py_file = tmp_path / "sort_test.py"
+        py_file.write_text(py_source)
+        result = subprocess.run(
+            [sys.executable, str(py_file)],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(tmp_path),
+            env={**os.environ, "PYTHONPATH": _PROJECT_SRC},
+        )
+        assert result.returncode == 0, f"rc={result.returncode}\n{result.stderr}"
+        assert "SORT DONE" in result.stdout
+        result_lines = (tmp_path / "out.dat").read_text().strip().splitlines()
+        assert len(result_lines) == 3
+        assert "APPLE" in result_lines[0]
+        assert "BANANA" in result_lines[1]
+        assert "CHERRY" in result_lines[2]
+
+
+# ---------------------------------------------------------------------------
+# 30. PERFORM THRU — call paragraph range A through C
+# ---------------------------------------------------------------------------
+class TestPerformThru:
+    def test_perform_thru_calls_range(self):
+        """PERFORM A THRU C should call paragraphs A, B, C in sequence."""
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. THRU-TEST.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-X PIC 9(5) VALUE 0.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           PERFORM STEP-A THRU STEP-C.\n"
+            "           STOP RUN.\n"
+            "       STEP-A.\n"
+            '           DISPLAY "A".\n'
+            "       STEP-B.\n"
+            '           DISPLAY "B".\n'
+            "       STEP-C.\n"
+            '           DISPLAY "C".\n'
+        )
+        stdout = _run_cobol_program(src)
+        lines = stdout.strip().splitlines()
+        assert len(lines) == 3
+        assert lines[0].strip() == "A"
+        assert lines[1].strip() == "B"
+        assert lines[2].strip() == "C"
+
+
+# ---------------------------------------------------------------------------
+# 31. DISPLAY WITH NO ADVANCING — suppress newline
+# ---------------------------------------------------------------------------
+class TestDisplayNoAdvancing:
+    def test_no_advancing_suppresses_newline(self):
+        """DISPLAY ... WITH NO ADVANCING should not add newline."""
+        src = make_cobol(
+            [
+                'DISPLAY "A" WITH NO ADVANCING.',
+                'DISPLAY "B" WITH NO ADVANCING.',
+                'DISPLAY "C".',
+                "STOP RUN.",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        lines = stdout.strip().splitlines()
+        # A, B concatenated on same line, then C on same line
+        assert lines[0].strip() == "ABC"
+
+
+# ---------------------------------------------------------------------------
+# 32. Deep nested IF — 3 levels
+# ---------------------------------------------------------------------------
+class TestDeepNestedIf:
+    def test_three_level_nested_if(self):
+        """3-level nested IF: all conditions true → innermost branch."""
+        src = make_cobol(
+            [
+                "IF WS-A > 5",
+                "    IF WS-B > 10",
+                "        IF WS-C > 20",
+                '            DISPLAY "DEEP"',
+                "        ELSE",
+                '            DISPLAY "MID"',
+                "        END-IF",
+                "    END-IF",
+                "END-IF.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-A PIC 9(5) VALUE 10.",
+                "       01 WS-B PIC 9(5) VALUE 15.",
+                "       01 WS-C PIC 9(5) VALUE 25.",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "DEEP"
+
+    def test_three_level_nested_if_middle_false(self):
+        """3-level nested IF: middle condition false → no output."""
+        src = make_cobol(
+            [
+                "IF WS-A > 5",
+                "    IF WS-B > 10",
+                "        IF WS-C > 20",
+                '            DISPLAY "DEEP"',
+                "        ELSE",
+                '            DISPLAY "MID"',
+                "        END-IF",
+                "    ELSE",
+                '        DISPLAY "SHALLOW"',
+                "    END-IF",
+                "END-IF.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-A PIC 9(5) VALUE 10.",
+                "       01 WS-B PIC 9(5) VALUE 5.",
+                "       01 WS-C PIC 9(5) VALUE 25.",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "SHALLOW"
+
+
+# ---------------------------------------------------------------------------
+# 33. 3-level PERFORM VARYING AFTER — triple nested loop
+# ---------------------------------------------------------------------------
+class TestPerformVaryingAfter3Level:
+    def test_three_level_varying(self):
+        """3-level PERFORM VARYING: 2 * 2 * 2 = 8 iterations."""
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. VARY3.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-I PIC 9(5) VALUE 0.\n"
+            "       01 WS-J PIC 9(5) VALUE 0.\n"
+            "       01 WS-K PIC 9(5) VALUE 0.\n"
+            "       01 WS-COUNT PIC 9(5) VALUE 0.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           PERFORM COUNT-PARA VARYING WS-I FROM 1 BY 1\n"
+            "               UNTIL WS-I > 2\n"
+            "               AFTER WS-J FROM 1 BY 1\n"
+            "               UNTIL WS-J > 2\n"
+            "               AFTER WS-K FROM 1 BY 1\n"
+            "               UNTIL WS-K > 2.\n"
+            "           DISPLAY WS-COUNT.\n"
+            "           STOP RUN.\n"
+            "       COUNT-PARA.\n"
+            "           ADD 1 TO WS-COUNT.\n"
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "8"
+
+
+# ---------------------------------------------------------------------------
+# 34. DIVIDE INTO — DIVIDE A INTO B means B = B / A
+# ---------------------------------------------------------------------------
+class TestDivideInto:
+    def test_divide_into(self):
+        """DIVIDE 5 INTO WS-B: WS-B = WS-B / 5 = 20 / 5 = 4."""
+        src = make_cobol(
+            [
+                "DIVIDE 5 INTO WS-B.",
+                "DISPLAY WS-B.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-B PIC 9(5) VALUE 20.",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "4"
+
+
+# ---------------------------------------------------------------------------
+# 35. IS NUMERIC / IS ALPHABETIC — class conditions
+# ---------------------------------------------------------------------------
+class TestClassConditions:
+    def test_is_numeric_true(self):
+        """IS NUMERIC on digit string → true branch."""
+        src = make_cobol(
+            [
+                "IF WS-TEXT IS NUMERIC",
+                '    DISPLAY "YES"',
+                "ELSE",
+                '    DISPLAY "NO"',
+                "END-IF.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                '       01 WS-TEXT PIC X(5) VALUE "12345".',
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "YES"
+
+    def test_is_numeric_false(self):
+        """IS NUMERIC on alpha string → false branch."""
+        src = make_cobol(
+            [
+                "IF WS-TEXT IS NUMERIC",
+                '    DISPLAY "YES"',
+                "ELSE",
+                '    DISPLAY "NO"',
+                "END-IF.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                '       01 WS-TEXT PIC X(5) VALUE "HELLO".',
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "NO"
+
+    def test_is_alphabetic_true(self):
+        """IS ALPHABETIC on letter string → true branch."""
+        src = make_cobol(
+            [
+                "IF WS-TEXT IS ALPHABETIC",
+                '    DISPLAY "ALPHA"',
+                "ELSE",
+                '    DISPLAY "NOT"',
+                "END-IF.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                '       01 WS-TEXT PIC X(5) VALUE "HELLO".',
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "ALPHA"
+
+
+# ---------------------------------------------------------------------------
+# 36. Sign conditions — POSITIVE, NEGATIVE, ZERO
+# ---------------------------------------------------------------------------
+class TestSignConditions:
+    def test_is_positive(self):
+        src = make_cobol(
+            [
+                "IF WS-A IS POSITIVE",
+                '    DISPLAY "POS"',
+                "ELSE",
+                '    DISPLAY "NOT-POS"',
+                "END-IF.",
+                "STOP RUN.",
+            ],
+            data_lines=["       01 WS-A PIC S9(5) VALUE 10."],
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "POS"
+
+    def test_is_negative(self):
+        src = make_cobol(
+            [
+                "IF WS-A IS NEGATIVE",
+                '    DISPLAY "NEG"',
+                "ELSE",
+                '    DISPLAY "NOT-NEG"',
+                "END-IF.",
+                "STOP RUN.",
+            ],
+            data_lines=["       01 WS-A PIC S9(5) VALUE -5."],
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "NEG"
+
+    def test_is_zero(self):
+        src = make_cobol(
+            [
+                "IF WS-A IS ZERO",
+                '    DISPLAY "ZERO"',
+                "ELSE",
+                '    DISPLAY "NOT-ZERO"',
+                "END-IF.",
+                "STOP RUN.",
+            ],
+            data_lines=["       01 WS-A PIC S9(5) VALUE 0."],
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "ZERO"

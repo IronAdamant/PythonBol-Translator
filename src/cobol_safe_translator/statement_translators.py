@@ -441,6 +441,14 @@ def translate_compute(
                 f"# COMPUTE: {' '.join(ops)}",
                 f"# TODO(high): COMPUTE has no right-hand side — manual translation required",
             ]
+        # Validate expression syntax — emit TODO on parse failure
+        try:
+            compile(expr, '<compute>', 'eval')
+        except SyntaxError:
+            return [
+                f"# COMPUTE: {' '.join(ops)}",
+                f"# TODO(high): expression could not be translated — manual review required",
+            ]
         results = [f"# COMPUTE: {' '.join(ops)}"]
         for t in targets:
             results.append(
