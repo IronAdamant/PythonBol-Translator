@@ -7,6 +7,8 @@ file status, DELETE, START, CANCEL, JSON, XML translation methods.
 
 from __future__ import annotations
 
+import re
+
 from .models import (
     CobolStatement,
     DataItem,
@@ -24,6 +26,9 @@ from .utils import (
     resolve_operand as _resolve_operand_base,
 )
 
+_FD_RE = re.compile(r"^\s*(?:FD|SD)\s+([\w-]+)", re.IGNORECASE)
+_LEVEL_01_RE = re.compile(r"^\s*01\s+([\w-]+)", re.IGNORECASE)
+
 
 class VerbTranslationMixin:
     """Verb-specific translation methods for PythonMapper."""
@@ -34,17 +39,14 @@ class VerbTranslationMixin:
         Scans raw lines to find FD/SD declarations and their 01-level records.
         This lets WRITE (which uses record names) find the correct file adapter.
         """
-        import re
-        fd_re = re.compile(r"^\s*(?:FD|SD)\s+([\w-]+)", re.IGNORECASE)
-        level_re = re.compile(r"^\s*01\s+([\w-]+)", re.IGNORECASE)
         current_fd: str | None = None
         for line in self.program.raw_lines:
-            fd_m = fd_re.match(line)
+            fd_m = _FD_RE.match(line)
             if fd_m:
                 current_fd = fd_m.group(1).upper()
                 continue
             if current_fd:
-                lev_m = level_re.match(line)
+                lev_m = _LEVEL_01_RE.match(line)
                 if lev_m:
                     rec_name = lev_m.group(1).upper()
                     py_rec = _to_python_name(rec_name)

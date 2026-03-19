@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import ast
 import importlib
-import os
 import shutil
 import sys
 import tempfile
+from pathlib import Path
 
 
 def validate_generated_python(
@@ -48,9 +48,8 @@ def validate_generated_python(
     # Step 2: import test — write to temp dir, import, instantiate Program
     tmp_dir_obj = tempfile.mkdtemp()
     try:
-        tmp_path = os.path.join(tmp_dir_obj, "generated_module.py")
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(source_code)
+        tmp_path = Path(tmp_dir_obj) / "generated_module.py"
+        tmp_path.write_text(source_code, encoding="utf-8")
 
         module_name = "generated_module"
 

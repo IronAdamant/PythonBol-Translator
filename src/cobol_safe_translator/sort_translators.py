@@ -11,8 +11,19 @@ where the return value is a list of Python source lines.
 
 from __future__ import annotations
 
+from typing import TypedDict
+
 from .models import DataItem, PicCategory
 from .utils import _to_method_name, _to_python_name, _upper_ops, extract_from_expr
+
+
+class _SortMergeClauses(TypedDict):
+    sort_file: str
+    keys: list[tuple[str, list[str]]]
+    using: list[str]
+    giving: list[str]
+    input_procedure: tuple[str, str | None] | None
+    output_procedure: tuple[str, str | None] | None
 
 # Clause keywords that terminate field-name collection in KEY clauses
 _CLAUSE_STOPS = frozenset((
@@ -40,13 +51,13 @@ def _parse_procedure_clause(ops: list[str], upper_ops: list[str], i: int) -> tup
     return i, (start_para, end_para)
 
 
-def _parse_sort_merge_clauses(ops: list[str]) -> dict[str, object]:
+def _parse_sort_merge_clauses(ops: list[str]) -> _SortMergeClauses:
     """Parse SORT/MERGE operand list into structured clauses.
 
-    Returns a dict with keys: sort_file, keys, using, giving,
+    Returns a typed dict with keys: sort_file, keys, using, giving,
     input_procedure, output_procedure.
     """
-    result: dict[str, object] = {
+    result: _SortMergeClauses = {
         "sort_file": "", "keys": [], "using": [], "giving": [],
         "input_procedure": None, "output_procedure": None,
     }
@@ -237,9 +248,9 @@ def translate_sort(
 
     c = _parse_sort_merge_clauses(ops)
     sf = _to_python_name(c["sort_file"])
-    keys: list[tuple[str, list[str]]] = c["keys"]  # type: ignore[assignment]
-    using: list[str] = c["using"]  # type: ignore[assignment]
-    giving: list[str] = c["giving"]  # type: ignore[assignment]
+    keys: list[tuple[str, list[str]]] = c["keys"]
+    using: list[str] = c["using"]
+    giving: list[str] = c["giving"]
     in_proc = c["input_procedure"]
     out_proc = c["output_procedure"]
 
@@ -277,13 +288,13 @@ def translate_sort(
             lines.extend(_emit_read_loop(_to_python_name(uf), rec_var))
         lines.extend(_emit_sort_call(keys, rec_var, field_offsets))
         lines.append(f"self._sort_sorted = list({rec_var})")
-        lines.extend(_emit_proc_call(out_proc, "OUTPUT PROCEDURE"))  # type: ignore[arg-type]
+        lines.extend(_emit_proc_call(out_proc, "OUTPUT PROCEDURE"))
         return lines
 
     # INPUT PROCEDURE + GIVING
     if in_proc and giving:
         lines.append(f"self._sort_work = []")
-        lines.extend(_emit_proc_call(in_proc, "INPUT PROCEDURE"))  # type: ignore[arg-type]
+        lines.extend(_emit_proc_call(in_proc, "INPUT PROCEDURE"))
         lines.extend(_emit_sort_call(keys, f"self._sort_work", field_offsets))
         for gf in giving:
             lines.extend(_emit_write_loop(_to_python_name(gf), f"self._sort_work"))
@@ -292,10 +303,10 @@ def translate_sort(
     # INPUT PROCEDURE + OUTPUT PROCEDURE
     if in_proc and out_proc:
         lines.append(f"self._sort_work = []")
-        lines.extend(_emit_proc_call(in_proc, "INPUT PROCEDURE"))  # type: ignore[arg-type]
+        lines.extend(_emit_proc_call(in_proc, "INPUT PROCEDURE"))
         lines.extend(_emit_sort_call(keys, f"self._sort_work", field_offsets))
         lines.append(f"self._sort_sorted = list(self._sort_work)")
-        lines.extend(_emit_proc_call(out_proc, "OUTPUT PROCEDURE"))  # type: ignore[arg-type]
+        lines.extend(_emit_proc_call(out_proc, "OUTPUT PROCEDURE"))
         return lines
 
     # Fallback
@@ -311,9 +322,9 @@ def translate_merge(ops: list[str]) -> list[str]:
 
     c = _parse_sort_merge_clauses(ops)
     mf = _to_python_name(c["sort_file"])
-    keys: list[tuple[str, list[str]]] = c["keys"]  # type: ignore[assignment]
-    using: list[str] = c["using"]  # type: ignore[assignment]
-    giving: list[str] = c["giving"]  # type: ignore[assignment]
+    keys: list[tuple[str, list[str]]] = c["keys"]
+    using: list[str] = c["using"]
+    giving: list[str] = c["giving"]
     out_proc = c["output_procedure"]
 
     lines: list[str] = [f"# MERGE {c['sort_file']}"]
@@ -362,7 +373,7 @@ def translate_merge(ops: list[str]) -> list[str]:
             lines.extend(_emit_write_loop(_to_python_name(gf), merged_var))
     elif out_proc:
         lines.append(f"self._{mf}_sorted = list({merged_var})")
-        lines.extend(_emit_proc_call(out_proc, "OUTPUT PROCEDURE"))  # type: ignore[arg-type]
+        lines.extend(_emit_proc_call(out_proc, "OUTPUT PROCEDURE"))
     else:
         lines.append("# TODO(high): MERGE has no GIVING or OUTPUT PROCEDURE — manual translation required")
 

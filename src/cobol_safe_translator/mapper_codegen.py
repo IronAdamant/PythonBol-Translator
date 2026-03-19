@@ -33,6 +33,14 @@ from .utils import (
 )
 
 
+def _wrap_occurs(inner: str, occurs_chain: list[int]) -> str:
+    """Wrap an expression in nested list comprehensions for OCCURS chains."""
+    expr = inner
+    for n in reversed(occurs_chain):
+        expr = f"[{expr} for _ in range({n})]"
+    return expr
+
+
 class CodegenMixin:
     """Code generation methods for PythonMapper."""
 
@@ -220,10 +228,7 @@ class CodegenMixin:
                 type_name = "CobolString"
 
             if occurs_chain:
-                # Wrap in nested list comprehensions (innermost OCCURS first)
-                expr = inner
-                for n in reversed(occurs_chain):
-                    expr = f"[{expr} for _ in range({n})]"
+                expr = _wrap_occurs(inner, occurs_chain)
                 lines.append(
                     f"{prefix}{py_name}: list = field(default_factory=lambda: {expr})"
                 )
@@ -237,9 +242,7 @@ class CodegenMixin:
         elif item.usage and item.usage.upper() == "INDEX":
             # INDEX usage -- 1-based index value (no PIC needed)
             if occurs_chain:
-                expr = "1"
-                for n in reversed(occurs_chain):
-                    expr = f"[{expr} for _ in range({n})]"
+                expr = _wrap_occurs("1", occurs_chain)
                 lines.append(
                     f"{prefix}{py_name}: list = field(default_factory=lambda: {expr})"
                 )

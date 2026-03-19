@@ -615,50 +615,40 @@ class IndexedFileAdapter:
             "GREATER OR EQUAL": ">=", "LESS": "<", "NOT GREATER": "<=",
         }
         op = op_map.get(comparison.upper(), ">=")
+        str_key = str(key)
 
         if op == "=":
-            # Position at the exact key
-            pos_row = self._db.execute(
-                "SELECT COUNT(*) FROM records WHERE record_key < ?",
-                (str(key),),
-            ).fetchone()
             # Verify the key actually exists
             exists = self._db.execute(
                 "SELECT 1 FROM records WHERE record_key = ?",
-                (str(key),),
+                (str_key,),
             ).fetchone()
             if exists is None:
                 self._status = "23"
                 return
+
+        # Determine the count query based on operator
+        if op in ("=", ">=", "<", "<="):
+            count_op = "<"
         elif op == ">":
-            pos_row = self._db.execute(
-                "SELECT COUNT(*) FROM records WHERE record_key <= ?",
-                (str(key),),
-            ).fetchone()
-        elif op == ">=":
-            pos_row = self._db.execute(
-                "SELECT COUNT(*) FROM records WHERE record_key < ?",
-                (str(key),),
-            ).fetchone()
-        elif op == "<":
-            pos_row = self._db.execute(
-                "SELECT COUNT(*) FROM records WHERE record_key < ?",
-                (str(key),),
-            ).fetchone()
+            count_op = "<="
+        else:
+            count_op = "<"
+
+        pos_row = self._db.execute(
+            f"SELECT COUNT(*) FROM records WHERE record_key {count_op} ?",
+            (str_key,),
+        ).fetchone()
+
+        if op == "<":
             if pos_row and pos_row[0] == 0:
                 self._status = "23"
                 return
-            # Position at the last record before the key
             if pos_row:
                 self._seq_position = pos_row[0] - 1
                 self._current_key = key
                 self._status = "00"
                 return
-        else:
-            pos_row = self._db.execute(
-                "SELECT COUNT(*) FROM records WHERE record_key < ?",
-                (str(key),),
-            ).fetchone()
 
         if pos_row is not None:
             self._seq_position = pos_row[0]

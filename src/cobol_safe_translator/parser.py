@@ -406,6 +406,13 @@ _GLOBAL_RE = re.compile(r"\bGLOBAL\b", re.IGNORECASE)
 _JUSTIFIED_RE = re.compile(r"\bJUSTIFIED\b|\bJUST\b", re.IGNORECASE)
 _BLANK_WHEN_ZERO_RE = re.compile(r"\bBLANK\s+WHEN\s+ZERO(?:S|ES)?\b", re.IGNORECASE)
 
+# Section boundary keywords used to delimit DATA DIVISION sections.
+_SECTION_BOUNDARIES = (
+    "WORKING-STORAGE SECTION", "LINKAGE SECTION", "FILE SECTION",
+    "LOCAL-STORAGE SECTION", "SCREEN SECTION",
+    "COMMUNICATION SECTION", "REPORT SECTION",
+)
+
 
 def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem], list[DataItem], list[ReportDescription], list[DataItem]]:
     """Parse DATA DIVISION into file, working-storage, linkage items, report descriptions, and local-storage items."""
@@ -417,11 +424,6 @@ def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem
 
     # Detect and extract REPORT SECTION and SCREEN SECTION lines for their
     # dedicated parsers, so they do not get processed as regular data items.
-    _SECTION_BOUNDARIES = (
-        "WORKING-STORAGE SECTION", "LINKAGE SECTION", "FILE SECTION",
-        "LOCAL-STORAGE SECTION", "SCREEN SECTION",
-        "COMMUNICATION SECTION", "REPORT SECTION",
-    )
     report_lines: list[str] = []
     screen_lines: list[str] = []
     remaining_lines: list[str] = []
@@ -626,26 +628,27 @@ def _parse_data_item(line: str) -> DataItem | None:
     )
 
 
-def _build_hierarchy(flat_items: list[DataItem]) -> list[DataItem]:
+def _level_hierarchy(flat_items: list, *, level77_independent: bool = False) -> list:
     """Build parent-child hierarchy from flat level-numbered items.
 
-    Returns only the top-level (01/77) items with children nested.
-    Level 77 items are independent (no children) and always root-level.
+    Works with any type that has ``.level: int`` and ``.children: list``
+    attributes (DataItem, ScreenField).
+
+    When *level77_independent* is True, level-77 items are treated as
+    independent root entries (COBOL DATA DIVISION semantics).
     """
     if not flat_items:
         return []
 
-    roots: list[DataItem] = []
-    stack: list[DataItem] = []
+    roots: list = []
+    stack: list = []
 
     for item in flat_items:
-        # Level 77 is always independent — never nested under another item
-        if item.level == 77:
+        if level77_independent and item.level == 77:
             stack.clear()
             roots.append(item)
             continue
 
-        # Pop stack until we find a parent with a lower level
         while stack and stack[-1].level >= item.level:
             stack.pop()
 
@@ -659,9 +662,13 @@ def _build_hierarchy(flat_items: list[DataItem]) -> list[DataItem]:
     return roots
 
 
+def _build_hierarchy(flat_items: list[DataItem]) -> list[DataItem]:
+    """Build parent-child hierarchy from flat level-numbered data items."""
+    return _level_hierarchy(flat_items, level77_independent=True)
+
+
 # --- SCREEN SECTION parser ---
 
-_SCREEN_LEVEL_RE = re.compile(r"^(\d{1,2})\s+([\w-]+)", re.IGNORECASE)
 _SCREEN_LINE_RE = re.compile(r"\bLINE\s+(?:NUMBER\s+(?:IS\s+)?)?(\d+)", re.IGNORECASE)
 _SCREEN_COL_RE = re.compile(r"\b(?:COL(?:UMN)?)\s+(?:NUMBER\s+(?:IS\s+)?)?(\d+)", re.IGNORECASE)
 _SCREEN_VALUE_RE = re.compile(r"""\bVALUE\s+(?:IS\s+)?("[^"]*"|'[^']*')""", re.IGNORECASE)
@@ -698,7 +705,7 @@ def _merge_screen_continuations(lines: list[str]) -> list[str]:
         stripped = line.strip()
         if not stripped:
             continue
-        if _SCREEN_LEVEL_RE.match(stripped):
+        if _LEVEL_RE.match(stripped):
             merged.append(stripped)
         elif merged:
             # Continuation — append to the previous entry
@@ -720,7 +727,7 @@ def parse_screen_section(lines: list[str]) -> list[ScreenField]:
             continue
 
         # Match level number + name
-        level_m = _SCREEN_LEVEL_RE.match(stripped)
+        level_m = _LEVEL_RE.match(stripped)
         if not level_m:
             continue
 
@@ -796,29 +803,7 @@ def parse_screen_section(lines: list[str]) -> list[ScreenField]:
 
         flat.append(sf)
 
-    return _build_screen_hierarchy(flat)
-
-
-def _build_screen_hierarchy(flat: list[ScreenField]) -> list[ScreenField]:
-    """Build parent-child hierarchy from flat level-numbered screen fields."""
-    if not flat:
-        return []
-
-    roots: list[ScreenField] = []
-    stack: list[ScreenField] = []
-
-    for sf in flat:
-        while stack and stack[-1].level >= sf.level:
-            stack.pop()
-
-        if stack:
-            stack[-1].children.append(sf)
-        else:
-            roots.append(sf)
-
-        stack.append(sf)
-
-    return roots
+    return _level_hierarchy(flat)
 
 
 # --- Multi-program splitting ---
@@ -869,11 +854,6 @@ def _extract_screen_lines(data_lines: list[str]) -> list[str]:
     header itself).  Used by _parse_single_program to feed the screen
     parser without changing parse_data_division's return type.
     """
-    _SECTION_BOUNDARIES = (
-        "WORKING-STORAGE SECTION", "LINKAGE SECTION", "FILE SECTION",
-        "LOCAL-STORAGE SECTION", "REPORT SECTION",
-        "COMMUNICATION SECTION",
-    )
     screen_lines: list[str] = []
     in_screen = False
     for line in data_lines:
