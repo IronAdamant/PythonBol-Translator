@@ -267,8 +267,8 @@ def _divide_giving_results(
     for t in giving_targets:
         results.append(f"self.data.{_to_python_name(t)}.set({dividend} / {divisor})")
     if has_remainder and remainder_target:
-        results.append(f"# TODO(high): REMAINDER {remainder_target} — compute modulo manually")
-        results.append(f"# self.data.{_to_python_name(remainder_target)}.set({dividend} % {divisor})")
+        py_rem = _to_python_name(remainder_target)
+        results.append(f"self.data.{py_rem}.set(int({dividend}) % int({divisor}))")
     return results
 
 

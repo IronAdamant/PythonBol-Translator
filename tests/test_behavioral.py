@@ -606,10 +606,6 @@ class TestSubtractGiving:
 # 15. DIVIDE GIVING REMAINDER — quotient and remainder
 # ---------------------------------------------------------------------------
 class TestDivideGivingRemainder:
-    @pytest.mark.skip(
-        reason="REMAINDER clause generates commented-out TODO stub; "
-               "remainder not computed in generated code"
-    )
     def test_divide_giving_remainder(self):
         """DIVIDE 17 BY 5 GIVING WS-Q REMAINDER WS-R -> Q=3, R=2."""
         src = make_cobol(
@@ -789,3 +785,145 @@ class TestFunctionUpperCase:
         )
         stdout = _run_cobol_program(src)
         assert "HELLO" in stdout
+
+
+# ---------------------------------------------------------------------------
+# 22. Signed arithmetic — S9 field with negative values
+# ---------------------------------------------------------------------------
+class TestSignedArithmetic:
+    def test_signed_add_negative(self):
+        """S9(5) field: ADD negative value, verify signed result."""
+        src = make_cobol(
+            [
+                "ADD WS-NEG TO WS-VAL.",
+                "DISPLAY WS-VAL.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-VAL PIC S9(5) VALUE 100.",
+                "       01 WS-NEG PIC S9(5) VALUE -30.",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "70"
+
+    def test_signed_subtract_to_negative(self):
+        """Subtract larger value from smaller, result should be negative."""
+        src = make_cobol(
+            [
+                "SUBTRACT WS-B FROM WS-A.",
+                "DISPLAY WS-A.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-A PIC S9(5) VALUE 10.",
+                "       01 WS-B PIC S9(5) VALUE 25.",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        assert "-15" in stdout
+
+
+# ---------------------------------------------------------------------------
+# 23. UNSTRING — split delimited string
+# ---------------------------------------------------------------------------
+class TestUnstring:
+    def test_unstring_delimited(self):
+        """UNSTRING with DELIMITED BY splits into multiple targets."""
+        src = make_cobol(
+            [
+                'UNSTRING WS-INPUT DELIMITED BY ","',
+                "    INTO WS-FIRST WS-SECOND WS-THIRD.",
+                "DISPLAY WS-FIRST.",
+                "DISPLAY WS-SECOND.",
+                "DISPLAY WS-THIRD.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                '       01 WS-INPUT PIC X(20) VALUE "ALPHA,BETA,GAMMA".',
+                "       01 WS-FIRST PIC X(10) VALUE SPACES.",
+                "       01 WS-SECOND PIC X(10) VALUE SPACES.",
+                "       01 WS-THIRD PIC X(10) VALUE SPACES.",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        lines = stdout.strip().splitlines()
+        assert "ALPHA" in lines[0]
+        assert "BETA" in lines[1]
+        assert "GAMMA" in lines[2]
+
+
+# ---------------------------------------------------------------------------
+# 24. PERFORM VARYING AFTER — nested 2-level loop
+# ---------------------------------------------------------------------------
+class TestPerformVaryingAfter:
+    def test_varying_after_nested_loop(self):
+        """2-level nested PERFORM VARYING: outer 1-3, inner 1-2 → 6 iterations."""
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. VARY-AFTER.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-I PIC 9(5) VALUE 0.\n"
+            "       01 WS-J PIC 9(5) VALUE 0.\n"
+            "       01 WS-COUNT PIC 9(5) VALUE 0.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           PERFORM COUNT-PARA VARYING WS-I FROM 1 BY 1\n"
+            "               UNTIL WS-I > 3\n"
+            "               AFTER WS-J FROM 1 BY 1\n"
+            "               UNTIL WS-J > 2.\n"
+            "           DISPLAY WS-COUNT.\n"
+            "           STOP RUN.\n"
+            "       COUNT-PARA.\n"
+            "           ADD 1 TO WS-COUNT.\n"
+        )
+        stdout = _run_cobol_program(src)
+        # 3 outer * 2 inner = 6 iterations
+        assert stdout.strip() == "6"
+
+
+# ---------------------------------------------------------------------------
+# 25. ACCEPT FROM DATE — YYMMDD format
+# ---------------------------------------------------------------------------
+class TestAcceptFromDate:
+    def test_accept_from_date(self):
+        """ACCEPT FROM DATE produces 6-digit YYMMDD string."""
+        src = make_cobol(
+            [
+                "ACCEPT WS-DATE FROM DATE.",
+                "DISPLAY WS-DATE.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-DATE PIC X(6) VALUE SPACES.",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        date_str = stdout.strip()
+        # Should be exactly 6 digits in YYMMDD format
+        assert len(date_str) == 6
+        assert date_str.isdigit()
+
+
+# ---------------------------------------------------------------------------
+# 26. Decimal COMPUTE — PIC 9(3)V99 multiplication
+# ---------------------------------------------------------------------------
+class TestDecimalCompute:
+    def test_decimal_multiplication(self):
+        """COMPUTE with decimal fields: 12.50 * 3 = 37.50."""
+        src = make_cobol(
+            [
+                "COMPUTE WS-RESULT = WS-PRICE * WS-QTY.",
+                "DISPLAY WS-RESULT.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-PRICE PIC 9(3)V99 VALUE 12.50.",
+                "       01 WS-QTY PIC 9(3) VALUE 3.",
+                "       01 WS-RESULT PIC 9(5)V99 VALUE 0.",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        # 12.50 * 3 = 37.50
+        assert "37.5" in stdout

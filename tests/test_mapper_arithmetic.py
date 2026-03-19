@@ -56,8 +56,9 @@ class TestGivingClause:
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "TODO(high)" in source
-        assert "REMAINDER" in source
+        # REMAINDER now generates active modulo code
+        rem_lines = [l for l in source.split("\n") if "ws_a.set(" in l and "%" in l and "field(" not in l]
+        assert len(rem_lines) >= 1, "Expected ws_a.set(... % ...) for REMAINDER"
 
 
 class TestFigurativeConstantsInArithmetic:

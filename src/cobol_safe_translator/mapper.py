@@ -226,11 +226,16 @@ class PythonMapper:
             return "0" if numeric else "\x00"
         return value
 
-    def _data_item_fields(self, item: DataItem, indent: int = 1) -> list[str]:
+    def _data_item_fields(
+        self, item: DataItem, indent: int = 1, parent_occurs: list[int] | None = None,
+    ) -> list[str]:
         """Generate dataclass fields for a data item and its children."""
         lines: list[str] = []
         prefix = "    " * indent
         py_name = _to_python_name(item.name)
+
+        # Build the occurs chain (outer → inner nesting)
+        occurs_chain = (parent_occurs or []) + ([item.occurs] if item.occurs else [])
 
         # Deduplicate field names (e.g., multiple FILLER items)
         if py_name in self._field_name_counts:
@@ -251,33 +256,31 @@ class PythonMapper:
         if item.children:
             # Group item — add a comment
             lines.append(f"{prefix}# Group: {item.name} (level {item.level:02d})")
-            # TODO(high): nested OCCURS — when a group with OCCURS contains children
-            # that also have OCCURS, the generated dataclass fields should produce
-            # nested list structures (lists of lists) for proper multi-dimensional
-            # table access.  Currently each OCCURS level is generated independently.
-            if item.occurs and any(c.occurs for c in item.children):
-                lines.append(
-                    f"{prefix}# TODO(high): nested OCCURS detected — "
-                    f"{item.name} OCCURS {item.occurs} with child OCCURS; "
-                    f"manual nested-list initialisation required"
-                )
             for child in item.children:
-                lines.extend(self._data_item_fields(child, indent))
+                lines.extend(self._data_item_fields(child, indent, occurs_chain))
         elif item.pic:
             if item.pic.category in (PicCategory.NUMERIC, PicCategory.EDITED):
                 dec = item.pic.decimals
                 int_digits = item.pic.size - dec
                 signed = "True" if item.pic.signed else "False"
                 init = self._translate_figurative(item.value, numeric=True) if item.value else "0"
-                lines.append(
-                    f"{prefix}{py_name}: CobolDecimal = field("
-                    f"default_factory=lambda: CobolDecimal({int_digits}, {dec}, {signed}, {init!r}))"
-                )
+                inner = f"CobolDecimal({int_digits}, {dec}, {signed}, {init!r})"
             else:
                 init = self._translate_figurative(item.value, numeric=False) if item.value else ""
+                inner = f"CobolString({item.pic.size}, {init!r})"
+
+            if occurs_chain:
+                # Wrap in nested list comprehensions (innermost OCCURS first)
+                expr = inner
+                for n in reversed(occurs_chain):
+                    expr = f"[{expr} for _ in range({n})]"
                 lines.append(
-                    f"{prefix}{py_name}: CobolString = field("
-                    f"default_factory=lambda: CobolString({item.pic.size}, {init!r}))"
+                    f"{prefix}{py_name}: list = field(default_factory=lambda: {expr})"
+                )
+            else:
+                type_name = "CobolDecimal" if item.pic.category in (PicCategory.NUMERIC, PicCategory.EDITED) else "CobolString"
+                lines.append(
+                    f"{prefix}{py_name}: {type_name} = field(default_factory=lambda: {inner})"
                 )
         else:
             # No PIC — group-level or filler

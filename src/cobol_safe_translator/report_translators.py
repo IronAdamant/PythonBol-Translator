@@ -187,6 +187,37 @@ def translate_generate(ops: list[str], reports: list[ReportDescription]) -> list
 
     lines: list[str] = [f"# GENERATE {ops[0]}"]
 
+    # --- Control break detection ---
+    if rd.controls:
+        for ctrl in rd.controls:
+            if ctrl.upper() == "FINAL":
+                continue
+            py_ctrl = _to_python_name(ctrl)
+            prev_attr = f"_rw_prev_{py_ctrl}"
+            lines.append(f"if hasattr(self, '{prev_attr}') and self.data.{py_ctrl}.value != self.{prev_attr}:")
+            # Emit matching CONTROL FOOTING groups
+            cf_groups = [g for g in rd.groups
+                         if g.type_clause.upper().startswith("CONTROL FOOTING")
+                         and ctrl.upper() in g.type_clause.upper()]
+            if cf_groups:
+                lines.append(f"    # Control Footing for {ctrl}")
+                for group in cf_groups:
+                    for idx in range(len(group.lines)):
+                        for fl in _format_line_expr(group, idx):
+                            lines.append(f"    {fl}")
+            # Emit matching CONTROL HEADING groups
+            ch_groups = [g for g in rd.groups
+                         if g.type_clause.upper().startswith("CONTROL HEADING")
+                         and ctrl.upper() in g.type_clause.upper()]
+            if ch_groups:
+                lines.append(f"    # Control Heading for {ctrl}")
+                for group in ch_groups:
+                    for idx in range(len(group.lines)):
+                        for fl in _format_line_expr(group, idx):
+                            lines.append(f"    {fl}")
+            # Save current value for next comparison
+            lines.append(f"self.{prev_attr} = self.data.{py_ctrl}.value")
+
     # Accumulate SUM fields from the detail data
     for group in rd.groups:
         for rline in group.lines:
@@ -205,6 +236,29 @@ def translate_generate(ops: list[str], reports: list[ReportDescription]) -> list
                     if field.name:
                         py_name = _to_python_name(field.name)
                         lines.append(f"self._rw_sums['{py_name}'] = self._rw_sums.get('{py_name}', 0) + {val_expr}")
+
+    # --- Page break detection ---
+    if rd.page_limit > 0 or rd.last_detail > 0:
+        limit = rd.last_detail if rd.last_detail > 0 else rd.page_limit
+        lines.append(f"if self._rw_line_counter >= {limit}:")
+        # Page footing
+        pf_groups = _groups_by_type(rd, "PAGE FOOTING")
+        if pf_groups:
+            lines.append("    # Page Footing")
+            for group in pf_groups:
+                for idx in range(len(group.lines)):
+                    for fl in _format_line_expr(group, idx):
+                        lines.append(f"    {fl}")
+        # New page heading
+        ph_groups = _groups_by_type(rd, "PAGE HEADING")
+        lines.append("    self._rw_page_counter += 1")
+        lines.append("    self._rw_line_counter = 0")
+        if ph_groups:
+            lines.append("    # Page Heading")
+            for group in ph_groups:
+                for idx in range(len(group.lines)):
+                    for fl in _format_line_expr(group, idx):
+                        lines.append(f"    {fl}")
 
     # Format and print the detail line
     lines.append("# Detail line")
@@ -245,11 +299,13 @@ def translate_terminate(ops: list[str], reports: list[ReportDescription]) -> lis
             for idx in range(len(group.lines)):
                 lines.extend(_format_line_expr(group, idx))
 
-    # Write output to file
+    # Write output to report file
+    rpt_filename = report_name.lower().replace("-", "_") + "_report.txt"
     lines.extend([
-        "# Write report output to file",
-        "for _rw_line in self._rw_output:",
-        "    print(_rw_line)  # TODO(high): replace with file write to report FD",
+        f"# Write report output to file",
+        f"with open({rpt_filename!r}, 'w') as _rw_f:",
+        "    for _rw_line in self._rw_output:",
+        "        _rw_f.write(_rw_line + '\\n')",
     ])
 
     return lines

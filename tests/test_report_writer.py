@@ -414,7 +414,7 @@ class TestTranslateTerminate:
         result = translate_terminate(["MY-REPORT"], [rd])
         combined = "\n".join(result)
         assert "_rw_output" in combined
-        assert "print" in combined
+        assert "open(" in combined
 
     def test_terminate_prints_report_footing(self):
         """TERMINATE should include REPORT FOOTING if present."""
