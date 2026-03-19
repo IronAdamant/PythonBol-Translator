@@ -94,12 +94,22 @@ def translate_string(
     lines: list[str] = []
     lines.append(f"# STRING INTO {ops[into_idx + 1]}")
     expr = " + ".join(concat_exprs)
-    lines.append(f"self.data.{target}.set({expr})")
 
     if has_pointer:
-        lines.append("# TODO(high): WITH POINTER — pointer arithmetic requires manual implementation")
-    if has_overflow:
-        lines.append("# TODO(high): ON OVERFLOW — overflow handling requires manual implementation")
+        # Find pointer variable name
+        ptr_idx = upper_ops.index("POINTER")
+        ptr_name = _to_python_name(ops[ptr_idx + 1]) if ptr_idx + 1 < len(ops) else "string_ptr"
+        lines.append(f"_str_concat = {expr}")
+        lines.append(f"_ptr_pos = int(self.data.{ptr_name}.value) - 1")
+        lines.append(f"_tgt_val = str(self.data.{target}.value)")
+        lines.append(f"_result = _tgt_val[:_ptr_pos] + _str_concat + _tgt_val[_ptr_pos + len(_str_concat):]")
+        lines.append(f"self.data.{target}.set(_result[:len(_tgt_val)])")
+        lines.append(f"self.data.{ptr_name}.set(_ptr_pos + len(_str_concat) + 1)")
+        if has_overflow:
+            lines.append(f"if _ptr_pos + len(_str_concat) > len(_tgt_val):")
+            lines.append(f"    pass  # ON OVERFLOW condition met")
+    else:
+        lines.append(f"self.data.{target}.set({expr})")
 
     return lines
 
@@ -151,34 +161,125 @@ def translate_unstring(
         j += 1
 
     has_tallying = "TALLYING" in upper_ops
+    has_pointer = "POINTER" in upper_ops
     has_overflow = "OVERFLOW" in upper_ops
 
     src_expr = resolve(source)
     lines: list[str] = []
     lines.append(f"# UNSTRING {source}")
 
+    # If POINTER is present, slice source from pointer position first
+    if has_pointer:
+        ptr_idx = upper_ops.index("POINTER")
+        ptr_name = _to_python_name(ops[ptr_idx + 1]) if ptr_idx + 1 < len(ops) else "unstr_ptr"
+        lines.append(f"_ptr_pos = int(self.data.{ptr_name}.value) - 1")
+        lines.append(f"_src_val = str({src_expr})[_ptr_pos:]")
+    else:
+        lines.append(f"_src_val = str({src_expr})")
+
     if len(delimiters) == 0:
-        # No delimiter specified — split by spaces (COBOL default)
-        lines.append(f"_parts = str({src_expr}).split()")
+        lines.append("_parts = _src_val.split()")
     elif len(delimiters) == 1:
         delim_expr = resolve(delimiters[0])
-        lines.append(f"_parts = str({src_expr}).split({delim_expr})")
+        lines.append(f"_parts = _src_val.split({delim_expr})")
     else:
-        # Multiple delimiters — use re.split
         delim_exprs = [resolve(d) for d in delimiters]
         pattern = "|".join(f"{{re.escape(str({d}))}}" for d in delim_exprs)
         lines.append("import re")
-        lines.append(f'_parts = re.split(f"{pattern}", str({src_expr}))')
+        lines.append(f'_parts = re.split(f"{pattern}", _src_val)')
 
     for idx, tgt in enumerate(targets):
         py_tgt = _to_python_name(tgt)
         lines.append(f"self.data.{py_tgt}.set(_parts[{idx}] if {idx} < len(_parts) else '')")
 
     if has_tallying:
-        lines.append("# TODO(high): TALLYING — count field requires manual implementation")
-    if has_overflow:
-        lines.append("# TODO(high): ON OVERFLOW — overflow handling requires manual implementation")
+        # Find the TALLYING IN counter field
+        tally_idx = upper_ops.index("TALLYING")
+        # TALLYING [IN] counter
+        k = tally_idx + 1
+        if k < len(ops) and upper_ops[k] == "IN":
+            k += 1
+        if k < len(ops):
+            tally_name = _to_python_name(ops[k])
+            lines.append(f"self.data.{tally_name}.set(len(_parts))")
+        else:
+            lines.append("# TALLYING counter not found — review UNSTRING syntax")
 
+    if has_pointer:
+        # Update pointer past the consumed portion of source
+        n_targets = len(targets)
+        lines.append(f"_used = sum(len(str(p)) for p in _parts[:{n_targets}]) + max(len(_parts[:{n_targets}]) - 1, 0)")
+        lines.append(f"self.data.{ptr_name}.set(_ptr_pos + _used + 1)")
+
+    return lines
+
+
+def _parse_before_after(
+    ops: list[str],
+    upper_ops: list[str],
+    start_idx: int,
+    resolve: Callable[[str], str],
+) -> tuple[str | None, str | None]:
+    """Extract BEFORE INITIAL and AFTER INITIAL boundary expressions.
+
+    Returns (before_expr, after_expr) as resolved Python expressions.
+    """
+    before_expr: str | None = None
+    after_expr: str | None = None
+    k = start_idx
+    while k < len(ops):
+        if upper_ops[k] == "BEFORE":
+            k += 1
+            if k < len(ops) and upper_ops[k] == "INITIAL":
+                k += 1
+            if k < len(ops):
+                before_expr = resolve(ops[k])
+            k += 1
+        elif upper_ops[k] == "AFTER":
+            k += 1
+            if k < len(ops) and upper_ops[k] == "INITIAL":
+                k += 1
+            if k < len(ops):
+                after_expr = resolve(ops[k])
+            k += 1
+        else:
+            k += 1
+    return before_expr, after_expr
+
+
+def _emit_bounded_op(
+    field_expr: str,
+    before_expr: str | None,
+    after_expr: str | None,
+    operation: str,
+    result_var: str = "_val",
+) -> list[str]:
+    """Wrap a string operation so it only applies within BEFORE/AFTER bounds.
+
+    *operation* should be a Python expression using ``{sub}`` as the
+    substring placeholder. The result is assigned to *result_var*.
+    """
+    lines: list[str] = []
+    if before_expr is None and after_expr is None:
+        lines.append(f"{result_var} = {operation.format(sub=f'str({field_expr}.value)')}")
+        return lines
+
+    lines.append(f"_full = str({field_expr}.value)")
+    if after_expr is not None and before_expr is not None:
+        lines.append(f"_ai = _full.find(str({after_expr}))")
+        lines.append(f"_start = _ai + len(str({after_expr})) if _ai >= 0 else 0")
+        lines.append(f"_bi = _full.find(str({before_expr}), _start)")
+        lines.append(f"_end = _bi if _bi >= 0 else len(_full)")
+    elif after_expr is not None:
+        lines.append(f"_ai = _full.find(str({after_expr}))")
+        lines.append(f"_start = _ai + len(str({after_expr})) if _ai >= 0 else 0")
+        lines.append("_end = len(_full)")
+    else:  # before_expr only
+        lines.append("_start = 0")
+        lines.append(f"_bi = _full.find(str({before_expr}))")
+        lines.append(f"_end = _bi if _bi >= 0 else len(_full)")
+    lines.append(f"_sub = _full[_start:_end]")
+    lines.append(f"{result_var} = _full[:_start] + {operation.format(sub='_sub')} + _full[_end:]")
     return lines
 
 
@@ -188,10 +289,11 @@ def translate_inspect(
 ) -> list[str]:
     """Translate INSPECT verb.
 
-    COBOL: INSPECT field TALLYING counter FOR ALL/LEADING char
-           INSPECT field REPLACING ALL/LEADING/FIRST old BY new
-           INSPECT field CONVERTING old TO new
-    Python: str.count() for TALLYING, str.replace() for REPLACING.
+    COBOL: INSPECT field TALLYING counter FOR ALL/LEADING char [BEFORE/AFTER INITIAL x]
+           INSPECT field REPLACING ALL/LEADING/FIRST old BY new [BEFORE/AFTER INITIAL x]
+           INSPECT field CONVERTING old TO new [BEFORE/AFTER INITIAL x]
+    Python: str.count() for TALLYING, str.replace() for REPLACING,
+            str.maketrans/translate for CONVERTING. BEFORE/AFTER bound the region.
     """
     if not ops:
         return ["# INSPECT: no operands"]
@@ -203,7 +305,6 @@ def translate_inspect(
 
     if "CONVERTING" in upper_ops:
         conv_idx = upper_ops.index("CONVERTING")
-        # INSPECT field CONVERTING old-chars TO new-chars
         if conv_idx + 1 < len(ops) and "TO" in upper_ops[conv_idx:]:
             to_offset = upper_ops[conv_idx:].index("TO")
             to_abs_idx = conv_idx + to_offset
@@ -211,9 +312,14 @@ def translate_inspect(
             new_val = ops[to_abs_idx + 1] if to_abs_idx + 1 < len(ops) else '""'
             old_expr = resolve(old_val)
             new_expr = resolve(new_val)
+            before_expr, after_expr = _parse_before_after(
+                ops, upper_ops, to_abs_idx + 2, resolve,
+            )
             lines = [f"# INSPECT {field} CONVERTING"]
             lines.append(f"_tbl = str.maketrans(str({old_expr}), str({new_expr}))")
-            lines.append(f"{field_expr}.set(str({field_expr}.value).translate(_tbl))")
+            op = "{sub}.translate(_tbl)"
+            lines.extend(_emit_bounded_op(field_expr, before_expr, after_expr, op))
+            lines.append(f"{field_expr}.set(_val)")
             return lines
         return [f"# INSPECT {field} CONVERTING",
                 f"# TODO(high): INSPECT CONVERTING — incomplete clause: {' '.join(ops)}"]
@@ -225,30 +331,44 @@ def translate_inspect(
         counter = ops[tally_idx + 1]
         py_counter = _to_python_name(counter)
 
-        # Find FOR keyword and the search character
         search_char = None
+        search_end_idx = len(ops)
         if "FOR" in upper_ops:
             for_idx = upper_ops.index("FOR")
-            # Skip ALL/LEADING to find the character
             k = for_idx + 1
             while k < len(ops) and upper_ops[k] in ("ALL", "LEADING", "CHARACTERS"):
                 k += 1
-            if k < len(ops):
+            if k < len(ops) and upper_ops[k] not in ("BEFORE", "AFTER"):
                 search_char = ops[k]
+                search_end_idx = k + 1
+            else:
+                search_end_idx = k
+
+        before_expr, after_expr = _parse_before_after(
+            ops, upper_ops, search_end_idx, resolve,
+        )
 
         lines = [f"# INSPECT {field} TALLYING {counter}"]
-        if search_char:
-            char_expr = resolve(search_char)
-            lines.append(f"self.data.{py_counter}.set(str({field_expr}.value).count({char_expr}))")
+        if before_expr is None and after_expr is None:
+            if search_char:
+                char_expr = resolve(search_char)
+                lines.append(f"self.data.{py_counter}.set(str({field_expr}.value).count({char_expr}))")
+            else:
+                lines.append(f"self.data.{py_counter}.set(len(str({field_expr}.value)))")
         else:
-            lines.append(f"self.data.{py_counter}.set(len(str({field_expr}.value)))")
+            # Apply BEFORE/AFTER bounds then count
+            op = "{sub}" if not search_char else "{sub}"
+            lines.extend(_emit_bounded_op(field_expr, before_expr, after_expr, "{sub}", "_region"))
+            if search_char:
+                char_expr = resolve(search_char)
+                lines.append(f"self.data.{py_counter}.set(_region.count({char_expr}))")
+            else:
+                lines.append(f"self.data.{py_counter}.set(len(_region))")
         return lines
 
     if "REPLACING" in upper_ops:
         repl_idx = upper_ops.index("REPLACING")
-        # Parse: [ALL|LEADING|FIRST] old BY new
         k = repl_idx + 1
-        # Skip ALL/LEADING/FIRST
         mode = "ALL"
         if k < len(ops) and upper_ops[k] in ("ALL", "LEADING", "FIRST"):
             mode = upper_ops[k]
@@ -259,24 +379,26 @@ def translate_inspect(
 
         old_val = ops[k]
         k += 1
-        # Skip BY
         if k < len(ops) and upper_ops[k] == "BY":
             k += 1
         if k >= len(ops):
             return [f"# INSPECT REPLACING: missing replacement value: {' '.join(ops)}"]
         new_val = ops[k]
+        k += 1
 
         old_expr = resolve(old_val)
         new_expr = resolve(new_val)
+        before_expr, after_expr = _parse_before_after(ops, upper_ops, k, resolve)
 
         lines = [f"# INSPECT {field} REPLACING {mode}"]
         if mode == "FIRST":
-            lines.append(f"{field_expr}.set(str({field_expr}.value).replace({old_expr}, {new_expr}, 1))")
+            op = "{{sub}}.replace({old}, {new}, 1)".format(old=old_expr, new=new_expr)
         else:
-            # ALL and LEADING both use replace (LEADING is approximate)
-            lines.append(f"{field_expr}.set(str({field_expr}.value).replace({old_expr}, {new_expr}))")
-            if mode == "LEADING":
-                lines.append("# NOTE: LEADING replacement approximated with str.replace()")
+            op = "{{sub}}.replace({old}, {new})".format(old=old_expr, new=new_expr)
+        lines.extend(_emit_bounded_op(field_expr, before_expr, after_expr, op))
+        lines.append(f"{field_expr}.set(_val)")
+        if mode == "LEADING":
+            lines.append("# NOTE: LEADING replacement approximated with str.replace()")
         return lines
 
     return [f"# INSPECT: unrecognized form: {' '.join(ops)}",

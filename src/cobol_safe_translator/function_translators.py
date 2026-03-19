@@ -18,8 +18,10 @@ from .utils import _is_numeric_literal
 # No-arg intrinsics (FUNCTION CURRENT-DATE, FUNCTION WHEN-COMPILED)
 _FUNCTION_INTRINSICS_0: dict[str, str] = {
     "CURRENT-DATE": "datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')[:21]",
-    "WHEN-COMPILED": "'compile_timestamp'",
+    "WHEN-COMPILED": "datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')[:21]",
     "RANDOM": "__import__('random').random()",
+    "PI": "3.14159265358979323846",
+    "E": "2.71828182845904523536",
 }
 
 # Single-arg intrinsics: template uses {0} for the resolved argument
@@ -47,6 +49,18 @@ _FUNCTION_INTRINSICS_1: dict[str, str] = {
     "ATAN": "__import__('math').atan({0})",
     "EXP": "__import__('math').exp({0})",
     "FACTORIAL": "__import__('math').factorial(int({0}))",
+    "SIGN": "(1 if ({0}) > 0 else (-1 if ({0}) < 0 else 0))",
+    "ORD-MAX": "max(ord(c) for c in str({0}))",
+    "ORD-MIN": "min(ord(c) for c in str({0}))",
+    "INTEGER-OF-DATE": "(datetime.datetime.strptime(str(int({0})), '%Y%m%d') - datetime.datetime(1601, 1, 1)).days + 1",
+    "DATE-OF-INTEGER": "(datetime.datetime(1601, 1, 1) + datetime.timedelta(days=int({0}) - 1)).strftime('%Y%m%d')",
+    "INTEGER-OF-DAY": "(datetime.datetime.strptime(str(int({0})), '%Y%j') - datetime.datetime(1601, 1, 1)).days + 1",
+    "DAY-OF-INTEGER": "(datetime.datetime(1601, 1, 1) + datetime.timedelta(days=int({0}) - 1)).strftime('%Y%j')",
+    "YEAR-TO-YYYY": "int('20' + str({0})[-2:]) if int(str({0})[-2:]) <= 50 else int('19' + str({0})[-2:])",
+    "DAY-TO-YYYYDDD": "int('20' + str({0})[-5:]) if int(str({0})[-5:-3]) <= 50 else int('19' + str({0})[-5:])",
+    "DATE-TO-YYYYMMDD": "int('20' + str({0})[-6:]) if int(str({0})[-6:-4]) <= 50 else int('19' + str({0})[-6:])",
+    "TEST-NUMVAL": "(0 if str({0}).strip().replace('.','',1).replace('-','',1).replace('+','',1).isdigit() else 1)",
+    "TEST-NUMVAL-C": "(0 if str({0}).strip().replace(',','').replace('$','').replace('.','',1).replace('-','',1).replace('+','',1).isdigit() else 1)",
 }
 
 # Two-arg intrinsics: template uses {0} and {1} for resolved arguments
@@ -67,6 +81,7 @@ _FUNCTION_INTRINSICS_VAR: dict[str, str] = {
     "VARIANCE": "__import__('statistics').variance([{args}])",
     "STANDARD-DEVIATION": "__import__('statistics').stdev([{args}])",
     "PRESENT-VALUE": "sum(_v / (1 + {a0}) ** _i for _i, _v in enumerate([{rest}], 1))",
+    "CONCATENATE": "''.join(str(_a) for _a in [{args}])",
 }
 
 _EXPR_OPERATORS = frozenset({'+', '-', '*', '/', '**', '(', ')'})

@@ -119,7 +119,13 @@ class VerbTranslationMixin:
         return st.translate_move(ops)
 
     def _translate_move_corresponding(self, ops: list[str]) -> list[str]:
-        """Translate MOVE CORRESPONDING source TO target."""
+        """Translate MOVE CORRESPONDING source TO target.
+
+        In a flat data model, source and target groups may share the same
+        Python field names.  When children are unique to each group we can
+        qualify them (``group_field``), otherwise emit an assignment with
+        a review note.
+        """
         upper_ops = _upper_ops(ops)
         if "TO" not in upper_ops:
             return [f"# MOVE CORRESPONDING: missing TO: {' '.join(ops)}"]
@@ -131,18 +137,33 @@ class VerbTranslationMixin:
         if not src_items or not tgt_items:
             return [
                 f"# MOVE CORRESPONDING {src_name} TO {tgt_name}",
-                f"# TODO(high): group items not found — manual field matching required",
+                "# TODO(high): group items not found — manual field matching required",
             ]
         common = set(src_items) & set(tgt_items)
         if not common:
             return [f"# MOVE CORRESPONDING: no common field names between {src_name} and {tgt_name}"]
-        results = [
-            f"# MOVE CORRESPONDING {src_name} TO {tgt_name}",
-            f"# TODO(high): flat data model cannot distinguish group-qualified fields — verify assignments",
-        ]
+        results = [f"# MOVE CORRESPONDING {src_name} TO {tgt_name}"]
+        src_py = _to_python_name(src_name)
+        tgt_py = _to_python_name(tgt_name)
         for name in sorted(common):
-            py = _to_python_name(name)
-            results.append(f"self.data.{py}.set(self.data.{py}.value)")
+            field_py = _to_python_name(name)
+            # Try group-qualified names first (group_field); fall back to bare field
+            src_qual = f"{src_py}_{field_py}"
+            tgt_qual = f"{tgt_py}_{field_py}"
+            src_has_qual = any(
+                _to_python_name(it.name) == src_qual
+                for it in self.program.all_data_items
+            )
+            tgt_has_qual = any(
+                _to_python_name(it.name) == tgt_qual
+                for it in self.program.all_data_items
+            )
+            if src_has_qual and tgt_has_qual:
+                results.append(f"self.data.{tgt_qual}.set(self.data.{src_qual}.value)")
+            else:
+                # Flat model: same field name in both groups — assignment is a no-op,
+                # emit it anyway so the generated code is explicit and reviewable
+                results.append(f"self.data.{field_py}.set(self.data.{field_py}.value)  # same field — verify group qualification")
         return results
 
     def _find_group_children(self, group_name: str) -> list[str]:

@@ -524,13 +524,13 @@ class TestComputeFunctionIntrinsics:
         assert "min(" in source
 
     def test_function_when_compiled(self):
-        """FUNCTION WHEN-COMPILED should translate to a static string."""
+        """FUNCTION WHEN-COMPILED should translate to a datetime call."""
         src = make_cobol(["COMPUTE WS-A = FUNCTION WHEN-COMPILED."])
         program = parse_cobol(src)
         smap = analyze(program)
         source = generate_python(smap)
         ast.parse(source)
-        assert "compile_timestamp" in source
+        assert "datetime" in source
 
     def test_unknown_function_emits_todo(self):
         """Unknown FUNCTION intrinsic should emit a TODO comment."""

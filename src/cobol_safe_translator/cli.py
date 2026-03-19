@@ -98,6 +98,130 @@ def _to_python_filename(program_id: str) -> str:
     return (_to_python_name(program_id) or "unnamed") + ".py"
 
 
+def _generate_review_report(
+    python_source: str,
+    cobol_path: str,
+    out_path: str,
+) -> str:
+    """Generate a REVIEW.md report for post-translation verification.
+
+    Scans the generated Python for TODO markers and review-worthy patterns,
+    then produces a Markdown report giving the user three clear choices:
+    automated LLM review, guided clarification, or human developer review.
+    """
+    import re as _re
+
+    lines = python_source.splitlines()
+    todos: list[tuple[int, str]] = []
+    verify_lines: list[tuple[int, str]] = []
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if "TODO(high)" in stripped:
+            todos.append((i, stripped.lstrip("# ").strip()))
+        elif "verify" in stripped.lower() or "review" in stripped.lower():
+            verify_lines.append((i, stripped.lstrip("# ").strip()))
+
+    # Categorise TODOs
+    categories: dict[str, list[tuple[int, str]]] = {
+        "Control Flow": [],
+        "String Operations": [],
+        "Data Movement": [],
+        "Arithmetic": [],
+        "File I/O": [],
+        "CICS/SQL": [],
+        "Other": [],
+    }
+    for lineno, text in todos:
+        upper = text.upper()
+        if any(k in upper for k in ("PERFORM", "GO TO", "IF", "EVALUATE", "ALTER")):
+            categories["Control Flow"].append((lineno, text))
+        elif any(k in upper for k in ("STRING", "UNSTRING", "INSPECT", "POINTER")):
+            categories["String Operations"].append((lineno, text))
+        elif any(k in upper for k in ("MOVE", "CORRESPONDING", "GROUP")):
+            categories["Data Movement"].append((lineno, text))
+        elif any(k in upper for k in ("COMPUTE", "ADD", "SUBTRACT", "DIVIDE", "MULTIPLY", "SIZE")):
+            categories["Arithmetic"].append((lineno, text))
+        elif any(k in upper for k in ("READ", "WRITE", "OPEN", "CLOSE", "FILE", "CALL")):
+            categories["File I/O"].append((lineno, text))
+        elif any(k in upper for k in ("CICS", "SQL", "EXEC", "FLASK")):
+            categories["CICS/SQL"].append((lineno, text))
+        else:
+            categories["Other"].append((lineno, text))
+
+    # Count review items
+    n_verify = len(verify_lines)
+
+    report: list[str] = []
+    report.append(f"# Translation Review: {Path(cobol_path).name}")
+    report.append("")
+    report.append(f"- **Source:** `{cobol_path}`")
+    report.append(f"- **Output:** `{out_path}`")
+    report.append(f"- **Items requiring attention:** {len(todos)} TODOs, {n_verify} verification notes")
+    report.append("")
+    report.append("---")
+    report.append("")
+    report.append("## How to proceed")
+    report.append("")
+    report.append("Choose the approach that fits your workflow:")
+    report.append("")
+    report.append("### Option A: Automated LLM review")
+    report.append("")
+    report.append("Feed this report and the generated Python to an LLM with this prompt:")
+    report.append("")
+    report.append("```")
+    report.append(f"Review the translated Python file `{Path(out_path).name}` against")
+    report.append(f"the original COBOL source `{Path(cobol_path).name}`.")
+    report.append("For each TODO(high) marker and verification note listed below,")
+    report.append("compare the COBOL logic with the generated Python and either:")
+    report.append("  1. Implement the missing logic if the COBOL intent is clear")
+    report.append("  2. Flag it for human review if the COBOL semantics are ambiguous")
+    report.append("After making changes, run the generated tests to verify correctness.")
+    report.append("```")
+    report.append("")
+    report.append("### Option B: Guided human review")
+    report.append("")
+    report.append("Use the categorized list below to assign review tasks to developers.")
+    report.append("Each item includes a line number in the generated Python file —")
+    report.append("cross-reference with the original COBOL source to verify correctness.")
+    report.append("")
+    report.append("### Option C: Hybrid (recommended for production)")
+    report.append("")
+    report.append("1. Run the LLM on Option A to resolve straightforward TODOs")
+    report.append("2. Human developer reviews the LLM's changes + remaining items")
+    report.append("3. Run unit tests and compare output with original COBOL execution")
+    report.append("")
+    report.append("---")
+    report.append("")
+
+    # Emit categorised items
+    report.append("## Items by category")
+    report.append("")
+    for cat, items in categories.items():
+        if not items:
+            continue
+        report.append(f"### {cat} ({len(items)} items)")
+        report.append("")
+        for lineno, text in items:
+            report.append(f"- **Line {lineno}:** {text}")
+        report.append("")
+
+    if verify_lines:
+        report.append("### Verification notes")
+        report.append("")
+        for lineno, text in verify_lines:
+            report.append(f"- **Line {lineno}:** {text}")
+        report.append("")
+
+    if not todos and not verify_lines:
+        report.append("No items requiring attention — translation is clean.")
+        report.append("")
+
+    report.append("---")
+    report.append("")
+    report.append("*Generated by [PythonBol-Translator](https://github.com/IronAdamant/PythonBol-Translator)*")
+    return "\n".join(report)
+
+
 # --- Single-file workers ---
 
 def _translate_single(src: Path, out_dir: Path, config: str | None,
@@ -163,6 +287,21 @@ def _translate_single(src: Path, out_dir: Path, config: str | None,
         else:
             print(red(f"  Validation FAILED: {err_msg}"), file=sys.stderr)
             return 1
+
+    # Generate review report alongside translation
+    review_report = _generate_review_report(
+        python_source, str(src), str(out_path),
+    )
+    review_path = out_dir / (out_name.replace(".py", "") + "_REVIEW.md")
+    try:
+        review_path.write_text(review_report, encoding="utf-8")
+        n_todos = python_source.count("TODO(high)")
+        if n_todos > 0:
+            print(yellow(f"  Review: {review_path} ({n_todos} items need attention)"))
+        else:
+            print(green(f"  Review: {review_path} (clean — no items)"))
+    except OSError:
+        pass  # non-fatal
 
     print(bold(green("Done.")))
     return 0
