@@ -1549,3 +1549,56 @@ class TestInlinePerformVarying:
         stdout = _run_cobol_program(src)
         # Sum of 1+2+3+4 = 10
         assert stdout.strip() == "10"
+
+
+# ---------------------------------------------------------------------------
+# 62. Group-level MOVE — group to group distribution
+# ---------------------------------------------------------------------------
+class TestGroupMove:
+    def test_group_to_group_move(self):
+        """MOVE group TO group distributes source concatenation across target."""
+        src = make_cobol(
+            [
+                'MOVE "ABC" TO WS-SRC-A.',
+                'MOVE "DE" TO WS-SRC-B.',
+                "MOVE WS-SRC TO WS-TGT.",
+                "DISPLAY WS-TGT-X.",
+                "DISPLAY WS-TGT-Y.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-SRC.",
+                "           05 WS-SRC-A PIC X(3).",
+                "           05 WS-SRC-B PIC X(2).",
+                "       01 WS-TGT.",
+                "           05 WS-TGT-X PIC X(2).",
+                "           05 WS-TGT-Y PIC X(3).",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        lines = stdout.strip().split("\n")
+        # Source concat: "ABC" + "DE" = "ABCDE"
+        # Target X (size 2) gets "AB", target Y (size 3) gets "CDE"
+        assert lines[0].strip() == "AB"
+        assert lines[1].strip() == "CDE"
+
+    def test_group_to_elementary_move(self):
+        """MOVE group TO elementary treats group as concatenated alphanumeric."""
+        src = make_cobol(
+            [
+                'MOVE "HI" TO WS-SRC-A.',
+                'MOVE "LO" TO WS-SRC-B.',
+                "MOVE WS-SRC TO WS-DEST.",
+                "DISPLAY WS-DEST.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-SRC.",
+                "           05 WS-SRC-A PIC X(3).",
+                "           05 WS-SRC-B PIC X(2).",
+                "       01 WS-DEST PIC X(10).",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        # Source concat: "HI " (3 chars padded) + "LO" (2 chars) = "HI LO"
+        assert "HI LO" in stdout

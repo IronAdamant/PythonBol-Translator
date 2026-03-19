@@ -37,9 +37,22 @@ _COPY_FREE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Pseudo-text replacement pair: ==(text)== BY ==(text)==
-_REPLACING_RE = re.compile(
-    r"==\s*(.*?)\s*==\s+BY\s+==\s*(.*?)\s*==",
+# Pseudo-text replacement pair with optional LEADING/TRAILING qualifier:
+#   [LEADING|TRAILING] ==(text)== BY ==(text)==
+_REPLACING_PSEUDO_RE = re.compile(
+    r"(?:LEADING|TRAILING)?\s*==\s*(.*?)\s*==\s+BY\s+==\s*(.*?)\s*==",
+    re.IGNORECASE,
+)
+
+# Full pseudo-text pattern that captures the optional qualifier
+_REPLACING_QUALIFIED_RE = re.compile(
+    r"(LEADING|TRAILING)?\s*==\s*(.*?)\s*==\s+BY\s+==\s*(.*?)\s*==",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Non-pseudo-text replacement: word BY word (no == delimiters)
+_REPLACING_WORD_RE = re.compile(
+    r"(?:REPLACING\s+)?(\S+)\s+BY\s+(\S+)",
     re.IGNORECASE,
 )
 
@@ -144,19 +157,62 @@ def _collect_copy_block(lines: list[str], start_idx: int) -> tuple[str, int]:
 
 def _apply_replacements(
     text: str,
-    replacements: list[tuple[str, str]],
+    replacements: list[tuple[str, str, str]],
 ) -> str:
-    """Apply pseudo-text replacements to copybook content."""
+    """Apply REPLACING substitutions to copybook content.
+
+    Each replacement is *(old, new, qualifier)* where *qualifier* is one of
+    ``"FULL"`` (default pseudo-text / whole-word), ``"LEADING"`` (prefix
+    match), or ``"TRAILING"`` (suffix match).
+    """
     result = text
-    for old, new in replacements:
-        # Pseudo-text replacement is literal text substitution
-        result = result.replace(old, new)
+    for old, new, qualifier in replacements:
+        if qualifier == "LEADING":
+            # Replace *old* only at the start of a COBOL word.
+            # COBOL words contain [A-Za-z0-9-], so we use a lookbehind
+            # that rejects preceding alphanumeric or hyphen characters.
+            result = re.sub(
+                r"(?<![A-Za-z0-9\-])" + re.escape(old) + r"(?=[A-Za-z0-9\-])",
+                new, result,
+            )
+        elif qualifier == "TRAILING":
+            # Replace *old* only at the end of a COBOL word.
+            result = re.sub(
+                r"(?<=[A-Za-z0-9\-])" + re.escape(old) + r"(?![A-Za-z0-9\-])",
+                new, result,
+            )
+        else:  # FULL — literal text substitution (original behaviour)
+            result = result.replace(old, new)
     return result
 
 
-def _parse_replacements(copy_block: str) -> list[tuple[str, str]]:
-    """Extract REPLACING pairs from a COPY statement block."""
-    return _REPLACING_RE.findall(copy_block)
+def _parse_replacements(copy_block: str) -> list[tuple[str, str, str]]:
+    """Extract REPLACING pairs from a COPY statement block.
+
+    Returns a list of ``(old_text, new_text, qualifier)`` tuples.
+    *qualifier* is ``"FULL"`` (default), ``"LEADING"``, or ``"TRAILING"``.
+    """
+    replacements: list[tuple[str, str, str]] = []
+
+    # --- 1. Try pseudo-text with optional LEADING/TRAILING qualifier ---
+    for m in _REPLACING_QUALIFIED_RE.finditer(copy_block):
+        qualifier = (m.group(1) or "FULL").upper()
+        old_text = " ".join(m.group(2).split())   # normalise whitespace
+        new_text = " ".join(m.group(3).split())
+        if old_text:
+            replacements.append((old_text, new_text, qualifier))
+
+    if replacements:
+        return replacements
+
+    # --- 2. Fall back to non-pseudo-text: word BY word ---
+    for m in _REPLACING_WORD_RE.finditer(copy_block):
+        old_word = m.group(1).strip().rstrip(".")
+        new_word = m.group(2).strip().rstrip(".")
+        if old_word.upper() not in ("REPLACING",) and old_word:
+            replacements.append((old_word, new_word, "FULL"))
+
+    return replacements
 
 
 def _is_copy_line(line: str) -> re.Match | None:

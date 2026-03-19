@@ -232,6 +232,56 @@ class CobolString:
         return self._value
 
 
+class GroupView:
+    """Concatenated view of COBOL group item fields.
+
+    Provides get/set that reads from or distributes across child fields
+    as a single string buffer, mimicking COBOL group-level MOVE semantics.
+
+    In COBOL, a group item is treated as an alphanumeric field whose value
+    is the concatenation of all its elementary children.  When you MOVE a
+    group to another group, the source's concatenated representation is
+    distributed across the target's children left-to-right.
+    """
+
+    def __init__(
+        self,
+        fields: list[CobolDecimal | CobolString],
+        sizes: list[int],
+    ) -> None:
+        self._fields = fields
+        self._sizes = sizes
+        self._total_size = sum(sizes)
+
+    @property
+    def size(self) -> int:
+        return self._total_size
+
+    @property
+    def value(self) -> str:
+        """Concatenate all child field values into a single string."""
+        parts: list[str] = []
+        for fld, sz in zip(self._fields, self._sizes):
+            val = str(fld.value)
+            if len(val) < sz:
+                val = val.ljust(sz)
+            elif len(val) > sz:
+                val = val[:sz]
+            parts.append(val)
+        return "".join(parts)
+
+    def set(self, value: str | int | float) -> None:
+        """Distribute a string value across child fields (group MOVE)."""
+        s = str(value)
+        if len(s) < self._total_size:
+            s = s.ljust(self._total_size)
+        offset = 0
+        for fld, sz in zip(self._fields, self._sizes):
+            chunk = s[offset:offset + sz]
+            fld.set(chunk)
+            offset += sz
+
+
 class FileAdapter:
     """File adapter for generated code with read and write support.
 

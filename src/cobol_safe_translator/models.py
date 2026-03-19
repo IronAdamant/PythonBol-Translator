@@ -97,6 +97,25 @@ class FileControl:
     alternate_keys: list[str] = field(default_factory=list)
 
 
+# --- SCREEN SECTION models ---
+
+@dataclass
+class ScreenField:
+    """A field in the SCREEN SECTION."""
+    level: int
+    name: str = ""
+    line: int = 0
+    column: int = 0
+    pic: str = ""
+    value: str = ""
+    using: str = ""  # USING data-name (input/output)
+    from_field: str = ""  # FROM data-name (display only)
+    to_field: str = ""  # TO data-name (input only)
+    blank_screen: bool = False
+    attributes: list[str] = field(default_factory=list)  # HIGHLIGHT, BLINK, etc.
+    children: list[ScreenField] = field(default_factory=list)
+
+
 # --- REPORT SECTION models ---
 
 @dataclass
@@ -157,10 +176,14 @@ class CobolProgram:
     linkage_section: list[DataItem] = field(default_factory=list)
     local_storage: list[DataItem] = field(default_factory=list)
     report_section: list[ReportDescription] = field(default_factory=list)
+    screen_section: list[ScreenField] = field(default_factory=list)
 
     # PROCEDURE
     paragraphs: list[Paragraph] = field(default_factory=list)
     declaratives: list[UseDeclaration] = field(default_factory=list)
+
+    # Nested/concatenated programs within the same source file
+    nested_programs: list[CobolProgram] = field(default_factory=list)
 
     # Raw text preserved for reference
     raw_lines: list[str] = field(default_factory=list)

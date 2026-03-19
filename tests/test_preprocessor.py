@@ -297,3 +297,135 @@ class TestExecStripping:
         assert "MOVE 1 TO WS-VAR" in result
         assert "DISPLAY WS-VAR" in result
         assert "TODO(high): EXEC CICS" in result
+
+
+class TestCopyReplacingLeadingTrailing:
+    """Tests for COPY REPLACING with LEADING/TRAILING qualifiers."""
+
+    def test_replacing_leading(self, copybook_dir: Path) -> None:
+        """REPLACING LEADING replaces prefix only at start of words."""
+        # Copybook contains 'WS-COPIED-VAR'
+        source = (
+            "       COPY MYBOOK\n"
+            "           REPLACING LEADING ==WS-== BY ==NEW-==.\n"
+        )
+        result = resolve_copies(source, [copybook_dir])
+        # WS- at start of word should be replaced
+        assert "NEW-COPIED-VAR" in result
+        assert "WS-COPIED-VAR" not in result
+
+    def test_replacing_leading_no_mid_word(self, copybook_dir: Path) -> None:
+        """REPLACING LEADING does NOT replace text in the middle of a word."""
+        # Create a copybook where the target text appears mid-word
+        (copybook_dir / "MIDWORD.cpy").write_text(
+            "       01 MY-WS-FIELD  PIC X(10).\n"
+            "       01 WS-OTHER     PIC X(5).\n",
+            encoding="utf-8",
+        )
+        source = (
+            "       COPY MIDWORD\n"
+            "           REPLACING LEADING ==WS-== BY ==NEW-==.\n"
+        )
+        result = resolve_copies(source, [copybook_dir])
+        # WS- at start of word should be replaced
+        assert "NEW-OTHER" in result
+        # WS- in the middle of MY-WS-FIELD should NOT be replaced
+        assert "MY-WS-FIELD" in result
+
+    def test_replacing_trailing(self, copybook_dir: Path) -> None:
+        """REPLACING TRAILING replaces suffix only at end of words."""
+        (copybook_dir / "TRAIL.cpy").write_text(
+            "       01 IN-REC     PIC X(10).\n"
+            "       01 REC-TYPE   PIC X(5).\n",
+            encoding="utf-8",
+        )
+        source = (
+            "       COPY TRAIL\n"
+            "           REPLACING TRAILING ==-REC== BY ==-RECORD==.\n"
+        )
+        result = resolve_copies(source, [copybook_dir])
+        # -REC at end of word should be replaced
+        assert "IN-RECORD" in result
+        # -REC in the middle of REC-TYPE should NOT be replaced
+        assert "REC-TYPE" in result
+
+    def test_replacing_trailing_no_start_of_word(self, copybook_dir: Path) -> None:
+        """REPLACING TRAILING does NOT replace text at the start of a word."""
+        (copybook_dir / "TRAIL2.cpy").write_text(
+            "       01 REC-FIELD  PIC X(10).\n"
+            "       01 MY-REC     PIC X(5).\n",
+            encoding="utf-8",
+        )
+        source = (
+            "       COPY TRAIL2\n"
+            "           REPLACING TRAILING ==REC== BY ==RECORD==.\n"
+        )
+        result = resolve_copies(source, [copybook_dir])
+        # REC at end of MY-REC should be replaced
+        assert "MY-RECORD" in result
+        # REC at start of REC-FIELD should NOT be replaced
+        assert "REC-FIELD" in result
+
+    def test_existing_pseudo_text_still_works(self, copybook_dir: Path) -> None:
+        """Existing pseudo-text REPLACING (no qualifier) still works."""
+        source = (
+            "       COPY MYBOOK\n"
+            "           REPLACING ==WS-COPIED-VAR== BY ==WS-NEW-VAR==.\n"
+        )
+        result = resolve_copies(source, [copybook_dir])
+        assert "WS-NEW-VAR" in result
+        assert "WS-COPIED-VAR" not in result
+
+
+class TestCopyReplacingNonPseudoText:
+    """Tests for COPY REPLACING without == delimiters (word-level)."""
+
+    def test_non_pseudo_text_replacing(self, copybook_dir: Path) -> None:
+        """REPLACING word BY word (no == delimiters) does whole-word replacement."""
+        (copybook_dir / "WORDS.cpy").write_text(
+            "       01 OLD-FIELD  PIC X(10).\n"
+            "       01 OLD-COUNT  PIC 9(5).\n",
+            encoding="utf-8",
+        )
+        source = (
+            "       COPY WORDS\n"
+            "           REPLACING OLD-FIELD BY NEW-FIELD.\n"
+        )
+        result = resolve_copies(source, [copybook_dir])
+        assert "NEW-FIELD" in result
+        # OLD-COUNT should remain unchanged (different word)
+        assert "OLD-COUNT" in result
+
+    def test_non_pseudo_text_single_word(self, copybook_dir: Path) -> None:
+        """Non-pseudo-text REPLACING replaces a single identifier."""
+        (copybook_dir / "SINGLE.cpy").write_text(
+            "       01 ALPHA  PIC X(10).\n",
+            encoding="utf-8",
+        )
+        source = "       COPY SINGLE REPLACING ALPHA BY BETA.\n"
+        result = resolve_copies(source, [copybook_dir])
+        assert "BETA" in result
+        assert "ALPHA" not in result
+
+    def test_non_pseudo_text_does_not_partial_match(self, copybook_dir: Path) -> None:
+        """Non-pseudo-text REPLACING is full-word, not substring."""
+        (copybook_dir / "PARTIAL.cpy").write_text(
+            "       01 ABC-FIELD  PIC X(10).\n"
+            "       01 ABC        PIC X(5).\n",
+            encoding="utf-8",
+        )
+        source = "       COPY PARTIAL REPLACING ABC BY XYZ.\n"
+        result = resolve_copies(source, [copybook_dir])
+        # ABC as standalone word should remain since FULL uses .replace()
+        # which is literal text substitution. The standalone ABC is replaced.
+        assert "XYZ" in result
+
+    def test_pseudo_text_takes_priority(self, copybook_dir: Path) -> None:
+        """If pseudo-text delimiters are present, non-pseudo-text fallback is skipped."""
+        source = (
+            "       COPY MYBOOK\n"
+            "           REPLACING ==WS-COPIED-VAR== BY ==WS-REPLACED==.\n"
+        )
+        result = resolve_copies(source, [copybook_dir])
+        assert "WS-REPLACED" in result
+        assert "WS-COPIED-VAR" not in result

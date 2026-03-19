@@ -650,3 +650,153 @@ class TestGoToTranslation:
         joined = "\n".join(lines)
         assert "TODO(high)" in joined
         assert "self.para_x()" in joined
+
+
+class TestGroupMove:
+    """Group-level MOVE should concatenate source children and distribute to target."""
+
+    def test_group_to_group_move(self):
+        """MOVE WS-SRC TO WS-TGT where both are group items."""
+        src = make_cobol(
+            ["MOVE WS-SRC TO WS-TGT."],
+            data_lines=[
+                "       01 WS-SRC.",
+                "           05 WS-SRC-A PIC X(3).",
+                "           05 WS-SRC-B PIC X(2).",
+                "       01 WS-TGT.",
+                "           05 WS-TGT-X PIC X(2).",
+                "           05 WS-TGT-Y PIC X(3).",
+            ],
+        )
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # Should generate group MOVE comment
+        assert "Group MOVE" in source
+        # Should reference source children in concatenation
+        assert "ws_src_a" in source
+        assert "ws_src_b" in source
+        # Should distribute to target children using slices
+        assert "ws_tgt_x" in source
+        assert "ws_tgt_y" in source
+        assert ".set(" in source
+
+    def test_group_to_elementary_move(self):
+        """MOVE group-item TO elementary-item treats group as alphanumeric."""
+        src = make_cobol(
+            ["MOVE WS-SRC TO WS-DEST."],
+            data_lines=[
+                "       01 WS-SRC.",
+                "           05 WS-SRC-A PIC X(3).",
+                "           05 WS-SRC-B PIC X(2).",
+                "       01 WS-DEST PIC X(10).",
+            ],
+        )
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # Should generate group-to-elementary MOVE
+        assert "Group-to-elementary MOVE" in source
+        assert "ws_dest" in source
+        assert ".set(" in source
+
+    def test_elementary_move_unchanged(self):
+        """Normal elementary MOVE should not be affected by group logic."""
+        src = make_cobol(
+            ["MOVE WS-A TO WS-B."],
+            data_lines=[
+                "       01 WS-A PIC X(5).",
+                "       01 WS-B PIC X(5).",
+            ],
+        )
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # Should NOT contain "Group MOVE"
+        assert "Group MOVE" not in source
+        assert "ws_b.set(self.data.ws_a.value)" in source
+
+    def test_group_move_nested_children(self):
+        """Group MOVE should flatten nested group children."""
+        src = make_cobol(
+            ["MOVE WS-OUTER TO WS-TGT."],
+            data_lines=[
+                "       01 WS-OUTER.",
+                "           05 WS-INNER.",
+                "               10 WS-FIELD-A PIC X(2).",
+                "               10 WS-FIELD-B PIC X(3).",
+                "           05 WS-FIELD-C PIC X(4).",
+                "       01 WS-TGT.",
+                "           05 WS-TGT-1 PIC X(5).",
+                "           05 WS-TGT-2 PIC X(4).",
+            ],
+        )
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "Group MOVE" in source
+        # All leaf children of WS-OUTER should be in concatenation
+        assert "ws_field_a" in source
+        assert "ws_field_b" in source
+        assert "ws_field_c" in source
+
+    def test_group_move_with_numeric_literal_is_normal(self):
+        """MOVE 0 TO group-item should use normal translate_move."""
+        src = make_cobol(
+            ["MOVE 0 TO WS-GRP."],
+            data_lines=[
+                "       01 WS-GRP.",
+                "           05 WS-FLD-A PIC X(3).",
+                "           05 WS-FLD-B PIC X(2).",
+            ],
+        )
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # Literal MOVE should NOT trigger group MOVE logic
+        assert "Group MOVE" not in source
+
+    def test_group_move_with_string_literal_is_normal(self):
+        """MOVE "ABC" TO group-item should use normal translate_move."""
+        src = make_cobol(
+            ['MOVE "ABC" TO WS-GRP.'],
+            data_lines=[
+                "       01 WS-GRP.",
+                "           05 WS-FLD-A PIC X(3).",
+                "           05 WS-FLD-B PIC X(2).",
+            ],
+        )
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        assert "Group MOVE" not in source
+
+    def test_group_move_multiple_targets(self):
+        """MOVE group TO target1 target2 handles each target separately."""
+        src = make_cobol(
+            ["MOVE WS-SRC TO WS-TGT1 WS-TGT2."],
+            data_lines=[
+                "       01 WS-SRC.",
+                "           05 WS-SRC-A PIC X(3).",
+                "           05 WS-SRC-B PIC X(2).",
+                "       01 WS-TGT1.",
+                "           05 WS-T1-A PIC X(2).",
+                "           05 WS-T1-B PIC X(3).",
+                "       01 WS-TGT2 PIC X(10).",
+            ],
+        )
+        program = parse_cobol(src)
+        smap = analyze(program)
+        source = generate_python(smap)
+        ast.parse(source)
+        # TGT1 is a group target
+        assert "ws_t1_a" in source
+        assert "ws_t1_b" in source
+        # TGT2 is elementary target
+        assert "ws_tgt2" in source

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cobol_safe_translator.adapters import CobolDecimal, CobolString, FileAdapter
+from cobol_safe_translator.adapters import CobolDecimal, CobolString, FileAdapter, GroupView
 
 
 class TestCobolDecimal:
@@ -308,3 +308,97 @@ class TestCobolDecimalNegativeZero:
         d = CobolDecimal(2, 0, signed=True)
         d.set(-150)  # -150 mod 100 = -50
         assert d.value == Decimal("-50")
+
+
+class TestGroupView:
+    """Tests for GroupView — concatenated view of COBOL group item fields."""
+
+    def test_value_concatenates_children(self):
+        """GroupView.value should concatenate child fields padded to their sizes."""
+        f1 = CobolString(5, "HELLO")
+        f2 = CobolString(5, "WORLD")
+        gv = GroupView([f1, f2], [5, 5])
+        assert gv.value == "HELLOWORLD"
+
+    def test_value_pads_short_fields(self):
+        """Short field values are space-padded to their PIC size."""
+        f1 = CobolString(5, "AB")
+        f2 = CobolString(3, "X")
+        gv = GroupView([f1, f2], [5, 3])
+        assert gv.value == "AB   X  "
+        assert len(gv.value) == 8
+
+    def test_value_truncates_long_fields(self):
+        """Fields longer than their PIC size are truncated."""
+        f1 = CobolString(3, "ABCDE")
+        gv = GroupView([f1], [3])
+        assert gv.value == "ABC"
+
+    def test_set_distributes_across_children(self):
+        """GroupView.set should distribute a string across child fields."""
+        f1 = CobolString(3)
+        f2 = CobolString(3)
+        f3 = CobolString(4)
+        gv = GroupView([f1, f2, f3], [3, 3, 4])
+        gv.set("ABCDEFGHIJ")
+        assert f1.value == "ABC"
+        assert f2.value == "DEF"
+        assert f3.value == "GHIJ"
+
+    def test_set_pads_short_value(self):
+        """Short source values are space-padded before distribution."""
+        f1 = CobolString(3)
+        f2 = CobolString(3)
+        gv = GroupView([f1, f2], [3, 3])
+        gv.set("AB")
+        assert f1.value == "AB "
+        assert f2.value == "   "
+
+    def test_set_with_numeric_children(self):
+        """GroupView.set should distribute across CobolDecimal children too."""
+        f1 = CobolDecimal(3, 0)
+        f2 = CobolDecimal(2, 0)
+        gv = GroupView([f1, f2], [3, 2])
+        gv.set("12345")
+        assert f1.value == Decimal("123")
+        assert f2.value == Decimal("45")
+
+    def test_size_property(self):
+        """GroupView.size returns the total of all child sizes."""
+        f1 = CobolString(5)
+        f2 = CobolString(10)
+        gv = GroupView([f1, f2], [5, 10])
+        assert gv.size == 15
+
+    def test_group_to_group_move_via_set(self):
+        """Simulate group-to-group MOVE: read from one GroupView, set another."""
+        # Source: WS-SRC with children "ABC" (3) and "DE" (2)
+        src_f1 = CobolString(3, "ABC")
+        src_f2 = CobolString(2, "DE")
+        src_gv = GroupView([src_f1, src_f2], [3, 2])
+
+        # Target: WS-TGT with children of size 2 and 3
+        tgt_f1 = CobolString(2)
+        tgt_f2 = CobolString(3)
+        tgt_gv = GroupView([tgt_f1, tgt_f2], [2, 3])
+
+        # Group MOVE: distribute source concatenation across target
+        tgt_gv.set(src_gv.value)
+        assert tgt_f1.value == "AB"
+        assert tgt_f2.value == "CDE"
+
+    def test_mixed_field_types(self):
+        """GroupView should handle mixed CobolString and CobolDecimal children."""
+        f1 = CobolString(5, "HELLO")
+        f2 = CobolDecimal(3, 0, initial=42)
+        gv = GroupView([f1, f2], [5, 3])
+        # CobolDecimal(3,0) with value 42 => str is "42", padded to "42 "
+        assert gv.value == "HELLO42 "
+
+    def test_value_with_numeric_decimal_child(self):
+        """Numeric field with decimals formats correctly in group view."""
+        f1 = CobolDecimal(3, 2, initial=1.23)
+        gv = GroupView([f1], [5])
+        # Decimal "1.23" as string is "1.23", padded to 5 chars
+        assert gv.value == "1.23 "
+        assert len(gv.value) == 5

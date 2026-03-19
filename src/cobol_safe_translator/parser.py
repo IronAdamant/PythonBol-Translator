@@ -22,6 +22,7 @@ from .models import (
     FileControl,
     PicClause,
     ReportDescription,
+    ScreenField,
 )
 from .report_parser import parse_report_section
 
@@ -414,30 +415,38 @@ def parse_data_division(lines: list[str]) -> tuple[list[DataItem], list[DataItem
     linkage_items: list[DataItem] = []
     local_items: list[DataItem] = []
 
-    # Detect and extract REPORT SECTION lines for the dedicated parser
+    # Detect and extract REPORT SECTION and SCREEN SECTION lines for their
+    # dedicated parsers, so they do not get processed as regular data items.
+    _SECTION_BOUNDARIES = (
+        "WORKING-STORAGE SECTION", "LINKAGE SECTION", "FILE SECTION",
+        "LOCAL-STORAGE SECTION", "SCREEN SECTION",
+        "COMMUNICATION SECTION", "REPORT SECTION",
+    )
     report_lines: list[str] = []
-    non_report_lines: list[str] = []
-    in_report = False
+    screen_lines: list[str] = []
+    remaining_lines: list[str] = []
+    current_special: str | None = None  # "REPORT" or "SCREEN"
     for line in lines:
         upper = line.strip().upper()
         if "REPORT SECTION" in upper:
-            in_report = True
+            current_special = "REPORT"
             report_lines.append(line)
             continue
-        # REPORT SECTION ends when another section starts
-        if in_report and any(kw in upper for kw in (
-            "WORKING-STORAGE SECTION", "LINKAGE SECTION", "FILE SECTION",
-            "LOCAL-STORAGE SECTION", "SCREEN SECTION",
-            "COMMUNICATION SECTION",
-        )):
-            in_report = False
-        if in_report:
+        if "SCREEN SECTION" in upper:
+            current_special = "SCREEN"
+            continue  # skip the header line itself
+        # Special section ends when another section starts
+        if current_special and any(kw in upper for kw in _SECTION_BOUNDARIES):
+            current_special = None
+        if current_special == "REPORT":
             report_lines.append(line)
+        elif current_special == "SCREEN":
+            screen_lines.append(line)
         else:
-            non_report_lines.append(line)
+            remaining_lines.append(line)
 
     reports = parse_report_section(report_lines) if report_lines else []
-    lines = non_report_lines
+    lines = remaining_lines
 
     last_item: DataItem | None = None
 
@@ -650,7 +659,267 @@ def _build_hierarchy(flat_items: list[DataItem]) -> list[DataItem]:
     return roots
 
 
+# --- SCREEN SECTION parser ---
+
+_SCREEN_LEVEL_RE = re.compile(r"^(\d{1,2})\s+([\w-]+)", re.IGNORECASE)
+_SCREEN_LINE_RE = re.compile(r"\bLINE\s+(?:NUMBER\s+(?:IS\s+)?)?(\d+)", re.IGNORECASE)
+_SCREEN_COL_RE = re.compile(r"\b(?:COL(?:UMN)?)\s+(?:NUMBER\s+(?:IS\s+)?)?(\d+)", re.IGNORECASE)
+_SCREEN_VALUE_RE = re.compile(r"""\bVALUE\s+(?:IS\s+)?("[^"]*"|'[^']*')""", re.IGNORECASE)
+_SCREEN_PIC_RE = re.compile(r"\bPIC(?:TURE)?\s+(?:IS\s+)?(S?[0-9XAVZBS().,+\-$CRDB*P/]+)", re.IGNORECASE)
+_SCREEN_USING_RE = re.compile(r"\bUSING\s+([\w-]+)", re.IGNORECASE)
+_SCREEN_FROM_RE = re.compile(r"\bFROM\s+([\w-]+)", re.IGNORECASE)
+_SCREEN_TO_RE = re.compile(r"\bTO\s+([\w-]+)", re.IGNORECASE)
+_SCREEN_BLANK_RE = re.compile(r"\bBLANK\s+SCREEN\b", re.IGNORECASE)
+_SCREEN_ATTRS = (
+    "HIGHLIGHT", "LOWLIGHT", "BLINK", "REVERSE-VIDEO", "UNDERLINE",
+    "SECURE", "AUTO", "REQUIRED", "FULL", "BELL",
+)
+_SCREEN_FG_RE = re.compile(r"\bFOREGROUND-COLO(?:U)?R\s+(?:IS\s+)?(\d+)", re.IGNORECASE)
+_SCREEN_BG_RE = re.compile(r"\bBACKGROUND-COLO(?:U)?R\s+(?:IS\s+)?(\d+)", re.IGNORECASE)
+
+# Keywords that appear directly after a level number and should NOT be
+# treated as the field name.  When the parser sees "05 LINE 1 ..." the
+# second token is "LINE" which is a clause keyword, not a name.
+_SCREEN_CLAUSE_KEYWORDS = frozenset({
+    "LINE", "COL", "COLUMN", "BLANK", "VALUE", "PIC", "PICTURE",
+    "USING", "FROM", "TO", "HIGHLIGHT", "LOWLIGHT", "BLINK",
+    "REVERSE-VIDEO", "UNDERLINE", "SECURE", "AUTO", "REQUIRED",
+    "FULL", "BELL", "FOREGROUND-COLOR", "FOREGROUND-COLOUR",
+    "BACKGROUND-COLOR", "BACKGROUND-COLOUR", "FILLER",
+})
+
+
+def _merge_screen_continuations(lines: list[str]) -> list[str]:
+    """Merge continuation lines (those without a leading level number) into
+    the preceding entry so that multi-line screen field definitions are
+    parsed as a single string."""
+    merged: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _SCREEN_LEVEL_RE.match(stripped):
+            merged.append(stripped)
+        elif merged:
+            # Continuation — append to the previous entry
+            merged[-1] = merged[-1].rstrip(".") + " " + stripped
+    return merged
+
+
+def parse_screen_section(lines: list[str]) -> list[ScreenField]:
+    """Parse SCREEN SECTION lines into a list of ScreenField trees.
+
+    Each 01-level entry becomes a root ScreenField with nested children
+    built from level numbers (same hierarchy approach as data items).
+    """
+    flat: list[ScreenField] = []
+
+    for line in _merge_screen_continuations(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # Match level number + name
+        level_m = _SCREEN_LEVEL_RE.match(stripped)
+        if not level_m:
+            continue
+
+        level = int(level_m.group(1))
+        raw_name = level_m.group(2).strip().upper().rstrip(".")
+        # If the token after the level number is a clause keyword,
+        # this is an unnamed field (e.g. "05 LINE 1 COL 1 ...")
+        if raw_name in _SCREEN_CLAUSE_KEYWORDS:
+            name = ""
+        else:
+            name = raw_name
+
+        sf = ScreenField(level=level, name=name)
+
+        # LINE clause
+        line_m = _SCREEN_LINE_RE.search(stripped)
+        if line_m:
+            sf.line = int(line_m.group(1))
+
+        # COLUMN clause
+        col_m = _SCREEN_COL_RE.search(stripped)
+        if col_m:
+            sf.column = int(col_m.group(1))
+
+        # VALUE clause
+        val_m = _SCREEN_VALUE_RE.search(stripped)
+        if val_m:
+            raw_val = val_m.group(1)
+            sf.value = raw_val[1:-1]  # strip quotes
+
+        # PIC clause
+        pic_m = _SCREEN_PIC_RE.search(stripped)
+        if pic_m:
+            sf.pic = pic_m.group(1).strip().rstrip(".")
+
+        # USING clause
+        using_m = _SCREEN_USING_RE.search(stripped)
+        if using_m:
+            sf.using = using_m.group(1).upper()
+
+        # FROM clause
+        from_m = _SCREEN_FROM_RE.search(stripped)
+        if from_m:
+            sf.from_field = from_m.group(1).upper()
+
+        # TO clause (only if not part of FOREGROUND-/BACKGROUND-COLOR)
+        to_m = _SCREEN_TO_RE.search(stripped)
+        if to_m:
+            # Ensure this TO is not inside a COLOR clause
+            to_pos = to_m.start()
+            preceding = stripped[:to_pos].upper()
+            if not preceding.rstrip().endswith(("FOREGROUND-COLOR", "FOREGROUND-COLOUR",
+                                                "BACKGROUND-COLOR", "BACKGROUND-COLOUR")):
+                sf.to_field = to_m.group(1).upper()
+
+        # BLANK SCREEN
+        if _SCREEN_BLANK_RE.search(stripped):
+            sf.blank_screen = True
+
+        # Display attributes
+        upper_stripped = stripped.upper()
+        for attr in _SCREEN_ATTRS:
+            if attr in upper_stripped:
+                sf.attributes.append(attr)
+
+        # Foreground/background color
+        fg_m = _SCREEN_FG_RE.search(stripped)
+        if fg_m:
+            sf.attributes.append(f"FOREGROUND-COLOR {fg_m.group(1)}")
+        bg_m = _SCREEN_BG_RE.search(stripped)
+        if bg_m:
+            sf.attributes.append(f"BACKGROUND-COLOR {bg_m.group(1)}")
+
+        flat.append(sf)
+
+    return _build_screen_hierarchy(flat)
+
+
+def _build_screen_hierarchy(flat: list[ScreenField]) -> list[ScreenField]:
+    """Build parent-child hierarchy from flat level-numbered screen fields."""
+    if not flat:
+        return []
+
+    roots: list[ScreenField] = []
+    stack: list[ScreenField] = []
+
+    for sf in flat:
+        while stack and stack[-1].level >= sf.level:
+            stack.pop()
+
+        if stack:
+            stack[-1].children.append(sf)
+        else:
+            roots.append(sf)
+
+        stack.append(sf)
+
+    return roots
+
+
+# --- Multi-program splitting ---
+
+_IDENT_DIV_RE = re.compile(
+    r"^IDENTIFICATION\s+DIVISION", re.IGNORECASE,
+)
+_END_PROGRAM_RE = re.compile(
+    r"^END\s+PROGRAM\s+[\w-]+\s*\.?\s*$", re.IGNORECASE,
+)
+
+
+def _split_programs(logical_lines: list[str]) -> list[list[str]]:
+    """Split logical lines into per-program segments.
+
+    Detects multiple IDENTIFICATION DIVISION boundaries.  If only one
+    is found the full list is returned as a single segment (preserving
+    backward compatibility).  ``END PROGRAM`` delimiter lines are
+    stripped from each segment since they carry no semantic value for
+    the parser.
+    """
+    boundaries: list[int] = []
+    for i, line in enumerate(logical_lines):
+        if _IDENT_DIV_RE.match(line.strip()):
+            boundaries.append(i)
+
+    # Single program — fast path (preserves all existing behaviour)
+    if len(boundaries) <= 1:
+        return [logical_lines]
+
+    segments: list[list[str]] = []
+    for idx, start in enumerate(boundaries):
+        end = boundaries[idx + 1] if idx + 1 < len(boundaries) else len(logical_lines)
+        segment = [
+            ln for ln in logical_lines[start:end]
+            if not _END_PROGRAM_RE.match(ln.strip())
+        ]
+        segments.append(segment)
+    return segments
+
+
 # --- Main parse entry point ---
+
+def _extract_screen_lines(data_lines: list[str]) -> list[str]:
+    """Extract SCREEN SECTION lines from DATA DIVISION lines.
+
+    Returns only the content lines inside the SCREEN SECTION (not the
+    header itself).  Used by _parse_single_program to feed the screen
+    parser without changing parse_data_division's return type.
+    """
+    _SECTION_BOUNDARIES = (
+        "WORKING-STORAGE SECTION", "LINKAGE SECTION", "FILE SECTION",
+        "LOCAL-STORAGE SECTION", "REPORT SECTION",
+        "COMMUNICATION SECTION",
+    )
+    screen_lines: list[str] = []
+    in_screen = False
+    for line in data_lines:
+        upper = line.strip().upper()
+        if "SCREEN SECTION" in upper:
+            in_screen = True
+            continue  # skip the header line
+        if in_screen and any(kw in upper for kw in _SECTION_BOUNDARIES):
+            in_screen = False
+        if in_screen:
+            screen_lines.append(line)
+    return screen_lines
+
+
+def _parse_single_program(
+    logical_lines: list[str],
+    source_path: str,
+    raw_lines: list[str],
+) -> CobolProgram:
+    """Parse a single program's logical lines into a CobolProgram AST."""
+    divisions = split_divisions(logical_lines)
+
+    program_id, author = parse_identification(divisions["IDENTIFICATION"])
+    file_controls = parse_environment(divisions["ENVIRONMENT"])
+    data_lines = divisions["DATA"]
+    file_section, working_storage, linkage_section, report_section, local_storage = parse_data_division(data_lines)
+    screen_lines = _extract_screen_lines(data_lines)
+    screen_section = parse_screen_section(screen_lines) if screen_lines else []
+    paragraphs, declaratives = parse_procedure(divisions["PROCEDURE"])
+
+    return CobolProgram(
+        program_id=program_id,
+        source_path=source_path,
+        author=author,
+        file_controls=file_controls,
+        file_section=file_section,
+        working_storage=working_storage,
+        linkage_section=linkage_section,
+        local_storage=local_storage,
+        report_section=report_section,
+        screen_section=screen_section,
+        paragraphs=paragraphs,
+        declaratives=declaratives,
+        raw_lines=raw_lines,
+    )
+
 
 def parse_cobol(
     source: str,
@@ -660,6 +929,12 @@ def parse_cobol(
     copy_paths: list[str | Path] | None = None,
 ) -> CobolProgram:
     """Parse COBOL source text into a CobolProgram AST.
+
+    Supports multi-program source files (nested or concatenated).
+    When multiple ``IDENTIFICATION DIVISION`` boundaries are found the
+    source is split into segments and each segment is parsed
+    independently.  Additional programs are attached to the first
+    program's ``nested_programs`` list.
 
     Args:
         source: Raw COBOL source text.
@@ -688,27 +963,18 @@ def parse_cobol(
     )
 
     logical_lines = preprocess_lines(source)
-    divisions = split_divisions(logical_lines)
+    segments = _split_programs(logical_lines)
+    raw_lines = source.splitlines()
 
-    program_id, author = parse_identification(divisions["IDENTIFICATION"])
-    file_controls = parse_environment(divisions["ENVIRONMENT"])
-    file_section, working_storage, linkage_section, report_section, local_storage = parse_data_division(divisions["DATA"])
-    paragraphs, declaratives = parse_procedure(divisions["PROCEDURE"])
+    # Parse the first (or only) program
+    main_program = _parse_single_program(segments[0], source_path, raw_lines)
 
-    return CobolProgram(
-        program_id=program_id,
-        source_path=source_path,
-        author=author,
-        file_controls=file_controls,
-        file_section=file_section,
-        working_storage=working_storage,
-        linkage_section=linkage_section,
-        local_storage=local_storage,
-        report_section=report_section,
-        paragraphs=paragraphs,
-        declaratives=declaratives,
-        raw_lines=source.splitlines(),
-    )
+    # Parse any additional programs and attach as nested_programs
+    for segment in segments[1:]:
+        nested = _parse_single_program(segment, source_path, [])
+        main_program.nested_programs.append(nested)
+
+    return main_program
 
 
 def parse_cobol_file(

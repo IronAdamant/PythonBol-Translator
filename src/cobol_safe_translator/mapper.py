@@ -25,6 +25,7 @@ from .models import (
     DataItem,
     Paragraph,
     PicCategory,
+    ScreenField,
     SensitivityFlag,
     SoftwareMap,
     UseDeclaration,
@@ -77,8 +78,13 @@ class PythonMapper:
         # Map record python names to their file adapter python names (for WRITE)
         self._record_to_file: dict[str, str] = {}
         self._build_record_to_file_map()
+        # Build screen name lookup for ACCEPT/DISPLAY screen-name support
+        self._screen_lookup: dict[str, ScreenField] = {}
+        for sf in self.program.screen_section:
+            if sf.name:
+                self._screen_lookup[sf.name.upper()] = sf
         self._verb_handlers = {
-            "DISPLAY": lambda s: st.translate_display(s, self._resolve_operand),
+            "DISPLAY": lambda s: self._translate_display_or_screen(s),
             "MOVE": lambda s: self._translate_move(s.operands),
             "PERFORM": lambda s: self._translate_perform(s.operands, s.raw_text),
             "OPEN": lambda s: self._wrap_file_status(st.translate_open(s.operands), s.operands, "OPEN"),
@@ -90,7 +96,7 @@ class PythonMapper:
             "GOBACK": lambda _: ["return"],
             "NEXT": lambda _: ["pass  # NEXT SENTENCE"],
             "CONTINUE": lambda _: ["pass  # CONTINUE"],
-            "ACCEPT": lambda s: st.translate_accept(s.operands, s.raw_text),
+            "ACCEPT": lambda s: self._translate_accept_or_screen(s),
             "REWRITE": lambda s: st.translate_rewrite(s.operands),
             "SET": lambda s: strt.translate_set(s.operands, self._resolve_operand, self._condition_lookup),
             "STRING": lambda s: strt.translate_string(s.operands, self._resolve_operand),
@@ -280,6 +286,11 @@ class PythonMapper:
         self._field_name_counts: dict[str, int] = {}
         for item in all_items:
             lines.extend(self._data_item_fields(item, indent=1))
+
+        # Append SCREEN SECTION layout as comments
+        screen_comments = self._screen_layout_comments()
+        if screen_comments:
+            lines.append(screen_comments)
 
         lines.append("")
         lines.append("")
@@ -628,6 +639,23 @@ class PythonMapper:
     def _translate_move(self, ops: list[str]) -> list[str]:
         if ops and ops[0].upper() in ("CORRESPONDING", "CORR"):
             return self._translate_move_corresponding(ops)
+        # Detect group-level MOVE
+        upper_ops = _upper_ops(ops)
+        if "TO" in upper_ops and not ops[0].upper().startswith(("ALL", "FUNCTION")):
+            to_idx = upper_ops.index("TO")
+            source = ops[0]
+            targets = ops[to_idx + 1:]
+            # Skip literals and figuratives — only data names can be groups
+            if (not _is_numeric_literal(source)
+                    and not source.startswith(("'", '"'))
+                    and source.upper() not in (
+                        "ZERO", "ZEROS", "ZEROES", "SPACE", "SPACES",
+                        "HIGH-VALUE", "HIGH-VALUES", "LOW-VALUE", "LOW-VALUES",
+                    )):
+                src_item = self._find_data_item(source)
+                if src_item and src_item.children and not src_item.pic:
+                    # Source is a group item — try group MOVE for each target
+                    return self._translate_group_move(src_item, source, targets)
         return st.translate_move(ops)
 
     def _translate_move_corresponding(self, ops: list[str]) -> list[str]:
@@ -671,6 +699,97 @@ class PythonMapper:
                 if result is not None:
                     return result
         return None
+
+    def _find_data_item(self, name: str) -> DataItem | None:
+        """Find a DataItem by name across all sections (case-insensitive)."""
+        upper = name.upper()
+        def _search(items: list[DataItem]) -> DataItem | None:
+            for item in items:
+                if item.name.upper() == upper:
+                    return item
+                if item.children:
+                    found = _search(item.children)
+                    if found:
+                        return found
+            return None
+        return _search(self.program.all_data_items)
+
+    @staticmethod
+    def _collect_elementary_children(
+        item: DataItem,
+    ) -> list[tuple[str, int]]:
+        """Recursively collect all elementary (leaf) children with their PIC sizes.
+
+        Returns list of (COBOL-name, pic_size) tuples in left-to-right order,
+        flattening nested group items.
+        """
+        result: list[tuple[str, int]] = []
+        for child in item.children:
+            if child.children:
+                # Nested group — recurse
+                result.extend(PythonMapper._collect_elementary_children(child))
+            elif child.pic:
+                result.append((child.name, child.pic.size))
+        return result
+
+    def _translate_group_move(
+        self, src_item: DataItem, src_name: str, targets: list[str],
+    ) -> list[str]:
+        """Generate code for group-level MOVE (source is a group item).
+
+        For group-to-group: concatenate source children, distribute across
+        target children.
+        For group-to-elementary: concatenate source children, set target.
+        """
+        src_children = self._collect_elementary_children(src_item)
+        if not src_children:
+            # No elementary children found — fall back to normal MOVE
+            return st.translate_move(
+                [src_name, "TO"] + targets,
+            )
+
+        # Build source concatenation expression
+        src_parts: list[str] = []
+        for child_name, sz in src_children:
+            py = _to_python_name(child_name)
+            src_parts.append(
+                f"str(self.data.{py}.value).ljust({sz})[:{sz}]"
+            )
+        src_concat = " + ".join(src_parts)
+
+        results: list[str] = []
+        for tgt in targets:
+            tgt_item = self._find_data_item(tgt)
+            if tgt_item and tgt_item.children and not tgt_item.pic:
+                # Group-to-group MOVE
+                tgt_children = self._collect_elementary_children(tgt_item)
+                if tgt_children:
+                    results.append(
+                        f"# Group MOVE: {src_name} TO {tgt}"
+                    )
+                    results.append(f"_grp_val = {src_concat}")
+                    offset = 0
+                    for child_name, sz in tgt_children:
+                        py = _to_python_name(child_name)
+                        results.append(
+                            f"self.data.{py}.set("
+                            f"_grp_val[{offset}:{offset + sz}])"
+                        )
+                        offset += sz
+                else:
+                    # Target group has no elementary children
+                    results.append(
+                        f"# Group MOVE {src_name} TO {tgt}: "
+                        f"target has no elementary children"
+                    )
+            else:
+                # Group-to-elementary MOVE — treat source as alphanumeric
+                results.append(f"# Group-to-elementary MOVE: {src_name} TO {tgt}")
+                from .utils import resolve_target as _resolve_target
+                results.append(
+                    f"{_resolve_target(tgt)}.set({src_concat})"
+                )
+        return results
 
     _resolve_operand = staticmethod(_resolve_operand_base)
 
@@ -978,6 +1097,127 @@ class PythonMapper:
             ]
         return [f"# TODO(high): unsupported XML sub-verb {sub}", f"# {raw}"]
 
+    # --- SCREEN SECTION support ---
+
+    def _translate_display_or_screen(self, stmt: CobolStatement) -> list[str]:
+        """Route DISPLAY to screen handler or standard translator."""
+        if stmt.operands:
+            name = stmt.operands[0].upper()
+            if name in self._screen_lookup:
+                return self._translate_screen_display(self._screen_lookup[name])
+        return st.translate_display(stmt, self._resolve_operand)
+
+    def _translate_accept_or_screen(self, stmt: CobolStatement) -> list[str]:
+        """Route ACCEPT to screen handler or standard translator."""
+        if stmt.operands:
+            name = stmt.operands[0].upper()
+            if name in self._screen_lookup:
+                return self._translate_screen_accept(self._screen_lookup[name])
+        return st.translate_accept(stmt.operands, stmt.raw_text)
+
+    def _collect_screen_fields(self, sf: ScreenField) -> list[ScreenField]:
+        """Flatten a screen tree into leaf fields in display order."""
+        leaves: list[ScreenField] = []
+        if sf.value or sf.pic or sf.using or sf.from_field or sf.to_field or sf.blank_screen:
+            leaves.append(sf)
+        for child in sf.children:
+            leaves.extend(self._collect_screen_fields(child))
+        return leaves
+
+    def _translate_screen_display(self, screen: ScreenField) -> list[str]:
+        """Generate print() calls for DISPLAY screen-name."""
+        lines = [f"# DISPLAY {screen.name}"]
+        fields = self._collect_screen_fields(screen)
+        if not fields:
+            lines.append(f"pass  # screen {screen.name} has no displayable fields")
+            return lines
+        for sf in fields:
+            if sf.blank_screen:
+                lines.append("print('\\n' * 24)  # BLANK SCREEN")
+                continue
+            if sf.value:
+                lines.append(f"print({sf.value!r}, end='')")
+            if sf.using:
+                py = _to_python_name(sf.using)
+                lines.append(f"print(self.data.{py}.value, end='')")
+            elif sf.from_field:
+                py = _to_python_name(sf.from_field)
+                lines.append(f"print(self.data.{py}.value, end='')")
+        # Add a trailing newline
+        lines.append("print()  # end of screen")
+        return lines
+
+    def _translate_screen_accept(self, screen: ScreenField) -> list[str]:
+        """Generate input() calls for ACCEPT screen-name."""
+        lines = [f"# ACCEPT {screen.name}"]
+        fields = self._collect_screen_fields(screen)
+        if not fields:
+            lines.append(f"pass  # screen {screen.name} has no input fields")
+            return lines
+        for sf in fields:
+            if sf.blank_screen:
+                lines.append("print('\\n' * 24)  # BLANK SCREEN")
+                continue
+            if sf.value:
+                lines.append(f"print({sf.value!r}, end='')")
+            if sf.using:
+                py = _to_python_name(sf.using)
+                lines.append(f"self.data.{py}.set(input())")
+            elif sf.to_field:
+                py = _to_python_name(sf.to_field)
+                lines.append(f"self.data.{py}.set(input())")
+            elif sf.from_field:
+                py = _to_python_name(sf.from_field)
+                lines.append(f"print(self.data.{py}.value, end='')")
+        return lines
+
+    def _screen_layout_comments(self) -> str:
+        """Generate comments describing the SCREEN SECTION layout."""
+        if not self.program.screen_section:
+            return ""
+
+        lines: list[str] = []
+        lines.append("")
+        lines.append("# " + "=" * 60)
+        lines.append("# SCREEN SECTION")
+        lines.append("# " + "=" * 60)
+        for screen in self.program.screen_section:
+            lines.append(f"# SCREEN: {screen.name or '(unnamed)'}")
+            self._emit_screen_comments(screen, lines, indent=1)
+            lines.append(
+                "#   TODO(high): implement screen I/O"
+                " -- consider curses, prompt_toolkit, or web UI"
+            )
+            lines.append("#")
+        lines.append("")
+        return "\n".join(lines)
+
+    def _emit_screen_comments(
+        self, sf: ScreenField, lines: list[str], indent: int,
+    ) -> None:
+        """Recursively emit comment lines describing a screen field tree."""
+        prefix = "#" + "  " * indent
+        fields = self._collect_screen_fields(sf)
+        for f in fields:
+            parts: list[str] = []
+            if f.line or f.column:
+                parts.append(f"Line {f.line}, Col {f.column}")
+            if f.blank_screen:
+                parts.append("BLANK SCREEN")
+            if f.value:
+                parts.append(f'"{f.value}"')
+            if f.pic:
+                parts.append(f"PIC {f.pic}")
+            if f.using:
+                parts.append(f"USING {f.using}")
+            elif f.from_field:
+                parts.append(f"FROM {f.from_field}")
+            elif f.to_field:
+                parts.append(f"TO {f.to_field}")
+            if f.attributes:
+                parts.append(f"[{', '.join(f.attributes)}]")
+            lines.append(f"{prefix} {': '.join(parts) if parts else '(empty field)'}")
+
     def _main_block(self) -> str:
         return (
             f'if __name__ == "__main__":\n'
@@ -987,6 +1227,56 @@ class PythonMapper:
 
 
 def generate_python(software_map: SoftwareMap) -> str:
-    """Generate Python source code from a SoftwareMap."""
+    """Generate Python source code from a SoftwareMap.
+
+    When the program contains ``nested_programs``, each nested program
+    is analyzed and translated into its own class within the same
+    module.  Only the outermost program gets the
+    ``if __name__ == "__main__"`` block.
+    """
+    from .analyzer import analyze
+
     mapper = PythonMapper(software_map)
-    return mapper.generate()
+    parts: list[str] = []
+
+    # Header + imports (emitted once for the whole module)
+    mapper._program_id = mapper.program.program_id or "UNNAMED"
+    mapper._class_name = (
+        _to_python_name(mapper._program_id).title().replace("_", "")
+    )
+    parts.append(mapper._header())
+    parts.append(mapper._imports())
+
+    # Main program data + class
+    parts.append(mapper._data_class())
+    parts.append(mapper._program_class())
+
+    # Nested / concatenated programs
+    for nested_prog in software_map.program.nested_programs:
+        nested_smap = analyze(nested_prog)
+        nested_mapper = PythonMapper(nested_smap)
+        nested_mapper._program_id = nested_prog.program_id or "UNNAMED"
+        nested_mapper._class_name = (
+            _to_python_name(nested_mapper._program_id).title().replace("_", "")
+        )
+        # Emit a separator comment for clarity
+        parts.append(
+            f"# --- Nested/concatenated program: {nested_prog.program_id} ---\n"
+        )
+        # GLOBAL data linkage hint
+        global_items = [
+            item for item in software_map.program.all_data_items
+            if item.is_global
+        ]
+        if global_items:
+            names = ", ".join(item.name for item in global_items)
+            parts.append(
+                f"# TODO(high): GLOBAL data items from outer program ({names})"
+                f" should be shared with this nested program.\n"
+            )
+        parts.append(nested_mapper._data_class())
+        parts.append(nested_mapper._program_class())
+
+    # Only the outermost program gets the main block
+    parts.append(mapper._main_block())
+    return "\n".join(parts)
