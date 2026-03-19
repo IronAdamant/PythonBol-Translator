@@ -695,10 +695,6 @@ class TestInspectReplacing:
 # 18. SEARCH table — indexed table lookup
 # ---------------------------------------------------------------------------
 class TestSearchTable:
-    @pytest.mark.skip(
-        reason="SEARCH generates array indexing on individually named "
-               "dataclass fields; OCCURS tables not yet supported at runtime"
-    )
     def test_search_table(self):
         """SEARCH an OCCURS table for a matching element."""
         src = (
@@ -927,3 +923,135 @@ class TestDecimalCompute:
         stdout = _run_cobol_program(src)
         # 12.50 * 3 = 37.50
         assert "37.5" in stdout
+
+
+# ---------------------------------------------------------------------------
+# 27. OCCURS table — MOVE to subscript, DISPLAY subscript
+# ---------------------------------------------------------------------------
+class TestOccursTableAccess:
+    def test_occurs_move_and_display(self):
+        """MOVE values into OCCURS table slots, then DISPLAY each."""
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. TABLE-ACC.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-TABLE.\n"
+            "           05 WS-ITEM OCCURS 3 TIMES.\n"
+            "               10 WS-VAL PIC 9(3).\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           MOVE 10 TO WS-VAL(1).\n"
+            "           MOVE 20 TO WS-VAL(2).\n"
+            "           MOVE 30 TO WS-VAL(3).\n"
+            "           DISPLAY WS-VAL(1).\n"
+            "           DISPLAY WS-VAL(2).\n"
+            "           DISPLAY WS-VAL(3).\n"
+            "           STOP RUN.\n"
+        )
+        stdout = _run_cobol_program(src)
+        lines = stdout.strip().splitlines()
+        assert lines[0].strip() == "10"
+        assert lines[1].strip() == "20"
+        assert lines[2].strip() == "30"
+
+    def test_occurs_variable_subscript(self):
+        """Access OCCURS table element via variable subscript."""
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. VAR-SUB.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-TABLE.\n"
+            "           05 WS-ITEM OCCURS 5 TIMES.\n"
+            "               10 WS-NUM PIC 9(3).\n"
+            "       01 WS-IDX PIC 9(3) VALUE 3.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           MOVE 100 TO WS-NUM(1).\n"
+            "           MOVE 200 TO WS-NUM(2).\n"
+            "           MOVE 300 TO WS-NUM(3).\n"
+            "           DISPLAY WS-NUM(WS-IDX).\n"
+            "           STOP RUN.\n"
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "300"
+
+    def test_occurs_arithmetic_on_subscript(self):
+        """ADD to a subscripted OCCURS element."""
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. ADD-SUB.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-TABLE.\n"
+            "           05 WS-ITEM OCCURS 3 TIMES.\n"
+            "               10 WS-AMT PIC 9(5).\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           MOVE 50 TO WS-AMT(2).\n"
+            "           ADD 25 TO WS-AMT(2).\n"
+            "           DISPLAY WS-AMT(2).\n"
+            "           STOP RUN.\n"
+        )
+        stdout = _run_cobol_program(src)
+        assert stdout.strip() == "75"
+
+
+# ---------------------------------------------------------------------------
+# 28. SEARCH with AT END — table lookup
+# ---------------------------------------------------------------------------
+class TestSearchWithAtEnd:
+    def test_search_finds_element(self):
+        """SEARCH finds matching element in OCCURS table."""
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. SEARCH-FIND.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-TABLE.\n"
+            "           05 WS-ENTRY OCCURS 5 TIMES.\n"
+            "               10 WS-CODE PIC 9(3).\n"
+            "       01 WS-IDX PIC 9(3) VALUE 1.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           MOVE 10 TO WS-CODE(1).\n"
+            "           MOVE 20 TO WS-CODE(2).\n"
+            "           MOVE 30 TO WS-CODE(3).\n"
+            "           SEARCH WS-ENTRY\n"
+            '               AT END DISPLAY "MISS"\n'
+            "               WHEN WS-CODE(WS-IDX) = 20\n"
+            '                   DISPLAY "HIT"\n'
+            "           END-SEARCH.\n"
+            "           STOP RUN.\n"
+        )
+        stdout = _run_cobol_program(src)
+        assert "HIT" in stdout
+        assert "MISS" not in stdout
+
+    def test_search_at_end_reached(self):
+        """SEARCH falls through to AT END when element not found."""
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. SEARCH-MISS.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-TABLE.\n"
+            "           05 WS-ENTRY OCCURS 3 TIMES.\n"
+            "               10 WS-CODE PIC 9(3).\n"
+            "       01 WS-IDX PIC 9(3) VALUE 1.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           MOVE 10 TO WS-CODE(1).\n"
+            "           MOVE 20 TO WS-CODE(2).\n"
+            "           MOVE 30 TO WS-CODE(3).\n"
+            "           SEARCH WS-ENTRY\n"
+            '               AT END DISPLAY "MISS"\n'
+            "               WHEN WS-CODE(WS-IDX) = 99\n"
+            '                   DISPLAY "HIT"\n'
+            "           END-SEARCH.\n"
+            "           STOP RUN.\n"
+        )
+        stdout = _run_cobol_program(src)
+        assert "MISS" in stdout
+        assert "HIT" not in stdout

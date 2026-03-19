@@ -256,6 +256,8 @@ class PythonMapper:
         if item.children:
             # Group item — add a comment
             lines.append(f"{prefix}# Group: {item.name} (level {item.level:02d})")
+            if item.occurs:
+                lines.append(f"{prefix}_{py_name}_occurs: int = {item.occurs}")
             for child in item.children:
                 lines.extend(self._data_item_fields(child, indent, occurs_chain))
         elif item.pic:

@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Callable
 
 from .models import CobolStatement
-from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _sanitize_numeric, _to_method_name, _to_python_name, _upper_ops
+from .utils import FIGURATIVE_RESOLVE, _is_numeric_literal, _sanitize_numeric, _to_method_name, _to_python_name, _upper_ops, resolve_operand as _resolve_operand, resolve_target as _resolve_target
 
 # Re-export from io_translators (split for LOC compliance)
 from .io_translators import translate_accept, translate_rewrite, wrap_on_size_error  # noqa: F401
@@ -105,12 +105,11 @@ def translate_move(ops: list[str]) -> list[str]:
         return ["# TODO(high): MOVE FUNCTION — manual translation required"]
     else:
         fig = FIGURATIVE_RESOLVE.get(source.upper())
-        src_expr = fig if fig is not None else f"self.data.{_to_python_name(source)}.value"
+        src_expr = fig if fig is not None else _resolve_operand(source)
 
     results: list[str] = []
     for t in targets:
-        target = _to_python_name(t)
-        results.append(f"self.data.{target}.set({src_expr})")
+        results.append(f"{_resolve_target(t)}.set({src_expr})")
     return results
 
 
@@ -140,7 +139,7 @@ def translate_add(
             if t.upper() in _ARITHMETIC_KEYWORDS:
                 break
             if t.upper() != "ROUNDED":
-                results.append(f"self.data.{_to_python_name(t)}.set({sum_expr})")
+                results.append(f"{_resolve_target(t)}.set({sum_expr})")
         if not results:
             return [f"# ADD GIVING: no valid target found: {' '.join(ops)}"]
         return results
@@ -154,7 +153,7 @@ def translate_add(
         for src in sources:
             src_expr = resolve(src)
             for t in targets:
-                results.append(f"self.data.{_to_python_name(t)}.add({src_expr})")
+                results.append(f"{_resolve_target(t)}.add({src_expr})")
         return results
     return [f"# ADD: could not parse operands: {' '.join(ops)}"]
 
@@ -187,7 +186,7 @@ def translate_subtract(
             if t.upper() in _ARITHMETIC_KEYWORDS:
                 break
             if t.upper() != "ROUNDED":
-                results.append(f"self.data.{_to_python_name(t)}.set({expr})")
+                results.append(f"{_resolve_target(t)}.set({expr})")
         if not results:
             return [f"# SUBTRACT GIVING: no valid target found: {' '.join(ops)}"]
         return results
@@ -201,7 +200,7 @@ def translate_subtract(
         for src in sources:
             src_expr = resolve(src)
             for t in targets:
-                results.append(f"self.data.{_to_python_name(t)}.subtract({src_expr})")
+                results.append(f"{_resolve_target(t)}.subtract({src_expr})")
         return results
     return [f"# SUBTRACT: could not parse operands: {' '.join(ops)}"]
 
@@ -225,7 +224,7 @@ def translate_multiply(
                 if t.upper() in _ARITHMETIC_KEYWORDS:
                     break
                 if t.upper() != "ROUNDED":
-                    results.append(f"self.data.{_to_python_name(t)}.set({source} * {multiplicand})")
+                    results.append(f"{_resolve_target(t)}.set({source} * {multiplicand})")
             if not results:
                 return [f"# MULTIPLY GIVING: no valid target found: {' '.join(ops)}"]
             return results
@@ -235,7 +234,7 @@ def translate_multiply(
             return [f"# MULTIPLY: missing target operand: {' '.join(ops)}"]
         results = []
         for t in targets:
-            results.append(f"self.data.{_to_python_name(t)}.multiply({source})")
+            results.append(f"{_resolve_target(t)}.multiply({source})")
         return results
     return [f"# MULTIPLY: could not parse operands: {' '.join(ops)}"]
 
@@ -265,10 +264,9 @@ def _divide_giving_results(
         i += 1
     results = ["# TODO: verify divisor is non-zero before division (COBOL EC-SIZE-ZERO-DIVIDE)"]
     for t in giving_targets:
-        results.append(f"self.data.{_to_python_name(t)}.set({dividend} / {divisor})")
+        results.append(f"{_resolve_target(t)}.set({dividend} / {divisor})")
     if has_remainder and remainder_target:
-        py_rem = _to_python_name(remainder_target)
-        results.append(f"self.data.{py_rem}.set(int({dividend}) % int({divisor}))")
+        results.append(f"{_resolve_target(remainder_target)}.set(int({dividend}) % int({divisor}))")
     return results
 
 
@@ -293,7 +291,7 @@ def translate_divide(
             return [f"# DIVIDE: missing target operand: {' '.join(ops)}"]
         results: list[str] = []
         for t in targets:
-            results.append(f"self.data.{_to_python_name(t)}.divide({divisor})")
+            results.append(f"{_resolve_target(t)}.divide({divisor})")
         return results
     if "BY" in upper_ops:
         by_idx = next(i for i, o in enumerate(upper_ops) if o == "BY")
@@ -452,7 +450,7 @@ def translate_compute(
         results = [f"# COMPUTE: {' '.join(ops)}"]
         for t in targets:
             results.append(
-                f"self.data.{_to_python_name(t)}.set({expr})  # TODO(high): verify expression translation"
+                f"{_resolve_target(t)}.set({expr})  # TODO(high): verify expression translation"
             )
         return results
     return [f"# COMPUTE: could not parse operands: {' '.join(ops)}"]

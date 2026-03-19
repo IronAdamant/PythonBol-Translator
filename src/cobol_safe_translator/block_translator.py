@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import Callable
 
 from .models import CobolStatement
+import re as _re
+
 from .utils import resolve_operand as _fallback_resolve, _to_python_name, _upper_ops
 
 # Verbs that indicate an inline IF/EVALUATE (body packed into operands)
@@ -650,9 +652,23 @@ def translate_search_block(
         lines.append(_indent_line(f"# SEARCH {table_name}", indent))
 
     lines.append(_indent_line("_found = False", indent))
+    # Use the _occurs constant generated in the data class
     lines.append(
-        _indent_line(f"for _idx in range(len(self.data.{py_table})):", indent)
+        _indent_line(
+            f"for _idx in range(getattr(self.data, '_{py_table}_occurs', 1)):",
+            indent,
+        )
     )
+
+    # Detect index variable from WHEN conditions (subscript patterns like NAME(IDX))
+    _idx_var = None
+    for cond_text, _ in when_clauses:
+        m = _re.search(r'\w[\w-]*\((\w[\w-]*)\)', cond_text)
+        if m and not m.group(1).isdigit():
+            _idx_var = _to_python_name(m.group(1))
+            break
+    if _idx_var:
+        lines.append(_indent_line(f"self.data.{_idx_var}.set(_idx + 1)", indent + 1))
 
     if not when_clauses:
         lines.append(

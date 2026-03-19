@@ -161,3 +161,29 @@ def resolve_operand(op: str) -> str:
         return f"self.data.{_to_python_name(field)}.value"
     # Default data name
     return f"self.data.{_to_python_name(op)}.value"
+
+
+def resolve_target(op: str) -> str:
+    """Resolve a COBOL target operand to a Python assignment target.
+
+    Like resolve_operand but returns 'self.data.name[idx]' (no .value),
+    suitable for use with .set()/.add()/.subtract() etc.
+    """
+    sm = _SUBSCRIPT_RE.match(op)
+    if sm:
+        name, idx_str = sm.group(1), sm.group(2).strip()
+        py = _to_python_name(name)
+        normalised = idx_str.replace(",", " ")
+        sub_parts = normalised.split()
+        indices: list[str] = []
+        for part in sub_parts:
+            if _is_numeric_literal(part):
+                indices.append(f"[{int(part) - 1}]")
+            else:
+                py_idx = _to_python_name(part)
+                indices.append(f"[int(self.data.{py_idx}.value) - 1]")
+        return f"self.data.{py}{''.join(indices)}"
+    if " OF " in op.upper() or " IN " in op.upper():
+        fld = op.split()[0]
+        return f"self.data.{_to_python_name(fld)}"
+    return f"self.data.{_to_python_name(op)}"

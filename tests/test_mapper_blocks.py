@@ -232,7 +232,7 @@ class TestSearchStatement:
         source = generate_python(smap)
         ast.parse(source)
         assert "_found = False" in source
-        assert "for _idx in range(len(self.data.ws_table)):" in source
+        assert "for _idx in range(getattr(self.data, '_ws_table_occurs', 1)):" in source
         assert "if self.data.ws_a.value == 1:" in source
         assert "_found = True" in source
         assert "break" in source
