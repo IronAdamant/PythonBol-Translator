@@ -5,10 +5,11 @@ Pipeline position: Parser -> AST -> Analyzer -> **Mapper** -> Python source
 Generated code uses adapter classes (CobolDecimal, CobolString, FileAdapter)
 to preserve COBOL semantics.
 
-The mapper is split across three modules for maintainability:
-  - mapper.py        — Core orchestration (this file)
-  - mapper_codegen.py — Code generation methods (header, imports, data class, etc.)
-  - mapper_verbs.py   — Verb-specific translation methods (MOVE, GO TO, etc.)
+The mapper is split across four modules for maintainability:
+  - mapper.py          — Core orchestration (this file)
+  - mapper_codegen.py  — Code generation methods (header, imports, data class, etc.)
+  - mapper_verbs.py    — Verb-specific translation methods (MOVE, GO TO, etc.)
+  - screen_codegen.py  — Screen section layout comments and I/O translation
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from __future__ import annotations
 from .condition_translator import translate_condition as _translate_condition_impl
 from .mapper_codegen import CodegenMixin
 from .mapper_verbs import VerbTranslationMixin
+from .screen_codegen import ScreenCodegenMixin
 from .models import (
     CobolStatement,
     DataItem,
@@ -43,7 +45,7 @@ _ORPHAN_SCOPE_VERBS = frozenset({
 _COMM_VERBS = frozenset({"ENABLE", "DISABLE", "SEND", "RECEIVE", "PURGE"})
 
 
-class PythonMapper(CodegenMixin, VerbTranslationMixin):
+class PythonMapper(CodegenMixin, ScreenCodegenMixin, VerbTranslationMixin):
     """Generates Python source from a CobolProgram AST and its analysis."""
 
     def __init__(self, software_map: SoftwareMap) -> None:

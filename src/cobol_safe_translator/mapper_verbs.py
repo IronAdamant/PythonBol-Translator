@@ -1,8 +1,11 @@
 """Verb-specific translation methods for PythonMapper.
 
 Extracted from mapper.py to keep each module under 500 LOC.
-Contains: MOVE, GO TO, arithmetic, PERFORM, screen I/O,
+Contains: MOVE, GO TO, arithmetic, PERFORM,
 file status, DELETE, START, CANCEL, JSON, XML translation methods.
+
+Screen I/O methods (_collect_screen_fields, _translate_screen_display,
+_translate_screen_accept) have been moved to screen_codegen.py (ScreenCodegenMixin).
 """
 
 from __future__ import annotations
@@ -12,7 +15,6 @@ import re
 from .models import (
     CobolStatement,
     DataItem,
-    ScreenField,
 )
 from . import statement_translators as st
 from .io_translators import wrap_on_size_error
@@ -458,58 +460,3 @@ class VerbTranslationMixin:
                 return self._translate_screen_accept(self._screen_lookup[name])
         return st.translate_accept(stmt.operands, stmt.raw_text)
 
-    def _collect_screen_fields(self, sf: ScreenField) -> list[ScreenField]:
-        """Flatten a screen tree into leaf fields in display order."""
-        leaves: list[ScreenField] = []
-        if sf.value or sf.pic or sf.using or sf.from_field or sf.to_field or sf.blank_screen:
-            leaves.append(sf)
-        for child in sf.children:
-            leaves.extend(self._collect_screen_fields(child))
-        return leaves
-
-    def _translate_screen_display(self, screen: ScreenField) -> list[str]:
-        """Generate print() calls for DISPLAY screen-name."""
-        lines = [f"# DISPLAY {screen.name}"]
-        fields = self._collect_screen_fields(screen)
-        if not fields:
-            lines.append(f"pass  # screen {screen.name} has no displayable fields")
-            return lines
-        for sf in fields:
-            if sf.blank_screen:
-                lines.append("print('\\n' * 24)  # BLANK SCREEN")
-                continue
-            if sf.value:
-                lines.append(f"print({sf.value!r}, end='')")
-            if sf.using:
-                py = _to_python_name(sf.using)
-                lines.append(f"print(self.data.{py}.value, end='')")
-            elif sf.from_field:
-                py = _to_python_name(sf.from_field)
-                lines.append(f"print(self.data.{py}.value, end='')")
-        # Add a trailing newline
-        lines.append("print()  # end of screen")
-        return lines
-
-    def _translate_screen_accept(self, screen: ScreenField) -> list[str]:
-        """Generate input() calls for ACCEPT screen-name."""
-        lines = [f"# ACCEPT {screen.name}"]
-        fields = self._collect_screen_fields(screen)
-        if not fields:
-            lines.append(f"pass  # screen {screen.name} has no input fields")
-            return lines
-        for sf in fields:
-            if sf.blank_screen:
-                lines.append("print('\\n' * 24)  # BLANK SCREEN")
-                continue
-            if sf.value:
-                lines.append(f"print({sf.value!r}, end='')")
-            if sf.using:
-                py = _to_python_name(sf.using)
-                lines.append(f"self.data.{py}.set(input())")
-            elif sf.to_field:
-                py = _to_python_name(sf.to_field)
-                lines.append(f"self.data.{py}.set(input())")
-            elif sf.from_field:
-                py = _to_python_name(sf.from_field)
-                lines.append(f"print(self.data.{py}.value, end='')")
-        return lines
