@@ -1,44 +1,25 @@
 # cobol-safe-translator
 
-**Offline COBOL-to-Python translator that generates Python skeletons and analysis reports.**
+**COBOL-to-Python translator for AI-assisted mainframe migration.**
 
-**99.98% syntax-valid output across 4,542 real-world COBOL files from 30 test projects** — including NIST conformance suites, IBM CICS banking, French government tax code, a Minecraft server, DB2 stored procedures, and a Lisp interpreter written in COBOL.
+**100% valid Python output across 4,705 real-world COBOL files** — zero runtime dependencies, works offline, runs on any Python 3.11+ system.
 
-![Validation Report — 4,541/4,542 valid Python across 30 projects](docs/images/validation-report.png)
+Built for LLM agents (Claude, GPT, Gemini, Llama, Mistral) and human developers migrating enterprise COBOL off IBM mainframes. Includes an MCP server so AI coding assistants can use it as a tool directly.
 
-> **This tool generates SKELETON code that requires manual review.** It does NOT produce production-ready translations. Generated code may be incomplete, incorrect, or miss critical business logic. **Always verify against the original COBOL source.**
-
-> **Safety guarantee:** This tool NEVER modifies source files, NEVER touches production data, and generated file adapters are READ-ONLY by design.
-
-> [!CAUTION]
-> ### What this tool does — and does not do
->
-> **cobol-safe-translator translates COBOL source code into Python.** It handles data divisions, control flow, arithmetic, conditions, file I/O, string operations, SEARCH/SORT/MERGE, REPORT WRITER, 30+ FUNCTION intrinsics, and procedure logic. This is the heavy lifting of COBOL migration — converting the language itself.
->
-> **It does NOT translate or provide the surrounding infrastructure.** Specifically:
->
-> | Not included | What you need to do |
-> |---|---|
-> | **EXEC CICS** (transaction processing) | Re-implement using Flask, FastAPI, or your transaction framework |
-> | **EXEC SQL / DB2** (database access) | Replace with SQLAlchemy, psycopg2, or your database layer |
-> | **EXEC DLI** (IMS database) | Replace with your hierarchical DB or API equivalent |
-> | **MQ / messaging** (MQOPEN, MQGET, etc.) | Use `ibm_mq`, `pika` (RabbitMQ), or your message broker client |
-> | **VSAM file handling** | Replace with standard file I/O, SQLite, or a key-value store |
-> | **JCL job control** | Replace with cron, Airflow, or your job scheduler |
-> | **External CALL targets** | Implement or source the called programs separately |
->
-> **Every untranslated construct is marked with `TODO(high)` in the generated code.** Search for these markers to find everything that needs manual attention.
+> **This tool generates SKELETON code that requires review.** Generated code preserves COBOL data semantics (fixed-point arithmetic, string padding, FILE STATUS codes) through runtime adapters, but middleware integration (DB2, CICS, MQ, VSAM) must be implemented separately. Every untranslated construct is marked with `TODO(high)`.
 
 ## Why this exists
 
-COBOL runs an estimated $3 trillion in daily financial transactions. Most of it is maintained by a shrinking pool of specialists, and it's completely opaque to modern developers and LLMs that have never seen a COBOL codebase.
+COBOL runs an estimated **$3 trillion in daily financial transactions**. The engineers who maintain it are retiring. The systems are locked behind IBM licensing, proprietary middleware, and documentation that hasn't been updated since the 1990s.
 
-This tool exists to change that. **Open source forever. No IBM lock-in. No cloud upload.**
+This tool exists to **break that lock-in**. Open source forever. No cloud upload. No vendor dependency. Zero pip-installed runtime dependencies.
 
-Run it once against any `.cob`/`.cbl`/`.cobol` file and get:
-- A readable Python skeleton with COBOL semantics preserved
-- A sensitivity report flagging SSNs, balances, salaries, and other PII
-- A token-efficient LLM brief for filling in the remaining TODOs
+Run it against any `.cob`/`.cbl`/`.cobol` file and get:
+- A **runnable Python skeleton** with COBOL semantics preserved
+- **EXEC SQL code generation** (DB-API 2.0 with parameterized queries)
+- A **sensitivity report** flagging SSNs, balances, and PII
+- A **token-efficient LLM brief** for AI agents to finish the migration
+- An **interactive test** that validates and executes the translation
 
 ## Install
 
@@ -46,140 +27,189 @@ Run it once against any `.cob`/`.cbl`/`.cobol` file and get:
 pip install cobol-safe-translator   # zero runtime dependencies
 
 # Or from source
-pip install -e .
-
-# With dev tools (pytest)
-pip install -e ".[dev]"
+git clone https://github.com/IronAdamant/PythonBol-Translator.git
+cd PythonBol-Translator && pip install -e ".[dev]"
 ```
 
-Requires **Python 3.11+**. Zero pip-installed runtime dependencies. Cross-platform (Linux, macOS, Windows). Works offline.
+Requires **Python 3.11+**. No pip dependencies at runtime. Cross-platform (Linux, macOS, Windows). Works fully offline.
 
 ## Quick start
 
 ```bash
-cobol2py translate PAYROLL.cob                    # single file
-cobol2py translate ./src/ --output ./out          # whole directory
-cobol2py translate ./src/ --recursive             # descend into subdirs
-cobol2py translate ./src/ --validate              # syntax + import validation
-cobol2py translate ./src/ --copybook-path ./cpy   # specify copybook directories
+# Translate a single file
+cobol2py translate PAYROLL.cob
+
+# Translate a directory recursively with copybook paths
+cobol2py translate ./src/ --recursive --copybook-path ./cpy --output ./out
+
+# Validate generated Python (syntax + import + instantiation)
+cobol2py translate PAYROLL.cob --validate
+
+# Full pipeline test (translate + validate + execute)
+cobol2py test PAYROLL.cob
+
+# Batch test an entire directory
+cobol2py test ./src/ --recursive --timeout 30
+
+# Generate analysis reports (Markdown + JSON)
+cobol2py map PAYROLL.cob
+
+# Generate LLM translation brief
+cobol2py prompt PAYROLL.cob > brief.md
 ```
 
-## Use with LLMs
+## Use with AI agents
 
-The `prompt` command generates a compact brief designed for LLM consumption:
+### MCP Server (Claude Code, Cursor, Windsurf, etc.)
+
+```json
+{
+  "mcpServers": {
+    "cobol-translator": {
+      "command": "python",
+      "args": ["-m", "cobol_safe_translator", "--mcp"]
+    }
+  }
+}
+```
+
+The MCP server exposes 6 tools: `translate_cobol`, `analyze_cobol`, `generate_brief`, `list_sensitivities`, `discover_cobol_files`, `translate_directory`.
+
+### LLM Prompt Brief
 
 ```bash
 cobol2py prompt PAYROLL.cob > brief.md
-# Paste brief.md into your LLM and ask it to fill the TODOs
+# Feed brief.md to any LLM and ask it to fill the TODOs
 ```
 
-**Token comparison — BANKACCT.cob (430 lines):**
-
-| Approach | Tokens (approx.) |
-|----------|-----------------|
-| Raw COBOL source | ~3,400 |
-| `cobol2py prompt` brief | ~900 |
-| `software-map.json` only | ~600 |
+The prompt brief is 3-4x more token-efficient than raw COBOL source, containing only what the LLM needs: data structure, control flow, sensitivities, and the Python skeleton.
 
 ## Supported COBOL features
 
-### Fully translated
-- **Data Division**: PIC clauses (9, X, A, S, V, P, edited), levels 01-49/77, OCCURS (multi-dimensional), 88-level conditions, WORKING-STORAGE, FILE SECTION, LINKAGE SECTION, REPORT SECTION
-- **Arithmetic**: ADD, SUBTRACT, MULTIPLY, DIVIDE (INTO/BY/GIVING/REMAINDER), COMPUTE (complex expressions), ON SIZE ERROR wrapping, ROUNDED
-- **Control flow**: IF/ELSE (multi-line and inline), EVALUATE TRUE/variable/ALSO (multi-subject), PERFORM (simple, UNTIL, TIMES, VARYING, THRU), PERFORM VARYING with AFTER (multi-level nested loops)
-- **String operations**: STRING (DELIMITED BY), UNSTRING (multi-delimiter), INSPECT (TALLYING/REPLACING/CONVERTING), MOVE (simple, ALL, CORRESPONDING)
-- **Table operations**: SEARCH/SEARCH ALL (for-loop with AT END/WHEN), SORT/MERGE (USING/GIVING, INPUT/OUTPUT PROCEDURE), RELEASE, RETURN
-- **REPORT WRITER**: REPORT SECTION parsing (RD, TYPE IS, LINE/COLUMN, SOURCE, SUM, GROUP INDICATE), INITIATE, GENERATE, TERMINATE
-- **FUNCTION intrinsics**: 30+ functions — LENGTH, NUMVAL, UPPER-CASE, LOWER-CASE, REVERSE, TRIM, MAX, MIN, MOD, ABS, SQRT, LOG, LOG10, SIN, COS, INTEGER, ORD, CHAR, CURRENT-DATE, RANDOM, ANNUITY, MEAN, MEDIAN, and more
-- **File I/O**: OPEN (INPUT/OUTPUT/EXTEND/I-O), CLOSE, READ (AT END), WRITE (FROM), REWRITE, ACCEPT (FROM DATE/TIME/ENVIRONMENT), DELETE, START
-- **Other**: SET (88-level, UP/DOWN BY), GO TO (raises NotImplementedError), EXIT, STOP RUN, GOBACK, CONTINUE, NEXT SENTENCE
-- **Preprocessing**: COPY resolution with search paths (`--copybook-path`), COPY REPLACING (pseudo-text), recursive COPY expansion, EXEC CICS/SQL/DLI stripping with 25 Python-equivalent hints
-- **Bitwise**: B-AND, B-OR, B-XOR, B-NOT, B-SHIFT-L, B-SHIFT-R
-- **Literals**: Hex (X"FF", H'0F'), binary (B"01"), figurative constants, EBCDIC collation (opt-in `--ebcdic`)
-- **Format detection**: Auto-detects free-format vs fixed-format COBOL
+### Fully translated to Python
 
-### Translated as TODO stubs
-- GO TO (raises `NotImplementedError` — requires manual restructuring)
-- Unknown FUNCTION intrinsics (safe `0` fallback)
+| Category | Features |
+|----------|----------|
+| **Data Division** | PIC clauses (9/X/A/S/V/P/edited), levels 01-49/77/88, OCCURS (multi-dimensional), REDEFINES, WORKING-STORAGE, FILE SECTION, LINKAGE SECTION, LOCAL-STORAGE, REPORT SECTION, SCREEN SECTION |
+| **Data types** | USAGE COMP/COMP-3/BINARY (CobolDecimal), COMP-1/COMP-2 (float), COMP-5 (int), INDEX (int), DISPLAY (default) |
+| **Data attributes** | EXTERNAL, GLOBAL, JUSTIFIED RIGHT, BLANK WHEN ZERO, OCCURS DEPENDING ON, SYNCHRONIZED |
+| **Arithmetic** | ADD, SUBTRACT, MULTIPLY, DIVIDE (INTO/BY/GIVING/REMAINDER), COMPUTE (complex expressions), ON SIZE ERROR, ROUNDED (ROUND_HALF_UP) |
+| **Control flow** | IF/ELSE (multi-line + inline), EVALUATE TRUE/variable/ALSO with WHEN THRU, PERFORM (simple/UNTIL/TIMES/VARYING/THRU), nested loops, GO TO (method call + return), GO TO DEPENDING ON, EXIT PERFORM |
+| **String ops** | STRING (DELIMITED BY), UNSTRING (multi-delimiter), INSPECT (TALLYING/REPLACING/CONVERTING), MOVE (simple/ALL/CORRESPONDING/FUNCTION/group-level) |
+| **Table ops** | SEARCH/SEARCH ALL, SORT/MERGE (USING/GIVING, INPUT/OUTPUT PROCEDURE), RELEASE, RETURN |
+| **File I/O** | OPEN (INPUT/OUTPUT/EXTEND/I-O), CLOSE, READ (INTO + AT END/NOT AT END body), WRITE (FROM + AFTER/BEFORE ADVANCING), REWRITE, DELETE, START (KEY IS) |
+| **FILE STATUS** | Tracked on FileAdapter ("00"/"10"/"35"/"30"), auto-updated after every I/O operation |
+| **Report Writer** | RD, TYPE IS, LINE/COLUMN, SOURCE, SUM, GROUP INDICATE, INITIATE, GENERATE, TERMINATE |
+| **Screen Section** | LINE, COL, PIC, VALUE, USING, FROM, TO, BLANK SCREEN, display attributes, ACCEPT/DISPLAY with screen names |
+| **Intrinsics** | 30+ FUNCTION intrinsics: LENGTH, NUMVAL, UPPER-CASE, LOWER-CASE, REVERSE, TRIM, MAX, MIN, MOD, ABS, SQRT, LOG, SIN, COS, CURRENT-DATE, RANDOM, MEAN, MEDIAN, FACTORIAL, and more |
+| **Preprocessing** | COPY resolution with recursive expansion, REPLACING (pseudo-text + LEADING/TRAILING + non-pseudo-text), cycle detection, case-insensitive copybook lookup |
+| **EXEC SQL** | DB-API 2.0 code generation: DECLARE/OPEN/FETCH/CLOSE cursors, SELECT INTO, INSERT/UPDATE/DELETE, COMMIT/ROLLBACK, SQLCA/SQLCODE, host variable parameterization |
+| **EXEC CICS** | Enhanced hints: MAP, TRANSID, COMMAREA, RESP/RESP2 extraction |
+| **Declaratives** | USE AFTER ERROR/EXCEPTION, USE BEFORE REPORTING, USE FOR DEBUGGING — parsed and translated as handler methods |
+| **Nested programs** | Multiple PROGRAM-ID per source, separate Python classes, GLOBAL data hints |
+| **Other** | SET (88-level, UP/DOWN BY), CANCEL, INITIALIZE (with REPLACING), ADD/SUBTRACT CORRESPONDING, JSON/XML GENERATE stubs, communication verbs, ENTRY, MicroFocus directives |
+| **Literals** | Hex (X"FF"), binary (B"01"), figurative constants (ZERO/SPACE/HIGH-VALUE/LOW-VALUE), EBCDIC collation |
+
+### Runtime adapters (included, zero deps)
+
+| Adapter | Purpose |
+|---------|---------|
+| `CobolDecimal` | Fixed-point arithmetic with truncation, ROUNDED mode, signed/unsigned, overflow handling |
+| `CobolString` | Fixed-length strings with right-padding, truncation, EBCDIC collation |
+| `FileAdapter` | File I/O with OPEN modes, FILE STATUS codes, EOF tracking |
+| `GroupView` | Concatenated view of group item fields for group-level MOVE semantics |
 
 ## Validation
 
 ```bash
-# Syntax check + import validation
-cobol2py translate program.cob --validate
+# Interactive test — translate, validate, and execute
+cobol2py test program.cob
 
-# The --validate flag performs:
-# 1. ast.parse() — syntax check
-# 2. compile() — bytecode compilation
-# 3. importlib import + Program class instantiation — catches NameError, ImportError
+# Output:
+# Testing: program.cob
+#   Parse:      OK  (PROG-ID, 15 paragraphs, 0.12s)
+#   Analyze:    OK  (3 sensitivities, 2 dependencies)
+#   Generate:   OK  (245 lines)
+#   Syntax:     OK  (ast.parse passed)
+#   Validate:   OK  (import + instantiate passed)
+#   Execute:    OK  (exit 0, 0.03s)
+#   Output:     "HELLO WORLD"
+#   Result: 6/6 checks passed
 ```
 
-**Test results across 29 projects (4,542 COBOL files):**
+**Corpus validation: 4,705/4,705 files produce valid Python (100.00%)** across 42 test projects including NIST conformance suites, IBM CICS banking, enterprise DB2, French government tax code, GnuCOBOL test suite, AS/400 ILE, and a Minecraft server written in COBOL.
 
-| Project | Files | Result |
-|---------|-------|--------|
-| proleap-cobol-parser (NIST + edge cases) | 759 | 100% |
-| che-che4z-lsp-for-cobol (Eclipse LSP tests) | 982 | 100% |
-| TypeCobol (French enterprise insurance) | 908 | 99.9% |
-| opensourcecobol4j (NIST COBOL-85) | 416 | 100% |
-| mapa (CICS+DB2+IMS enterprise) | 324 | 100% |
-| CobolCraft (Minecraft server) | 206 | 100% |
-| Cobol-Projects (MVS/z/OS dual-target) | 164 | 100% |
-| 22 more projects | 783 | 100% |
-| **Total** | **4,542** | **99.98%** |
-
-## Running tests
+## Test suite
 
 ```bash
 pytest tests/ -v
-# 717 tests covering parser, analyzer, mapper, conditions, blocks, SEARCH,
-# SORT/MERGE, FUNCTION intrinsics, REPORT WRITER, COPY expansion, adapters,
-# CLI, batch, validation, and 33 behavioral end-to-end tests
+# 889 tests covering parser, analyzer, mapper, conditions, blocks, SEARCH,
+# SORT/MERGE, FUNCTION intrinsics, REPORT WRITER, SCREEN SECTION, COPY expansion,
+# nested programs, group MOVE, SQL translation, adapters, CLI, batch, validation,
+# and 60+ behavioral end-to-end tests
 ```
-
-**Behavioral tests** translate COBOL → execute generated Python in subprocess → verify stdout matches expected output. Covers: DISPLAY, arithmetic, MOVE, IF/ELSE, nested IF, PERFORM loops, PERFORM VARYING, PERFORM UNTIL, STRING, INSPECT, EVALUATE, 88-level conditions, COMPUTE expressions, FUNCTION LENGTH/UPPER-CASE, SUBTRACT GIVING, DIVIDE GIVING.
 
 ## Project structure
 
 ```
 src/cobol_safe_translator/
-  __init__.py              — Version export
-  models.py                — Shared dataclasses (AST, analysis models)
-  parser.py                — COBOL parser with free/fixed format detection
-  pic_parser.py            — PIC clause parsing
-  procedure_parser.py      — PROCEDURE DIVISION statement splitting
-  preprocessor.py          — COPY resolution (with search paths), EXEC stripping
-  analyzer.py              — Sensitivity detection, dependency extraction
-  adapters.py              — CobolDecimal, CobolString, FileAdapter
-  mapper.py                — AST-to-Python code generator (orchestration)
+  models.py                — Shared dataclasses (AST, SqlBlock, UseDeclaration, ScreenField)
+  parser.py                — COBOL parser (free/fixed format, nested programs, screen section)
+  pic_parser.py            — PIC clause parsing and classification
+  procedure_parser.py      — PROCEDURE DIVISION + DECLARATIVES splitting
+  preprocessor.py          — COPY resolution (recursive), EXEC SQL/CICS extraction
+  analyzer.py              — Sensitivity detection, dependency extraction, statistics
+  mapper.py                — Python code generator (core orchestration)
+  mapper_codegen.py        — Code generation mixin (data class, program class, header)
+  mapper_verbs.py          — Verb translation mixin (MOVE, GO TO, PERFORM, arithmetic)
   condition_translator.py  — Two-pass COBOL condition → Python expression
-  statement_translators.py — Arithmetic, PERFORM, I/O verb translators
-  function_translators.py  — COMPUTE FUNCTION intrinsic mapping (30+ functions)
+  statement_translators.py — Arithmetic, PERFORM, READ, WRITE, I/O verbs
+  function_translators.py  — 30+ FUNCTION intrinsic mappings
+  sql_translator.py        — EXEC SQL → DB-API 2.0 Python code generator
   sort_translators.py      — SORT, MERGE, RELEASE, RETURN
   report_parser.py         — REPORT SECTION parser
   report_translators.py    — INITIATE, GENERATE, TERMINATE
   string_translators.py    — STRING, UNSTRING, INSPECT, SET
   io_translators.py        — ACCEPT, REWRITE, ON SIZE ERROR
   block_translator.py      — IF/EVALUATE/SEARCH block reconstruction
+  adapters.py              — CobolDecimal, CobolString, FileAdapter, GroupView
   validation.py            — Runtime import validation
   ebcdic.py                — EBCDIC collation (cp037)
   exporters.py             — Markdown and JSON report exporters
   prompt_generator.py      — LLM translation brief generator
   batch.py                 — Batch/directory processing
-  cli.py                   — CLI (translate / map / prompt subcommands)
+  cli.py                   — CLI (translate / map / prompt / test)
   mcp_server.py            — MCP server for AI coding assistants
+  py.typed                 — PEP 561 type marker
 ```
 
 ## CLI reference
 
 ```
-cobol2py translate <path|dir> [--output <dir>] [--config protected.json]
-                               [--recursive] [--validate] [--copybook-path <dir>]
-cobol2py map <path|dir> [--output <dir>] [--config protected.json] [--recursive]
-cobol2py prompt <path|dir> [--output <file|dir>] [--config protected.json] [--recursive]
+cobol2py translate <path|dir> [--output <dir>] [--recursive] [--validate] [--copybook-path <dir>]
+cobol2py map       <path|dir> [--output <dir>] [--recursive] [--config protected.json]
+cobol2py prompt    <path|dir> [--output <file|dir>] [--recursive]
+cobol2py test      <path|dir> [--output <dir>] [--recursive] [--timeout N] [--no-execute]
 cobol2py --version
 ```
 
+## What this tool does NOT include
+
+| Not included | What you need to do |
+|---|---|
+| **EXEC CICS** (online transactions) | Re-implement using Flask, FastAPI, or your transaction framework |
+| **EXEC DLI** (IMS database) | Replace with your hierarchical DB or API equivalent |
+| **MQ / messaging** | Use `ibm_mq`, `pika` (RabbitMQ), or your message broker |
+| **VSAM runtime** | Replace with SQLite, key-value store, or indexed file library |
+| **JCL job control** | Replace with cron, Airflow, Prefect, or your scheduler |
+| **External CALL targets** | Implement or source the called programs separately |
+
+EXEC SQL is now **generated as runnable DB-API 2.0 Python** with parameterized queries, cursor management, and SQLCODE tracking.
+
+## Contributing
+
+PRs welcome. Run `pytest tests/ -v` before submitting. The project follows a 500 LOC per file guideline.
+
 ## License
 
-MIT
+MIT — use it however you want, commercially or otherwise. No IBM required.
