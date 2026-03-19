@@ -98,6 +98,14 @@ class CodegenMixin:
         return "\n".join(lines)
 
     def _imports(self) -> str:
+        # Check if any file uses indexed/relative organization
+        has_indexed = any(
+            fc.organization and fc.organization.upper() in ("INDEXED", "RELATIVE")
+            for fc in self.program.file_controls
+        )
+        adapter_imports = "CobolDecimal, CobolString, FileAdapter"
+        if has_indexed:
+            adapter_imports += ", IndexedFileAdapter"
         lines = [
             "from __future__ import annotations",
             "",
@@ -105,7 +113,7 @@ class CodegenMixin:
             "from decimal import Decimal",
             "",
             "# Runtime adapters — install cobol-safe-translator or copy adapters.py",
-            "from cobol_safe_translator.adapters import CobolDecimal, CobolString, FileAdapter",
+            f"from cobol_safe_translator.adapters import {adapter_imports}",
             "",
         ]
         # Add SQL import when EXEC SQL blocks are present
@@ -258,7 +266,19 @@ class CodegenMixin:
         for fc in self.program.file_controls:
             py_name = _to_python_name(fc.select_name)
             safe_path = fc.assign_to.replace("\\", "\\\\")
-            lines.append(f'        self.{py_name} = FileAdapter("{safe_path}")')
+            if fc.organization and fc.organization.upper() in ("INDEXED", "RELATIVE"):
+                key = _to_python_name(fc.record_key) if fc.record_key else "key"
+                mode = fc.access_mode or "SEQUENTIAL"
+                alt_keys = ""
+                if fc.alternate_keys:
+                    alt_list = ", ".join(f'"{_to_python_name(k)}"' for k in fc.alternate_keys)
+                    alt_keys = f", alternate_keys=[{alt_list}]"
+                lines.append(
+                    f'        self.{py_name} = IndexedFileAdapter("{safe_path}", '
+                    f'record_key="{key}", access_mode="{mode}"{alt_keys})'
+                )
+            else:
+                lines.append(f'        self.{py_name} = FileAdapter("{safe_path}")')
             if fc.file_status:
                 py_status = _to_python_name(fc.file_status)
                 lines.append(

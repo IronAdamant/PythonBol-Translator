@@ -258,3 +258,12 @@ class SoftwareMap:
     dependencies: list[Dependency] = field(default_factory=list)
     stats: ProgramStats = field(default_factory=ProgramStats)
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ProjectMap:
+    """Cross-program analysis for a COBOL project directory."""
+    programs: dict[str, SoftwareMap] = field(default_factory=dict)  # program_id -> SoftwareMap
+    call_graph: dict[str, list[str]] = field(default_factory=dict)  # caller -> [callees]
+    entry_points: list[str] = field(default_factory=list)  # programs not called by anyone
+    unresolved_calls: dict[str, list[str]] = field(default_factory=dict)  # program -> [unknown targets]

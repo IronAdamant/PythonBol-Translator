@@ -107,8 +107,15 @@ def _to_python_filename(program_id: str) -> str:
 
 def _translate_single(src: Path, out_dir: Path, config: str | None,
                       copy_paths: list[str] | None = None,
-                      validate: bool = False) -> int:
+                      validate: bool = False,
+                      tests: bool = False,
+                      incremental: bool = False) -> int:
     """Translate one COBOL file to Python; write to out_dir."""
+    if incremental:
+        return _translate_single_incremental(
+            src, out_dir, config, copy_paths, validate, tests,
+        )
+
     args = argparse.Namespace(path=str(src), config=config,
                               copybook_path=copy_paths or [])
     rc, program, smap = _parse_and_analyze(args, "Translating")
@@ -122,6 +129,100 @@ def _translate_single(src: Path, out_dir: Path, config: str | None,
         pid = program.program_id or src.stem
         out_name = _to_python_filename(pid)
         out_path = out_dir / out_name
+        out_path.write_text(python_source, encoding="utf-8")
+    except OSError as e:
+        print(red(f"Error: could not write output: {e}"), file=sys.stderr)
+        return 1
+
+    print(green(f"  Output: {out_path}"))
+
+    # Generate CICS Flask template as a separate file if applicable
+    from .cics_translator import has_cics, generate_cics_template
+    if has_cics(smap.program):
+        cics_template = generate_cics_template(smap.program)
+        if cics_template:
+            flask_name = out_name.replace(".py", "") + "_flask.py"
+            flask_path = out_dir / flask_name
+            try:
+                flask_path.write_text(cics_template, encoding="utf-8")
+                print(green(f"  CICS template: {flask_path}"))
+            except OSError:
+                pass  # non-fatal
+
+    # Generate pytest regression tests alongside translation
+    if tests:
+        from .test_generator import generate_tests
+        module_stem = out_name.replace('.py', '')
+        test_source = generate_tests(smap, module_stem)
+        test_path = out_dir / f"{module_stem}_test.py"
+        try:
+            test_path.write_text(test_source, encoding="utf-8")
+            print(green(f"  Tests: {test_path}"))
+        except OSError:
+            pass  # non-fatal
+
+    if validate:
+        is_valid, err_msg = validate_generated_python(python_source, str(out_path))
+        if is_valid:
+            print(green("  Validation: passed (syntax + compile + import)"))
+        else:
+            print(red(f"  Validation FAILED: {err_msg}"), file=sys.stderr)
+            return 1
+
+    print(bold(green("Done.")))
+    return 0
+
+
+def _translate_single_incremental(
+    src: Path, out_dir: Path, config: str | None,
+    copy_paths: list[str] | None = None,
+    validate: bool = False,
+    tests: bool = False,
+) -> int:
+    """Translate one COBOL file using incremental (diff-based) strategy."""
+    from .incremental import incremental_translate
+
+    source_path = Path(src)
+    if not source_path.exists() or not source_path.is_file():
+        print(red(f"Error: file not found: {source_path}"), file=sys.stderr)
+        return 1
+
+    print(bold(f"Translating (incremental): {source_path}"))
+
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # Need to determine output filename -- parse minimally for program_id
+        from .parser import parse_cobol_file as _pcf
+        prog = _pcf(source_path, copy_paths=copy_paths)
+        pid = prog.program_id or src.stem
+    except OSError as e:
+        print(red(f"Error: could not read file: {e}"), file=sys.stderr)
+        return 1
+
+    out_name = _to_python_filename(pid)
+    out_path = out_dir / out_name
+
+    try:
+        python_source, diff = incremental_translate(
+            source_path, out_path,
+            copy_paths=copy_paths, config_path=config,
+        )
+    except Exception as e:
+        print(red(f"Error: translation failed: {e}"), file=sys.stderr)
+        return 1
+
+    # Report what happened
+    if diff.get("full_retranslation_needed"):
+        print(yellow(f"  Full retranslation: {diff.get('reason', 'structural changes')}"))
+    else:
+        modified = diff.get("paragraphs_modified", [])
+        if modified:
+            print(green(f"  Incremental: patched {len(modified)} paragraphs"))
+        else:
+            print(green(f"  No changes detected"))
+
+    # Write output
+    try:
         out_path.write_text(python_source, encoding="utf-8")
     except OSError as e:
         print(red(f"Error: could not write output: {e}"), file=sys.stderr)
@@ -354,16 +455,42 @@ def cmd_translate(args: argparse.Namespace) -> int:
     config = args.config
     copy_paths = args.copybook_path
     validate = args.validate
+    tests = args.tests
+    incremental = args.incremental
 
     if p.is_dir():
+        # Package mode: unified Python package with cross-program imports
+        if args.package:
+            from .project_analyzer import analyze_project, generate_package
+            project_map = analyze_project(
+                p, recursive=args.recursive,
+                copy_paths=copy_paths, config_path=config,
+            )
+            if not project_map.programs:
+                print(red(f"Error: no COBOL files found in {p}"), file=sys.stderr)
+                return 1
+            files = generate_package(project_map, Path(args.output))
+            print(green(f"Generated package with {len(files)} files"))
+            if project_map.entry_points:
+                print(f"  Entry points: {', '.join(project_map.entry_points)}")
+            if project_map.unresolved_calls:
+                for prog, targets in sorted(project_map.unresolved_calls.items()):
+                    for t in targets:
+                        print(yellow(f"  Unresolved CALL: {prog} -> {t}"))
+            return 0
+
         base_out = Path(args.output)
 
         def process(src: Path, out_dir: Path) -> int:
-            return _translate_single(src, out_dir, config, copy_paths, validate)
+            return _translate_single(
+                src, out_dir, config, copy_paths, validate, tests, incremental,
+            )
 
         return _batch.run_batch(p, base_out, args.recursive, process)
 
-    return _translate_single(p, Path(args.output), config, copy_paths, validate)
+    return _translate_single(
+        p, Path(args.output), config, copy_paths, validate, tests, incremental,
+    )
 
 
 def cmd_map(args: argparse.Namespace) -> int:
@@ -503,6 +630,18 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument(
         "--validate", action="store_true", default=False,
         help="Run import validation on generated Python (syntax + compile + import)",
+    )
+    tr.add_argument(
+        "--incremental", action="store_true", default=False,
+        help="Incremental re-translation: only regenerate changed paragraphs",
+    )
+    tr.add_argument(
+        "--tests", action="store_true", default=False,
+        help="Generate pytest regression tests alongside translation",
+    )
+    tr.add_argument(
+        "--package", action="store_true", default=False,
+        help="Generate a unified Python package with cross-program imports (directory mode only)",
     )
 
     # map subcommand

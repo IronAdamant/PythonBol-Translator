@@ -210,19 +210,42 @@ class PythonMapper(CodegenMixin, VerbTranslationMixin):
         return [f"# CANCEL {program} — release subprogram resources (no-op in Python; garbage collected)"]
 
     def _translate_delete(self, ops: list[str]) -> list[str]:
-        """Translate DELETE verb."""
+        """Translate DELETE verb for indexed/relative files."""
         if not ops:
             return ["# DELETE: no file specified"]
         file_name = _to_python_name(ops[0])
-        return [f"self.{file_name}.delete()  # TODO(high): implement DELETE for indexed/relative file"]
+        upper_ops = _upper_ops(ops)
+
+        # Check for RECORD KEY clause: DELETE file-name RECORD [KEY IS field]
+        key_expr = None
+        if "KEY" in upper_ops:
+            key_idx = upper_ops.index("KEY")
+            offset = key_idx + 1
+            if offset < len(upper_ops) and upper_ops[offset] == "IS":
+                offset += 1
+            if offset < len(ops):
+                key_expr = self._resolve_operand(ops[offset])
+
+        lines: list[str] = []
+        if key_expr:
+            lines.append(f"self.{file_name}.delete(key=str({key_expr}))")
+        else:
+            lines.append(f"self.{file_name}.delete()")
+
+        # Handle INVALID KEY / NOT INVALID KEY clauses
+        if "INVALID" in upper_ops:
+            lines.append(f'if self.{file_name}.status == "23":')
+            lines.append(f"    pass  # INVALID KEY handler")
+        return lines
 
     def _translate_start(self, ops: list[str], raw: str) -> list[str]:
-        """Translate START verb."""
+        """Translate START verb for indexed/relative files."""
         if not ops:
             return ["# START: no file specified"]
         file_name = ops[0]
+        py_file = _to_python_name(file_name)
         upper_ops = _upper_ops(ops)
-        comparison = "="
+        comparison = "EQUAL"
         field = ""
         if "KEY" in upper_ops:
             key_idx = upper_ops.index("KEY")
@@ -232,22 +255,39 @@ class PythonMapper(CodegenMixin, VerbTranslationMixin):
             if next_idx < len(upper_ops):
                 comp = upper_ops[next_idx]
                 if comp in ("EQUAL", "=", "EQUALS"):
-                    comparison = "="
+                    comparison = "EQUAL"
                     next_idx += 1
                 elif comp in ("GREATER", ">"):
-                    comparison = ">"
+                    comparison = "GREATER"
                     next_idx += 1
                 elif comp == "NOT" and next_idx + 1 < len(upper_ops) and upper_ops[next_idx + 1] in ("LESS", "<"):
-                    comparison = ">="
+                    comparison = "NOT LESS"
                     next_idx += 2
                 elif comp in (">=",):
-                    comparison = ">="
+                    comparison = "GREATER OR EQUAL"
                     next_idx += 1
                 if next_idx < len(upper_ops) and upper_ops[next_idx] == "THAN":
                     next_idx += 1
             if next_idx < len(ops):
                 field = ops[next_idx]
-        return [f"# TODO(high): START {file_name} KEY IS {comparison} {field} — position file pointer"]
+
+        lines: list[str] = []
+        if field:
+            key_expr = self._resolve_operand(field)
+            lines.append(
+                f'self.{py_file}.start(key=str({key_expr}), '
+                f'comparison="{comparison}")'
+            )
+        else:
+            lines.append(
+                f'self.{py_file}.start(key="", comparison="{comparison}")'
+            )
+
+        # Handle INVALID KEY clause
+        if "INVALID" in upper_ops:
+            lines.append(f'if self.{py_file}.status == "23":')
+            lines.append(f"    pass  # INVALID KEY handler")
+        return lines
 
     def _translate_json(self, ops: list[str], raw: str) -> list[str]:
         """Translate JSON GENERATE/PARSE verb."""
@@ -363,4 +403,23 @@ def generate_python(software_map: SoftwareMap) -> str:
 
     # Only the outermost program gets the main block
     parts.append(mapper._main_block())
+
+    # CICS Flask template (appended as commented-out section)
+    from .cics_translator import has_cics, generate_cics_template
+    if has_cics(software_map.program):
+        cics_template = generate_cics_template(software_map.program)
+        if cics_template:
+            parts.append("")
+            parts.append("# " + "=" * 60)
+            parts.append(
+                "# CICS TRANSACTION FRAMEWORK (Flask template)"
+            )
+            parts.append(
+                "# Uncomment and save as a separate file to use."
+            )
+            parts.append("# Install: pip install flask")
+            parts.append("# " + "=" * 60)
+            for tpl_line in cics_template.splitlines():
+                parts.append(f"# {tpl_line}" if tpl_line else "#")
+
     return "\n".join(parts)

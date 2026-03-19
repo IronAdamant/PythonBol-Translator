@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from cobol_safe_translator.adapters import CobolDecimal, CobolString, FileAdapter, GroupView
+from cobol_safe_translator.adapters import (
+    CobolDecimal, CobolString, FileAdapter, GroupView, IndexedFileAdapter,
+)
 
 
 class TestCobolDecimal:
@@ -402,3 +404,240 @@ class TestGroupView:
         # Decimal "1.23" as string is "1.23", padded to 5 chars
         assert gv.value == "1.23 "
         assert len(gv.value) == 5
+
+
+class TestIndexedFileAdapter:
+    """Tests for IndexedFileAdapter — SQLite-backed VSAM-style keyed access."""
+
+    def test_write_then_sequential_read(self, tmp_path):
+        """OPEN OUTPUT + WRITE records, then OPEN INPUT + sequential READ."""
+        db_file = str(tmp_path / "customers.dat")
+        fa = IndexedFileAdapter(db_file, record_key="cust_id", access_mode="SEQUENTIAL")
+
+        fa.open_output()
+        assert fa.status == "00"
+        fa.write("Alice Record", key="001")
+        fa.write("Bob Record", key="002")
+        fa.write("Carol Record", key="003")
+        fa.close()
+
+        fa.open_input()
+        assert fa.read() == "Alice Record"
+        assert fa.status == "00"
+        assert fa.read() == "Bob Record"
+        assert fa.read() == "Carol Record"
+        assert fa.read() is None
+        assert fa.eof is True
+        assert fa.status == "10"
+        fa.close()
+
+    def test_random_read_by_key(self, tmp_path):
+        """Random read retrieves the correct record by key."""
+        db_file = str(tmp_path / "accounts.dat")
+        fa = IndexedFileAdapter(db_file, record_key="acct_no", access_mode="RANDOM")
+
+        fa.open_output()
+        fa.write("Checking 1000", key="CHK001")
+        fa.write("Savings 5000", key="SAV001")
+        fa.write("Checking 2000", key="CHK002")
+        fa.close()
+
+        fa.open_input()
+        assert fa.read(key="SAV001") == "Savings 5000"
+        assert fa.status == "00"
+        assert fa.read(key="CHK002") == "Checking 2000"
+        assert fa.status == "00"
+        fa.close()
+
+    def test_rewrite_existing_record(self, tmp_path):
+        """REWRITE updates an existing record in place."""
+        db_file = str(tmp_path / "inventory.dat")
+        fa = IndexedFileAdapter(db_file, record_key="item_id", access_mode="RANDOM")
+
+        fa.open_output()
+        fa.write("Widget qty=10", key="W001")
+        fa.write("Gadget qty=5", key="G001")
+        fa.close()
+
+        fa.open_io()
+        fa.rewrite("Widget qty=20", key="W001")
+        assert fa.status == "00"
+        # Verify the update
+        assert fa.read(key="W001") == "Widget qty=20"
+        assert fa.read(key="G001") == "Gadget qty=5"
+        fa.close()
+
+    def test_delete_record(self, tmp_path):
+        """DELETE removes a record by key."""
+        db_file = str(tmp_path / "employees.dat")
+        fa = IndexedFileAdapter(db_file, record_key="emp_id", access_mode="RANDOM")
+
+        fa.open_output()
+        fa.write("John Doe", key="E001")
+        fa.write("Jane Smith", key="E002")
+        fa.write("Bob Jones", key="E003")
+        fa.close()
+
+        fa.open_io()
+        fa.delete(key="E002")
+        assert fa.status == "00"
+        # Verify deletion
+        assert fa.read(key="E002") is None
+        assert fa.status == "23"
+        # Other records still exist
+        assert fa.read(key="E001") == "John Doe"
+        assert fa.read(key="E003") == "Bob Jones"
+        fa.close()
+
+    def test_start_positioning_then_sequential_read(self, tmp_path):
+        """START positions the cursor, then sequential READ continues from there."""
+        db_file = str(tmp_path / "products.dat")
+        fa = IndexedFileAdapter(db_file, record_key="prod_id", access_mode="DYNAMIC")
+
+        fa.open_output()
+        fa.write("Apple", key="A01")
+        fa.write("Banana", key="B01")
+        fa.write("Cherry", key="C01")
+        fa.write("Date", key="D01")
+        fa.close()
+
+        fa.open_input()
+        fa.start(key="C01", comparison="EQUAL")
+        assert fa.status == "00"
+        assert fa.read() == "Cherry"
+        assert fa.read() == "Date"
+        assert fa.read() is None
+        assert fa.eof is True
+        fa.close()
+
+    def test_start_greater_than(self, tmp_path):
+        """START with GREATER positions past the specified key."""
+        db_file = str(tmp_path / "orders.dat")
+        fa = IndexedFileAdapter(db_file, record_key="order_id", access_mode="DYNAMIC")
+
+        fa.open_output()
+        fa.write("Order 1", key="100")
+        fa.write("Order 2", key="200")
+        fa.write("Order 3", key="300")
+        fa.close()
+
+        fa.open_input()
+        fa.start(key="100", comparison="GREATER")
+        assert fa.status == "00"
+        assert fa.read() == "Order 2"
+        fa.close()
+
+    def test_duplicate_key_error(self, tmp_path):
+        """Writing a duplicate key sets status to '22'."""
+        db_file = str(tmp_path / "unique.dat")
+        fa = IndexedFileAdapter(db_file, record_key="id")
+
+        fa.open_output()
+        fa.write("First", key="K001")
+        assert fa.status == "00"
+        fa.write("Duplicate", key="K001")
+        assert fa.status == "22"
+        fa.close()
+
+    def test_record_not_found(self, tmp_path):
+        """Reading a nonexistent key sets status to '23'."""
+        db_file = str(tmp_path / "sparse.dat")
+        fa = IndexedFileAdapter(db_file, record_key="id", access_mode="RANDOM")
+
+        fa.open_output()
+        fa.write("Only Record", key="EXISTS")
+        fa.close()
+
+        fa.open_input()
+        result = fa.read(key="MISSING")
+        assert result is None
+        assert fa.status == "23"
+        fa.close()
+
+    def test_eof_on_empty_file(self, tmp_path):
+        """Sequential read on empty file returns EOF immediately."""
+        db_file = str(tmp_path / "empty.dat")
+        fa = IndexedFileAdapter(db_file, record_key="id")
+
+        fa.open_output()
+        fa.close()
+
+        fa.open_input()
+        result = fa.read()
+        assert result is None
+        assert fa.eof is True
+        assert fa.status == "10"
+        fa.close()
+
+    def test_rewrite_nonexistent_record(self, tmp_path):
+        """REWRITE on a missing key sets status to '23'."""
+        db_file = str(tmp_path / "missing.dat")
+        fa = IndexedFileAdapter(db_file, record_key="id", access_mode="RANDOM")
+
+        fa.open_output()
+        fa.write("Existing", key="K001")
+        fa.close()
+
+        fa.open_io()
+        fa.rewrite("Updated", key="MISSING")
+        assert fa.status == "23"
+        fa.close()
+
+    def test_delete_nonexistent_record(self, tmp_path):
+        """DELETE on a missing key sets status to '23'."""
+        db_file = str(tmp_path / "del_miss.dat")
+        fa = IndexedFileAdapter(db_file, record_key="id", access_mode="RANDOM")
+
+        fa.open_output()
+        fa.write("Only", key="K001")
+        fa.close()
+
+        fa.open_io()
+        fa.delete(key="MISSING")
+        assert fa.status == "23"
+        fa.close()
+
+    def test_read_before_open_raises(self):
+        """Reading without opening raises RuntimeError."""
+        fa = IndexedFileAdapter("nonexistent.dat")
+        with pytest.raises(RuntimeError, match="File not opened"):
+            fa.read()
+
+    def test_context_manager(self, tmp_path):
+        """IndexedFileAdapter works as a context manager."""
+        db_file = str(tmp_path / "ctx.dat")
+        fa = IndexedFileAdapter(db_file, record_key="id")
+        fa.open_output()
+        fa.write("Test", key="001")
+        fa.close()
+
+        with IndexedFileAdapter(db_file, record_key="id") as fa2:
+            assert fa2.read() == "Test"
+
+    def test_open_output_clears_existing_data(self, tmp_path):
+        """OPEN OUTPUT drops and recreates the table."""
+        db_file = str(tmp_path / "clear.dat")
+        fa = IndexedFileAdapter(db_file, record_key="id")
+
+        fa.open_output()
+        fa.write("Old Data", key="001")
+        fa.close()
+
+        fa.open_output()
+        fa.write("New Data", key="002")
+        fa.close()
+
+        fa.open_input()
+        assert fa.read() == "New Data"
+        assert fa.read() is None  # old data is gone
+        fa.close()
+
+    def test_close_resets_state(self, tmp_path):
+        """Close resets eof, mode, and status."""
+        db_file = str(tmp_path / "reset.dat")
+        fa = IndexedFileAdapter(db_file, record_key="id")
+        fa.open_output()
+        fa.close()
+        assert fa.status == "00"
+        assert fa.eof is False
+        assert fa._mode is None
