@@ -1,18 +1,18 @@
 # cobol-safe-translator
 
-**COBOL-to-Python translator for AI-assisted mainframe migration.**
+**Translate COBOL to Python. Zero dependencies. Works offline.**
 
-**100% valid Python output across 4,705 real-world COBOL files** — zero runtime dependencies, works offline, runs on any Python 3.11+ system.
+Produces valid Python from real enterprise COBOL — tested on 4,705 files across 42 projects with 100% syntax validity. Handles the structural heavy lifting of mainframe migration so developers and AI agents can focus on business logic and middleware integration.
 
-Built for LLM agents (Claude, GPT, Gemini, Llama, Mistral) and human developers migrating enterprise COBOL off IBM mainframes. Includes an MCP server so AI coding assistants can use it as a tool directly.
+Ships with an MCP server for AI coding assistants and a CLI for direct use.
 
-> **This tool generates SKELETON code that requires review.** Generated code preserves COBOL data semantics (fixed-point arithmetic, string padding, FILE STATUS codes) through runtime adapters, but middleware integration (DB2, CICS, MQ, VSAM) must be implemented separately. Every untranslated construct is marked with `TODO(high)`.
+> **This tool generates skeleton code that requires review.** COBOL data semantics (fixed-point arithmetic, string padding, FILE STATUS) are preserved through runtime adapters, but middleware (DB2, CICS, MQ, VSAM) must be wired up separately. Every untranslated construct is marked with `TODO(high)`.
 
 ## Why this exists
 
-COBOL runs an estimated **$3 trillion in daily financial transactions**. The engineers who maintain it are retiring. The systems are locked behind IBM licensing, proprietary middleware, and documentation that hasn't been updated since the 1990s.
+COBOL runs an estimated **$3 trillion in daily financial transactions**. The engineers who maintain it are retiring, and the systems they built are locked behind proprietary middleware and decades-old documentation.
 
-This tool exists to **break that lock-in**. Open source forever. No cloud upload. No vendor dependency. Zero pip-installed runtime dependencies.
+This tool exists to make those systems readable, translatable, and migratable — without needing an IBM contract or a mainframe consultant. Open source, offline, no vendor dependency.
 
 Run it against any `.cob`/`.cbl`/`.cobol` file and get:
 - A **runnable Python skeleton** with COBOL semantics preserved
