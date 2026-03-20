@@ -18,7 +18,7 @@ from .models import CobolProgram, DataItem, Paragraph
 from .analyzer import analyze
 from .mapper import generate_python, PythonMapper
 from .parser import parse_cobol_file
-from .utils import _to_python_name, _to_method_name
+from .utils import _to_method_name
 
 
 def _hash_paragraph(para: Paragraph) -> str:

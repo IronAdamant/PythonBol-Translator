@@ -75,16 +75,25 @@ _CICS_RESP2_RE = re.compile(r"RESP2\s*\(\s*'?([^')]+)'?\s*\)", re.IGNORECASE)
 # ── Helper functions ─────────────────────────────────────────────────────
 
 
+def _normalize_sql(sql_text: str) -> tuple[str, str]:
+    """Normalize EXEC SQL text, stripping prefix/suffix.
+
+    Returns (text, upper) where *text* preserves original casing and
+    *upper* is the uppercased form for keyword matching.
+    """
+    text = " ".join(sql_text.split())
+    text = re.sub(r"^EXEC\s+SQL\s+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*END-EXEC\.?\s*$", "", text, flags=re.IGNORECASE)
+    return text, text.upper().strip()
+
+
 def _parse_sql_block(sql_text: str) -> SqlBlock | None:
     """Parse EXEC SQL text into a structured SqlBlock.
 
     Returns None if the text cannot be parsed.
     """
     try:
-        text = " ".join(sql_text.split())
-        text = re.sub(r"^EXEC\s+SQL\s+", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s*END-EXEC\.?\s*$", "", text, flags=re.IGNORECASE)
-        upper = text.upper().strip()
+        text, upper = _normalize_sql(sql_text)
 
         if upper.startswith("INCLUDE") and "SQLCA" in upper:
             return SqlBlock(sql_type="INCLUDE", raw_sql=text)
@@ -192,7 +201,7 @@ def _parse_sql_block(sql_text: str) -> SqlBlock | None:
             return SqlBlock(sql_type="ROLLBACK", raw_sql=text)
 
         return None
-    except Exception:
+    except (ValueError, IndexError, KeyError, AttributeError):
         return None
 
 
@@ -203,12 +212,7 @@ def _sql_hint(sql_text: str) -> list[str]:
     Falls back to an empty list if parsing fails.
     """
     try:
-        # Normalize whitespace for easier parsing
-        text = " ".join(sql_text.split())
-        # Remove EXEC SQL prefix and END-EXEC suffix
-        text = re.sub(r"^EXEC\s+SQL\s+", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s*END-EXEC\.?\s*$", "", text, flags=re.IGNORECASE)
-        upper = text.upper().strip()
+        text, upper = _normalize_sql(sql_text)
 
         # INCLUDE SQLCA
         if upper.startswith("INCLUDE") and "SQLCA" in upper:
@@ -303,7 +307,7 @@ def _sql_hint(sql_text: str) -> list[str]:
             return ["connection.rollback()"]
 
         return []
-    except Exception:
+    except (ValueError, IndexError, KeyError, AttributeError):
         return []
 
 

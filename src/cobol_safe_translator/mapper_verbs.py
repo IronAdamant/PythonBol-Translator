@@ -18,7 +18,6 @@ from .models import (
 )
 from . import statement_translators as st
 from .io_translators import wrap_on_size_error
-from . import string_translators as strt
 from .utils import (
     _is_numeric_literal,
     _sanitize_numeric,
