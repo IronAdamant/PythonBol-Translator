@@ -1,15 +1,17 @@
-"""Two-pass COBOL condition translator (tokenize then translate).
+"""Recursive descent COBOL condition translator.
 
 Handles: basic comparisons, compound (AND/OR), negation, class conditions
-(NUMERIC/ALPHABETIC), sign conditions (POSITIVE/NEGATIVE/ZERO), 88-level
-condition names, implied subjects, abbreviated combined relations,
-figurative constants, reference modification, parenthesized groups,
-and quoted string literals.
+(NUMERIC/ALPHABETIC/ALPHABETIC-UPPER/ALPHABETIC-LOWER), sign conditions
+(POSITIVE/NEGATIVE/ZERO), 88-level condition names, implied subjects,
+abbreviated combined relations, figurative constants, reference modification,
+parenthesized groups, FUNCTION intrinsics, and quoted string literals.
 
 Pipeline position: Called by mapper.py._translate_condition()
 """
 
 from __future__ import annotations
+
+import re
 
 from .function_translators import translate_function_intrinsic
 from .utils import resolve_operand
@@ -42,18 +44,13 @@ _ARITH_OPS = frozenset({'+', '-', '*', '/'})
 # Tokens that precede a '(' and indicate it's NOT a reference-modification paren
 _NON_REFMOD_TOKENS = frozenset({'AND', 'OR', 'NOT', '(', ')'}) | _CMP_OPS
 
-# Combined set for sign-word subject exclusion check
-_NON_SUBJECT_TOKENS = frozenset({'and', 'or', 'not', '('}) | _CMP_OPS
-
-_OP_KEYWORDS = frozenset({
-    'AND', 'OR', 'NOT', '(', ')', 'NUMERIC', 'ALPHABETIC', 'POSITIVE', 'NEGATIVE',
-})
-
 # Single-token comparison operators → Python equivalents
 _SINGLE_OPS: dict[str, str] = {
     '=': '==', 'EQUAL': '==', 'GREATER': '>', 'LESS': '<',
     '>': '>', '<': '<', '>=': '>=', '<=': '<=',
 }
+
+_CLASS_KEYWORDS = frozenset({'NUMERIC', 'ALPHABETIC', 'ALPHABETIC-UPPER', 'ALPHABETIC-LOWER'})
 
 
 def _is_quoted(tok: str) -> bool:
@@ -78,6 +75,12 @@ def _condition_88_expr(parent: str, val: str, negate: bool = False) -> str:
     else:
         expr = f"self.data.{parent}.value == {val}"
     return f"not ({expr})" if negate else expr
+
+
+def _negate_op(op: str) -> str:
+    """Negate a comparison operator."""
+    return {'>': '<=', '<': '>=', '==': '!=', '!=': '==',
+            '>=': '<', '<=': '>'}.get(op, '!=')
 
 
 def tokenize_condition(cond: str) -> list[str]:
@@ -125,17 +128,13 @@ def tokenize_condition(cond: str) -> list[str]:
                 tokens.append(ch)
                 i += 1
         elif ch in ('+', '*', '/'):
-            # Arithmetic operators in conditions (e.g., "X + Y > Z")
             tokens.append(ch)
             i += 1
         elif ch == '-':
-            # Minus as operator vs hyphen in COBOL names
-            # If preceded by a word-ending char and followed by space or operator, it's subtraction
             if i > 0 and (cond[i - 1] in (' ', '\t', ')') or cond[i - 1].isdigit()):
                 tokens.append(ch)
                 i += 1
             else:
-                # Part of a COBOL hyphenated name — fall through to word collection
                 j = i
                 while j < n and cond[j] not in (' ', '\t', '(', ')', '=', '>', '<', '"', "'", '+', '*', '/'):
                     j += 1
@@ -151,274 +150,353 @@ def tokenize_condition(cond: str) -> list[str]:
 
 
 def translate_condition(cond: str, condition_lookup: dict[str, tuple[str, str]]) -> str:
-    """Two-pass COBOL condition to Python expression translator.
+    """Translate COBOL condition to Python expression.
 
     On unrecoverable parse failure returns "True".
     """
     try:
-        return _translate_inner(cond.strip(), condition_lookup)
+        tokens = tokenize_condition(cond.strip())
+        if not tokens:
+            return "True"
+        parser = _CondParser(tokens, condition_lookup)
+        result = parser.parse()
+        return _validate_condition(result)
     except (ValueError, IndexError, KeyError):
         return "True"
 
 
-def _try_phrase(tokens: list[str], i: int, n: int) -> tuple[str, int] | None:
-    """Try to match a multi-word comparison phrase at position i."""
-    for phrase, op in _CMP_PHRASES:
-        plen = len(phrase)
-        if i + plen <= n and [_upper(tokens[j]) for j in range(i, i + plen)] == phrase:
-            return op, i + plen
-    return None
+# ---------------------------------------------------------------------------
+# Recursive descent parser
+# ---------------------------------------------------------------------------
 
+class _CondParser:
+    """Recursive descent parser for COBOL conditions.
 
-def _handle_not(tokens: list[str], i: int, n: int, result: list[str],
-                condition_lookup: dict[str, tuple[str, str]]) -> int:
-    """Handle NOT token: class conditions, 88-level negation, or standalone not."""
-    if i + 1 < n:
-        nxt = _upper(tokens[i + 1])
-        if nxt == 'NUMERIC':
-            subj = result.pop() if result else "True"
-            result.append(_numeric_check_expr(subj, negate=True))
-            return i + 2
-        if nxt == 'ALPHABETIC':
-            subj = result.pop() if result else "True"
-            result.append(f"not str({subj}).isalpha()")
-            return i + 2
-        if nxt == 'ALPHABETIC-UPPER':
-            subj = result.pop() if result else "True"
-            result.append(f"not (str({subj}).isupper() and str({subj}).isalpha())")
-            return i + 2
-        if nxt == 'ALPHABETIC-LOWER':
-            subj = result.pop() if result else "True"
-            result.append(f"not (str({subj}).islower() and str({subj}).isalpha())")
-            return i + 2
-        if nxt in condition_lookup:
-            parent, val = condition_lookup[nxt]
-            result.append(_condition_88_expr(parent, val, negate=True))
-            return i + 2
-        # NOT followed by a value (no operator) → implied NOT EQUAL
-        # e.g., "IF X NOT 0" means "IF X NOT = 0"
-        # But only when there IS a preceding subject (result has a data reference).
-        # If NOT is at the start or after AND/OR, it's negating a condition name.
-        # Also, NOT before a subject with a comparison after it is standalone NOT.
-        if (nxt not in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL',
-                         'AND', 'OR', '(', ')')
-                and nxt not in _SIGN_WORDS and nxt not in _OP_KEYWORDS):
-            # Check there's a preceding subject (not at start, not after and/or)
-            has_subject = (result and result[-1] not in ('and', 'or', 'not', '('))
-            # Check if the token AFTER the value is a comparison → standalone NOT
-            peek_after_val = _upper(tokens[i + 2]) if i + 2 < n else ''
-            is_followed_by_cmp = peek_after_val in ('>', '<', '=', '>=', '<=',
-                                                      'GREATER', 'LESS', 'EQUAL',
-                                                      'NOT', '+', '-', '*', '/')
-            if has_subject and not is_followed_by_cmp:
-                result.append("!=")
-                return i + 1  # consume NOT, leave value for next iteration
-    result.append("not")
-    return i + 1
+    Grammar (simplified):
+      condition      := or_expr
+      or_expr        := and_expr ('OR' (abbreviated | and_expr))*
+      and_expr       := not_expr ('AND' (abbreviated | not_expr))*
+      not_expr       := 'NOT' not_expr | primary
+      primary        := '(' condition ')' [arith_tail]
+                      | condition_name
+                      | operand [comparison | class_cond | sign_cond]
+      abbreviated    := comp_op operand | bare_operand (inherit subj/op)
+    """
 
+    __slots__ = ('tokens', 'n', 'pos', 'lookup', 'last_subject', 'last_op')
 
-def _handle_conjunction(tokens: list[str], i: int, n: int, result: list[str],
-                         last_subject: str, last_op: str,
-                         condition_lookup: dict[str, tuple[str, str]]) -> int:
-    """Handle AND/OR with implied subjects and abbreviated relations."""
-    if i >= n:
-        return i
-    next_upper = _upper(tokens[i])
+    def __init__(self, tokens: list[str],
+                 condition_lookup: dict[str, tuple[str, str]]):
+        self.tokens = tokens
+        self.n = len(tokens)
+        self.pos = 0
+        self.lookup = {k.upper(): v for k, v in condition_lookup.items()}
+        self.last_subject = ""
+        self.last_op = ""
 
-    # NOT: check if followed by comparison op → abbreviated relation
-    # e.g., "AND NOT = 'X'" needs implied subject inserted before NOT
-    if next_upper == 'NOT':
-        if i + 1 < n:
-            peek = _upper(tokens[i + 1])
-            if peek in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL'):
-                if last_subject:
-                    result.append(last_subject)
-        return i
+    # --- Token access ---
 
-    # Abbreviated: AND/OR followed by comparison op (no left operand)
-    if next_upper in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL'):
-        if last_subject:
-            result.append(last_subject)
-    else:
-        # Implied subject: value without operator follows AND/OR
-        is_value = (next_upper not in _OP_KEYWORDS
-                    and next_upper not in condition_lookup)
-        if is_value and last_subject and last_op:
-            has_following_op = False
-            if i + 1 < n:
-                peek = _upper(tokens[i + 1])
-                has_following_op = peek in ('>', '<', '=', '>=', '<=',
-                                            'GREATER', 'LESS', 'EQUAL', 'NOT')
-            if not has_following_op:
-                result.append(last_subject)
-                result.append(last_op)
-    return i
+    def _peek(self, offset: int = 0) -> str | None:
+        p = self.pos + offset
+        return _upper(self.tokens[p]) if p < self.n else None
 
+    def _advance(self) -> str:
+        tok = self.tokens[self.pos]
+        self.pos += 1
+        return tok
 
-def _is_lhs_subject(tokens: list[str], i: int, n: int) -> bool:
-    """Check if token at i is a left-hand subject (followed by comparison)."""
-    if i + 1 >= n:
-        return False
-    nxt = _upper(tokens[i + 1])
-    if nxt in ('>', '<', '=', '>=', '<=', 'GREATER', 'LESS', 'EQUAL',
-               'NOT', 'NUMERIC', 'ALPHABETIC', 'POSITIVE', 'NEGATIVE', 'IS'):
-        return True
-    return any(nxt == p[0] for p, _ in _CMP_PHRASES)
+    # --- Entry ---
 
+    def parse(self) -> str:
+        result = self._or_expr()
+        return result if result else "True"
 
-def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) -> str:
-    """Core translation logic."""
-    tokens = tokenize_condition(cond)
-    if not tokens:
-        return "True"
-    result: list[str] = []
-    last_subject = ""
-    last_op = ""
-    i, n = 0, len(tokens)
-    while i < n:
-        t = _upper(tokens[i])
-        # Multi-word comparison phrases
-        phrase_match = _try_phrase(tokens, i, n)
-        if phrase_match:
-            op, i = phrase_match
-            result.append(op)
-            last_op = op
-            continue
-        if t in ('(', ')'):
-            result.append(t)
-            i += 1
-            continue
-        if t in ('IS', 'THEN'):
-            i += 1
-            continue
-        if t in ('OF', 'IN'):
-            # COBOL qualification: FIELD OF GROUP — skip OF and the group name
-            i += 2  # skip OF/IN + group-name
-            continue
-        if t == 'FUNCTION':
-            if i + 1 < n:
-                func_token = tokens[i + 1]
-                paren_pos = func_token.find('(')
-                consumed = 2
-                if paren_pos >= 0:
-                    func_name = func_token[:paren_pos]
-                    raw_inner = func_token[paren_pos + 1:]
-                    if raw_inner.endswith(')'):
-                        raw_inner = raw_inner[:-1]
-                    raw_args = raw_inner.strip()
-                else:
-                    func_name = func_token
-                    raw_args = ''
-                    if i + 2 < n and tokens[i + 2] == '(':
-                        arg_parts: list[str] = []
-                        j = i + 3
-                        depth = 1
-                        while j < n and depth > 0:
-                            if tokens[j] == '(':
-                                depth += 1
-                            elif tokens[j] == ')':
-                                depth -= 1
-                                if depth == 0:
-                                    break
-                            arg_parts.append(tokens[j])
-                            j += 1
-                        raw_args = ' '.join(arg_parts)
-                        consumed = j + 1 - i
-                translated = translate_function_intrinsic(
-                    func_name, raw_args, resolve_operand,
-                )
-                result.append(translated if translated else '0')
-                i += consumed
-            else:
-                result.append('0')
-                i += 1
-            continue
-        if t == 'NOT':
-            i = _handle_not(tokens, i, n, result, condition_lookup)
-            continue
-        if t == 'NUMERIC':
-            subj = result.pop() if result else "True"
-            result.append(_numeric_check_expr(subj))
-            i += 1
-            continue
-        if t == 'ALPHABETIC':
-            subj = result.pop() if result else "True"
-            result.append(f"str({subj}).isalpha()")
-            i += 1
-            continue
-        if t == 'ALPHABETIC-UPPER':
-            subj = result.pop() if result else "True"
-            result.append(f"(str({subj}).isupper() and str({subj}).isalpha())")
-            i += 1
-            continue
-        if t == 'ALPHABETIC-LOWER':
-            subj = result.pop() if result else "True"
-            result.append(f"(str({subj}).islower() and str({subj}).isalpha())")
-            i += 1
-            continue
-        if t in _SIGN_WORDS and result:
-            prev = result[-1]
-            if prev not in _NON_SUBJECT_TOKENS:
-                result.append(_SIGN_WORDS[t])
-                i += 1
-                continue
-        if t in ('AND', 'OR'):
-            result.append(t.lower())
-            i += 1
-            i = _handle_conjunction(tokens, i, n, result, last_subject, last_op,
-                                     condition_lookup)
-            continue
-        if t in _SINGLE_OPS:
-            op = _SINGLE_OPS[t]
-            result.append(op)
-            last_op = op
-            i += 1
-            continue
-        if t in _ARITH_OPS:
-            result.append(t)
-            i += 1
-            continue
-        if t in condition_lookup:
-            parent, val = condition_lookup[t]
-            result.append(_condition_88_expr(parent, val))
-            i += 1
-            continue
-        # Regular operand
-        resolved = resolve_operand(tokens[i])
-        if _is_lhs_subject(tokens, i, n):
-            last_subject = resolved
-        result.append(resolved)
-        i += 1
-    fixed = _fix_not_grouping(result)
-    joined = " ".join(fixed)
-    return _validate_condition(joined)
+    # --- Precedence: OR < AND < NOT < primary ---
 
+    def _or_expr(self) -> str:
+        left = self._and_expr()
+        while self._peek() == 'OR':
+            self._advance()
+            right = self._after_conjunction(self._and_expr)
+            left = f"{left} or {right}"
+        return left
 
-def _fix_not_grouping(tokens: list[str]) -> list[str]:
-    """Wrap 'not X op Y ...' patterns into 'not (X op Y ...)' for correct precedence."""
-    fixed: list[str] = []
-    j = 0
-    while j < len(tokens):
-        if tokens[j] == "not" and j + 1 < len(tokens) and tokens[j + 1] == '(':
-            # Already parenthesized — pass through
-            fixed.append(tokens[j])
-            j += 1
-        elif (tokens[j] == "not" and j + 3 < len(tokens)
-                and tokens[j + 2] in _CMP_OPS):
-            # Collect RHS: may be multi-token (e.g., not X == Y and Z)
-            fixed.extend(["not", "(", tokens[j + 1], tokens[j + 2]])
-            k = j + 3
-            # Grab tokens until we hit and/or/end
-            while k < len(tokens) and tokens[k] not in ('and', 'or'):
-                fixed.append(tokens[k])
-                k += 1
-            fixed.append(")")
-            j = k
+    def _and_expr(self) -> str:
+        left = self._not_expr()
+        while self._peek() == 'AND':
+            self._advance()
+            right = self._after_conjunction(self._not_expr)
+            left = f"{left} and {right}"
+        return left
+
+    def _after_conjunction(self, parse_fn) -> str:
+        """After AND/OR, detect abbreviated relations or parse new condition."""
+        pk = self._peek()
+
+        # Abbreviated: starts with comparison operator (e.g., AND > 5)
+        if self._is_comp_op():
+            op = self._comp_op()
+            rhs = self._operand()
+            return f"{self.last_subject} {op} {rhs}"
+
+        # NOT followed by comparison operator → abbreviated negated
+        if pk == 'NOT' and self._is_comp_op_at(self.pos + 1):
+            self._advance()
+            op = self._comp_op()
+            rhs = self._operand()
+            return f"{self.last_subject} {_negate_op(op)} {rhs}"
+
+        # Parenthesized group → new condition
+        if pk == '(':
+            return parse_fn()
+
+        # Condition name → standalone
+        if pk and pk in self.lookup:
+            return parse_fn()
+
+        # NOT before condition name or parenthesized group → new condition
+        if pk == 'NOT':
+            pk2 = self._peek(1)
+            if pk2 == '(' or (pk2 and pk2 in self.lookup):
+                return parse_fn()
+            # NOT + value without comp op → abbreviated negated
+            if self.last_subject and self.last_op and pk2 is not None:
+                if not self._is_comp_op_at(self.pos + 2):
+                    self._advance()
+                    rhs = self._operand()
+                    return f"{self.last_subject} {_negate_op(self.last_op)} {rhs}"
+            return parse_fn()
+
+        # Value followed by comparison op → new comparison (new subject)
+        if pk is not None and self._is_comp_op_at(self.pos + 1):
+            return parse_fn()
+
+        # Value followed by IS or class/sign keyword → new condition
+        if pk is not None:
+            pk1 = self._peek(1)
+            if pk1 in ('IS', 'THEN') or pk1 in _CLASS_KEYWORDS or (pk1 and pk1 in _SIGN_WORDS):
+                return parse_fn()
+
+        # Bare value → abbreviated with inherited subject and operator
+        if self.last_subject and self.last_op:
+            rhs = self._operand()
+            return f"{self.last_subject} {self.last_op} {rhs}"
+
+        # Fallback: parse as new condition
+        return parse_fn()
+
+    def _not_expr(self) -> str:
+        if self._peek() == 'NOT':
+            self._advance()
+            inner = self._not_expr()
+            return f"not ({inner})"
+        return self._primary()
+
+    def _primary(self) -> str:
+        pk = self._peek()
+
+        # Parenthesized group
+        if pk == '(':
+            self._advance()
+            inner = self._or_expr()
+            if self._peek() == ')':
+                self._advance()
+            paren_expr = f"( {inner} )"
+            # If followed by arithmetic, this was arithmetic grouping
+            if self._peek() in _ARITH_OPS:
+                parts = [paren_expr]
+                while self._peek() in _ARITH_OPS:
+                    parts.append(self._advance())
+                    parts.append(self._simple_operand())
+                return self._after_lhs(' '.join(parts))
+            return paren_expr
+
+        # Skip leading IS/THEN
+        while pk in ('IS', 'THEN'):
+            self._advance()
+            pk = self._peek()
+
+        # 88-level condition name
+        if pk and pk in self.lookup:
+            name = _upper(self._advance())
+            parent, val = self.lookup[name]
+            return _condition_88_expr(parent, val)
+
+        # Parse left operand, then check for comparison/class/sign
+        lhs = self._operand()
+        return self._after_lhs(lhs)
+
+    def _after_lhs(self, lhs: str) -> str:
+        """After parsing LHS, handle comparison, class condition, or sign condition."""
+        # Skip IS/THEN
+        while self._peek() in ('IS', 'THEN'):
+            self._advance()
+
+        pk = self._peek()
+
+        # NOT before class/sign/comparison
+        if pk == 'NOT':
+            # Peek past optional IS
+            off = 1
+            if self._peek(off) == 'IS':
+                off += 1
+            pk_after = self._peek(off)
+            if pk_after in _CLASS_KEYWORDS:
+                self.pos += off  # skip NOT [IS]
+                return self._class_condition(lhs, negate=True)
+            if pk_after and pk_after in _SIGN_WORDS:
+                self.pos += off
+                sign = _upper(self._advance())
+                return f"not ({lhs} {_SIGN_WORDS[sign]})"
+            # NOT as part of comparison phrase (NOT GREATER, NOT =, etc.)
+            if self._is_comp_op():
+                op = self._comp_op()
+                rhs = self._operand()
+                self.last_subject = lhs
+                self.last_op = op
+                return f"{lhs} {op} {rhs}"
+
+        # Class condition
+        if pk in _CLASS_KEYWORDS:
+            return self._class_condition(lhs, negate=False)
+
+        # Sign condition
+        if pk and pk in _SIGN_WORDS:
+            sign = _upper(self._advance())
+            return f"{lhs} {_SIGN_WORDS[sign]}"
+
+        # Comparison operator
+        if self._is_comp_op():
+            op = self._comp_op()
+            rhs = self._operand()
+            self.last_subject = lhs
+            self.last_op = op
+            return f"{lhs} {op} {rhs}"
+
+        # Bare operand (no comparison follows)
+        return lhs
+
+    def _class_condition(self, subj: str, negate: bool) -> str:
+        pk = _upper(self._advance())
+        if pk == 'NUMERIC':
+            return _numeric_check_expr(subj, negate)
+        if pk == 'ALPHABETIC':
+            return f"not str({subj}).isalpha()" if negate else f"str({subj}).isalpha()"
+        if pk == 'ALPHABETIC-UPPER':
+            expr = f"(str({subj}).isupper() and str({subj}).isalpha())"
+            return f"not {expr}" if negate else expr
+        if pk == 'ALPHABETIC-LOWER':
+            expr = f"(str({subj}).islower() and str({subj}).isalpha())"
+            return f"not {expr}" if negate else expr
+        return subj
+
+    # --- Operand parsing ---
+
+    def _operand(self) -> str:
+        """Parse an operand, possibly with arithmetic operators."""
+        if self._peek() in ('+', '-'):
+            prefix = self._advance()
+            first = self._simple_operand()
+            parts = [f"{prefix}{first}"]
         else:
-            fixed.append(tokens[j])
-            j += 1
-    return fixed
+            parts = [self._simple_operand()]
+        while self._peek() in _ARITH_OPS:
+            parts.append(self._advance())
+            parts.append(self._simple_operand())
+        return ' '.join(parts)
 
+    def _simple_operand(self) -> str:
+        """Parse a single operand token."""
+        pk = self._peek()
+        # Safety: don't consume keywords or operators
+        if pk in ('AND', 'OR', 'NOT', ')', None) or pk in _CMP_OPS or pk in _SINGLE_OPS:
+            return '0'
+        # Arithmetic grouping paren
+        if pk == '(':
+            self._advance()
+            inner = self._operand()
+            if self._peek() == ')':
+                self._advance()
+            return f"( {inner} )"
+        # FUNCTION intrinsic
+        if pk == 'FUNCTION':
+            return self._function_call()
+        # Regular token
+        raw = self._advance()
+        resolved = resolve_operand(raw)
+        # Skip trailing OF/IN qualification
+        while self._peek() in ('OF', 'IN'):
+            self._advance()
+            if self.pos < self.n:
+                self._advance()
+        return resolved
+
+    def _function_call(self) -> str:
+        """Parse FUNCTION intrinsic call."""
+        self._advance()  # consume FUNCTION
+        if self.pos >= self.n:
+            return '0'
+        func_token = self._advance()
+        paren_pos = func_token.find('(')
+        if paren_pos >= 0:
+            func_name = func_token[:paren_pos]
+            raw_inner = func_token[paren_pos + 1:]
+            if raw_inner.endswith(')'):
+                raw_inner = raw_inner[:-1]
+            raw_args = raw_inner.strip()
+        else:
+            func_name = func_token
+            raw_args = ''
+            if self._peek() == '(':
+                self._advance()
+                arg_parts: list[str] = []
+                depth = 1
+                while self.pos < self.n and depth > 0:
+                    if self._peek() == '(':
+                        depth += 1
+                    elif self._peek() == ')':
+                        depth -= 1
+                        if depth == 0:
+                            self._advance()
+                            break
+                    arg_parts.append(self._advance())
+                raw_args = ' '.join(arg_parts)
+        translated = translate_function_intrinsic(func_name, raw_args, resolve_operand)
+        return translated if translated else '0'
+
+    # --- Comparison operator handling ---
+
+    def _is_comp_op(self) -> bool:
+        return self._is_comp_op_at(self.pos)
+
+    def _is_comp_op_at(self, pos: int) -> bool:
+        if pos >= self.n:
+            return False
+        t = _upper(self.tokens[pos])
+        if t in _SINGLE_OPS:
+            return True
+        for phrase, _ in _CMP_PHRASES:
+            plen = len(phrase)
+            if pos + plen <= self.n:
+                if all(_upper(self.tokens[pos + j]) == phrase[j] for j in range(plen)):
+                    return True
+        return False
+
+    def _comp_op(self) -> str:
+        """Parse and consume a comparison operator."""
+        for phrase, op in _CMP_PHRASES:
+            plen = len(phrase)
+            if self.pos + plen <= self.n:
+                if all(_upper(self.tokens[self.pos + j]) == phrase[j] for j in range(plen)):
+                    self.pos += plen
+                    return op
+        t = _upper(self._advance())
+        return _SINGLE_OPS.get(t, '==')
+
+
+# ---------------------------------------------------------------------------
+# Validation / recovery
+# ---------------------------------------------------------------------------
 
 def _fix_unbalanced_parens(expr: str) -> str:
     """Auto-fix unbalanced parentheses."""
@@ -427,7 +505,6 @@ def _fix_unbalanced_parens(expr: str) -> str:
     if opens > closes:
         expr += ')' * (opens - closes)
     elif closes > opens:
-        # Strip trailing orphan close parens
         diff = closes - opens
         while diff > 0 and expr.endswith(')'):
             expr = expr[:-1].rstrip()
@@ -437,7 +514,6 @@ def _fix_unbalanced_parens(expr: str) -> str:
 
 def _fix_double_operators(expr: str) -> str:
     """Deduplicate consecutive identical operators (e.g., '== ==' → '==')."""
-    import re
     expr = re.sub(r'(==\s*){2,}', '== ', expr)
     expr = re.sub(r'(!=\s*){2,}', '!= ', expr)
     expr = re.sub(r'\band\s+and\b', 'and', expr)
@@ -448,7 +524,6 @@ def _fix_double_operators(expr: str) -> str:
 
 def _fix_trailing_operator(expr: str) -> str:
     """Strip dangling operator at end of expression."""
-    import re
     return re.sub(r'\s+(==|!=|>=|<=|>|<|and|or|not)\s*$', '', expr)
 
 
