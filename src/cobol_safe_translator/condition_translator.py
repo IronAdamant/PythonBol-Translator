@@ -554,4 +554,4 @@ def _validate_condition(joined: str) -> str:
         pass
 
     # All recovery failed
-    return "True  # condition could not be translated"
+    return "True"

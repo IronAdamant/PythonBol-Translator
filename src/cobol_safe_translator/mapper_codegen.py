@@ -10,6 +10,7 @@ have been moved to screen_codegen.py (ScreenCodegenMixin).
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from .block_translator import (
@@ -587,10 +588,10 @@ class CodegenMixin:
             sql_type = block.sql_type.upper()
             method_suffix = sql_type.lower()
             if block.cursor_name:
-                cursor_py = block.cursor_name.replace("-", "_").lower()
+                cursor_py = re.sub(r'[^a-z0-9_]', '_', block.cursor_name.lower())
                 method_name = f"_sql_{method_suffix}_{cursor_py}"
             elif block.table_name:
-                table_py = block.table_name.replace("-", "_").lower()
+                table_py = re.sub(r'[^a-z0-9_]', '_', block.table_name.lower())
                 method_name = f"_sql_{method_suffix}_{table_py}"
             else:
                 method_name = f"_sql_{method_suffix}_{idx}"
@@ -615,7 +616,7 @@ class CodegenMixin:
         lines: list[str] = []
         for idx, block in enumerate(self.program.dli_blocks):
             dli_type = block.dli_type.lower()
-            seg_py = block.segment_name.replace("-", "_").lower() if block.segment_name else f"op_{idx}"
+            seg_py = re.sub(r'[^a-z0-9_]', '_', block.segment_name.lower()) if block.segment_name else f"op_{idx}"
             method_name = f"_dli_{dli_type}_{seg_py}"
 
             lines.append(f"    def {method_name}(self) -> None:")

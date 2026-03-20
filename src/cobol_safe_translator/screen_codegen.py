@@ -108,28 +108,17 @@ class ScreenCodegenMixin:
             # Apply display attributes
             attr_on, attr_off = _ansi_attrs(sf.attributes)
             if attr_on:
-                on_expr = f"'{attr_on}' if _tty else ''"
-                off_expr = f"'{attr_off}' if _tty else ''"
-            else:
-                on_expr = "''"
-                off_expr = "''"
+                lines.append(f"print('{attr_on}' if _tty else '', end='')")
             if sf.value:
-                if attr_on:
-                    lines.append(f"print(f'{{{on_expr}}}{sf.value!s}{{{off_expr}}}', end='')")
-                else:
-                    lines.append(f"print({sf.value!r}, end='')")
+                lines.append(f"print({sf.value!r}, end='')")
             if sf.using:
                 py = _to_python_name(sf.using)
-                if attr_on:
-                    lines.append(f"print(f'{{{on_expr}}}{{self.data.{py}.value}}{{{off_expr}}}', end='')")
-                else:
-                    lines.append(f"print(self.data.{py}.value, end='')")
+                lines.append(f"print(self.data.{py}.value, end='')")
             elif sf.from_field:
                 py = _to_python_name(sf.from_field)
-                if attr_on:
-                    lines.append(f"print(f'{{{on_expr}}}{{self.data.{py}.value}}{{{off_expr}}}', end='')")
-                else:
-                    lines.append(f"print(self.data.{py}.value, end='')")
+                lines.append(f"print(self.data.{py}.value, end='')")
+            if attr_on:
+                lines.append(f"print('{attr_off}' if _tty else '', end='')")
         lines.append("print()  # flush output")
         return lines
 
