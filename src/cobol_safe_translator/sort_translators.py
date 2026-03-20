@@ -429,7 +429,6 @@ def translate_return_verb(ops: list[str], raw: str) -> list[str]:
     if not ops:
         return [f"# RETURN: no operands: {raw}"]
 
-    sf = _to_python_name(ops[0])
     upper_ops = _upper_ops(ops)
 
     into_target = None

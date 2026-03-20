@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .function_translators import _resolve_expr_ext, translate_function_intrinsic
+from .function_translators import _resolve_expr_ext
 from .utils import _upper_ops, resolve_target as _resolve_target
 
 

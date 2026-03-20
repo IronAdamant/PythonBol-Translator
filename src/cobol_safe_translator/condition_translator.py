@@ -380,15 +380,16 @@ class _CondParser:
         pk = _upper(self._advance())
         if pk == 'NUMERIC':
             return _numeric_check_expr(subj, negate)
+        expr: str | None = None
         if pk == 'ALPHABETIC':
-            return f"not str({subj}).isalpha()" if negate else f"str({subj}).isalpha()"
-        if pk == 'ALPHABETIC-UPPER':
+            expr = f"str({subj}).isalpha()"
+        elif pk == 'ALPHABETIC-UPPER':
             expr = f"(str({subj}).isupper() and str({subj}).isalpha())"
-            return f"not {expr}" if negate else expr
-        if pk == 'ALPHABETIC-LOWER':
+        elif pk == 'ALPHABETIC-LOWER':
             expr = f"(str({subj}).islower() and str({subj}).isalpha())"
-            return f"not {expr}" if negate else expr
-        return subj
+        if expr is None:
+            return subj
+        return f"not {expr}" if negate else expr
 
     # --- Operand parsing ---
 

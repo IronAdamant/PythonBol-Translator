@@ -209,8 +209,6 @@ class CodegenMixin:
         # Emit __post_init__ to wire REDEFINES aliases to originals
         wiring = getattr(self, '_redefines_wiring', [])
         if wiring:
-            # Build set of REDEFINES field names for chain resolution
-            redefines_fields = {w[0] for w in wiring}
             # Map field name → its original for chain following
             orig_map = {w[0]: w[1] for w in wiring}
 

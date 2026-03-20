@@ -445,10 +445,7 @@ class VerbTranslationMixin:
         # Simple GO TO paragraph-name
         if len(filtered) == 1:
             method = _to_method_name(filtered[0])
-            # Check if the containing paragraph is ALTER-modified
-            alter_targets = getattr(self, '_alter_targets', set())
-            # Find which paragraph we're in by checking if filtered[0] is an ALTER target
-            # (ALTER changes where a paragraph's GO TO jumps, not the GO TO's own target)
+            # ALTER changes where a paragraph's GO TO jumps, not the GO TO's own target
             return [
                 f"self.{method}()  # GO TO {filtered[0]}",
                 "return",

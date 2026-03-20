@@ -162,7 +162,6 @@ def translate_unstring(
 
     has_tallying = "TALLYING" in upper_ops
     has_pointer = "POINTER" in upper_ops
-    has_overflow = "OVERFLOW" in upper_ops
 
     src_expr = resolve(source)
     lines: list[str] = []
@@ -177,7 +176,7 @@ def translate_unstring(
     else:
         lines.append(f"_src_val = str({src_expr})")
 
-    if len(delimiters) == 0:
+    if not delimiters:
         lines.append("_parts = _src_val.split()")
     elif len(delimiters) == 1:
         delim_expr = resolve(delimiters[0])
@@ -392,9 +391,9 @@ def translate_inspect(
 
         lines = [f"# INSPECT {field} REPLACING {mode}"]
         if mode == "FIRST":
-            op = "{{sub}}.replace({old}, {new}, 1)".format(old=old_expr, new=new_expr)
+            op = f"{{sub}}.replace({old_expr}, {new_expr}, 1)"
         else:
-            op = "{{sub}}.replace({old}, {new})".format(old=old_expr, new=new_expr)
+            op = f"{{sub}}.replace({old_expr}, {new_expr})"
         lines.extend(_emit_bounded_op(field_expr, before_expr, after_expr, op))
         lines.append(f"{field_expr}.set(_val)")
         if mode == "LEADING":

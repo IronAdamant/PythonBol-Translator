@@ -175,7 +175,6 @@ def _find_unreachable(
         return []
 
     unreachable: list[str] = []
-    first = para_names[0]
     for name in para_names[1:]:
         node = cfg.nodes.get(name)
         if node and not node.incoming:

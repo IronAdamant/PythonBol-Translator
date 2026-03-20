@@ -164,13 +164,10 @@ class MarkdownExporter:
         """
         if not name:
             return "unknown"
-        result = []
-        for c in name:
-            if c.isalnum() or c == "_":
-                result.append(c)
-            else:
-                result.append(f"_{ord(c):x}_")
-        return "".join(result)
+        return "".join(
+            c if c.isalnum() or c == "_" else f"_{ord(c):x}_"
+            for c in name
+        )
 
     def _dependency_graph(self) -> str:
         lines = ["## Dependency Graph\n"]
