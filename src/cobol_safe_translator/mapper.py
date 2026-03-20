@@ -81,6 +81,13 @@ class PythonMapper(CodegenMixin, ScreenCodegenMixin, VerbTranslationMixin):
         # Map record python names to their file adapter python names (for WRITE)
         self._record_to_file: dict[str, str] = {}
         self._build_record_to_file_map()
+        # Build ALTER target set for dynamic GO TO dispatch
+        from .cfg import build_cfg
+        self._cfg = build_cfg(self.program)
+        self._alter_targets: set[str] = {
+            am.altered_paragraph.upper()
+            for am in self._cfg.alter_mappings
+        }
         # Build screen name lookup for ACCEPT/DISPLAY screen-name support
         self._screen_lookup: dict[str, object] = {}
         for sf in self.program.screen_section:

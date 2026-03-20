@@ -30,6 +30,21 @@ def generate_sql_init() -> list[str]:
         '        self._sql_connection = None  # TODO(high): configure database connection',
         '        self._sql_cursor = None',
         '        self._sqlcode = 0',
+        "        self._sql_whenever_sqlerror = 'CONTINUE'",
+        "        self._sql_whenever_not_found = 'CONTINUE'",
+    ]
+
+
+def _emit_whenever_check() -> list[str]:
+    """Emit WHENEVER SQLERROR / NOT FOUND check lines after an SQL operation."""
+    return [
+        "# WHENEVER check",
+        "if self._sqlcode == 100 and self._sql_whenever_not_found != 'CONTINUE':",
+        "    getattr(self, self._sql_whenever_not_found)()",
+        "    return",
+        "if self._sqlcode not in (0, 100) and self._sql_whenever_sqlerror != 'CONTINUE':",
+        "    getattr(self, self._sql_whenever_sqlerror)()",
+        "    return",
     ]
 
 
@@ -148,16 +163,25 @@ def translate_sql_block(block: SqlBlock) -> list[str]:
         return _translate_whenever(block)
 
     if sql_type in ("DECLARE", "OPEN", "FETCH", "CLOSE"):
-        return _translate_cursor_ops(block)
+        lines = _translate_cursor_ops(block)
+        if sql_type in ("OPEN", "FETCH", "CLOSE"):
+            lines.extend(_emit_whenever_check())
+        return lines
 
     if sql_type in ("SELECT", "INSERT", "UPDATE", "DELETE"):
-        return _translate_sql_query(block)
+        lines = _translate_sql_query(block)
+        lines.extend(_emit_whenever_check())
+        return lines
 
     if sql_type == "COMMIT":
-        return ["# SQL: COMMIT", "self._sql_connection.commit()", "self._sqlcode = 0"]
+        lines = ["# SQL: COMMIT", "self._sql_connection.commit()", "self._sqlcode = 0"]
+        lines.extend(_emit_whenever_check())
+        return lines
 
     if sql_type == "ROLLBACK":
-        return ["# SQL: ROLLBACK", "self._sql_connection.rollback()", "self._sqlcode = 0"]
+        lines = ["# SQL: ROLLBACK", "self._sql_connection.rollback()", "self._sqlcode = 0"]
+        lines.extend(_emit_whenever_check())
+        return lines
 
     return [f"# SQL: (unrecognized type: {sql_type})", f"# {block.raw_sql}"]
 

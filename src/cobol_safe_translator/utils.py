@@ -14,6 +14,10 @@ import re
 # Set by mapper_codegen during code generation for OF/IN qualification resolution.
 _qualified_field_map: dict[tuple[str, str], str] = {}
 
+# Reverse lookup: COBOL_FIELD_UPPER → list of qualified python names
+# Built from _qualified_field_map; allows resolving unqualified colliding names.
+_collision_reverse_map: dict[str, list[str]] = {}
+
 
 def _indent_line(line: str, indent: int) -> str:
     """Indent a line by *indent* levels (4 spaces each)."""
@@ -215,8 +219,13 @@ def resolve_operand(op: str) -> str:
     # OF/IN qualification: FIELD OF GROUP → resolve via qualified map if available
     if " OF " in upper or " IN " in upper:
         return f"self.data.{_resolve_qualified(op)}.value"
-    # Default data name
-    return f"self.data.{_to_python_name(op)}.value"
+    # Default data name — check collision reverse map for disambiguation
+    py = _to_python_name(op)
+    variants = _collision_reverse_map.get(upper)
+    if variants:
+        # Colliding name used without OF/IN — pick the first qualified variant
+        return f"self.data.{variants[0]}.value"
+    return f"self.data.{py}.value"
 
 
 def extract_from_expr(ops: list[str], upper_ops: list[str]) -> str | None:
@@ -260,4 +269,9 @@ def resolve_target(op: str) -> str:
         return f"self.data.{py}{indices}"
     if " OF " in op.upper() or " IN " in op.upper():
         return f"self.data.{_resolve_qualified(op)}"
+    # Check collision reverse map for unqualified colliding names
+    upper = op.upper()
+    variants = _collision_reverse_map.get(upper)
+    if variants:
+        return f"self.data.{variants[0]}"
     return f"self.data.{_to_python_name(op)}"

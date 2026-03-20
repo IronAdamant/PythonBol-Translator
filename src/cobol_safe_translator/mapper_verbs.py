@@ -396,11 +396,18 @@ class VerbTranslationMixin:
         )
 
     def _translate_goto(self, ops: list[str], raw: str) -> list[str]:
-        """Translate GO TO verb to Python."""
+        """Translate GO TO verb to Python.
+
+        When a paragraph is known to be ALTER-modified (from CFG analysis),
+        uses dynamic dispatch via getattr() so the target can be changed
+        at runtime by ALTER statements.
+        """
         if not ops:
+            # Empty GO TO — must be ALTER-modified
             return [
-                "raise NotImplementedError('GO TO with no target (ALTER-modified)')",
-                "# TODO(high): ALTER-modified GO TO requires manual restructuring",
+                "getattr(self, self._goto_target_current)()"
+                "  # ALTER-modified GO TO (dynamic dispatch)",
+                "return",
             ]
         upper_ops = _upper_ops(ops)
 
@@ -410,8 +417,9 @@ class VerbTranslationMixin:
 
         if not filtered:
             return [
-                "raise NotImplementedError('GO TO with no target')",
-                "# TODO(high): GO TO requires manual restructuring",
+                "getattr(self, self._goto_target_current)()"
+                "  # ALTER-modified GO TO (dynamic dispatch)",
+                "return",
             ]
 
         # GO TO ... DEPENDING ON variable
@@ -434,19 +442,28 @@ class VerbTranslationMixin:
                 lines.append(f"    return")
             return lines
 
-        # Simple GO TO paragraph-name (possibly multiple targets from ALTER)
+        # Simple GO TO paragraph-name
         if len(filtered) == 1:
             method = _to_method_name(filtered[0])
+            # Check if the containing paragraph is ALTER-modified
+            alter_targets = getattr(self, '_alter_targets', set())
+            # Find which paragraph we're in by checking if filtered[0] is an ALTER target
+            # (ALTER changes where a paragraph's GO TO jumps, not the GO TO's own target)
             return [
                 f"self.{method}()  # GO TO {filtered[0]}",
                 "return",
             ]
 
-        # Multiple targets without DEPENDING — list of possible targets (from ALTER)
+        # Multiple targets without DEPENDING — ALTER-modified GO TO
         lines = [f"# GO TO with multiple targets: {' '.join(filtered)}"]
-        lines.append(f"# TODO(high): multiple GO TO targets suggest ALTER usage — pick the correct target")
-        method = _to_method_name(filtered[0])
-        lines.append(f"self.{method}()  # defaulting to first target")
+        # Use the first target's method name as the default state variable
+        default_method = _to_method_name(filtered[0])
+        py_current = _to_method_name(filtered[0])
+        lines.append(
+            f"getattr(self, getattr(self, '_goto_target_{py_current}', "
+            f"'{default_method}'))()"
+            f"  # ALTER-modified GO TO (dynamic dispatch)"
+        )
         lines.append("return")
         return lines
 

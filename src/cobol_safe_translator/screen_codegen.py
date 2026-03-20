@@ -82,56 +82,82 @@ class ScreenCodegenMixin:
           \\033[{line};{col}H — move cursor to line, column
           \\033[2J            — clear screen
           \\033[7m / \\033[0m  — reverse video on/off
+
+        Falls back to plain print() when stdout is not a terminal.
         """
-        lines = [f"# DISPLAY {screen.name}"]
+        lines = [
+            f"# DISPLAY {screen.name}",
+            "import sys",
+            "_tty = sys.stdout.isatty()",
+        ]
         fields = self._collect_screen_fields(screen)
         if not fields:
             lines.append(f"pass  # screen {screen.name} has no displayable fields")
             return lines
         for sf in fields:
             if sf.blank_screen:
-                lines.append("print('\\033[2J\\033[H', end='')  # BLANK SCREEN")
+                lines.append("print('\\033[2J\\033[H' if _tty else '', end='')  # BLANK SCREEN")
                 continue
-            pos = ""
             if sf.line or sf.column:
                 row = sf.line if sf.line else 1
                 col = sf.column if sf.column else 1
-                pos = f"print(f'\\033[{row};{col}H', end='')  # Line {row}, Col {col}"
-                lines.append(pos)
+                lines.append(
+                    f"print(f'\\033[{row};{col}H' if _tty else '', end='')"
+                    f"  # Line {row}, Col {col}"
+                )
             # Apply display attributes
             attr_on, attr_off = _ansi_attrs(sf.attributes)
+            if attr_on:
+                on_expr = f"'{attr_on}' if _tty else ''"
+                off_expr = f"'{attr_off}' if _tty else ''"
+            else:
+                on_expr = "''"
+                off_expr = "''"
             if sf.value:
-                lines.append(f"print(f'{attr_on}{sf.value!s}{attr_off}', end='')")
+                if attr_on:
+                    lines.append(f"print(f'{{{on_expr}}}{sf.value!s}{{{off_expr}}}', end='')")
+                else:
+                    lines.append(f"print({sf.value!r}, end='')")
             if sf.using:
                 py = _to_python_name(sf.using)
-                lines.append(f"print(f'{attr_on}{{self.data.{py}.value}}{attr_off}', end='')")
+                if attr_on:
+                    lines.append(f"print(f'{{{on_expr}}}{{self.data.{py}.value}}{{{off_expr}}}', end='')")
+                else:
+                    lines.append(f"print(self.data.{py}.value, end='')")
             elif sf.from_field:
                 py = _to_python_name(sf.from_field)
-                lines.append(f"print(f'{attr_on}{{self.data.{py}.value}}{attr_off}', end='')")
+                if attr_on:
+                    lines.append(f"print(f'{{{on_expr}}}{{self.data.{py}.value}}{{{off_expr}}}', end='')")
+                else:
+                    lines.append(f"print(self.data.{py}.value, end='')")
         lines.append("print()  # flush output")
         return lines
 
     def _translate_screen_accept(self, screen: ScreenField) -> list[str]:
         """Generate ANSI-positioned input for ACCEPT screen-name."""
-        lines = [f"# ACCEPT {screen.name}"]
+        lines = [
+            f"# ACCEPT {screen.name}",
+            "import sys",
+            "_tty = sys.stdout.isatty()",
+        ]
         fields = self._collect_screen_fields(screen)
         if not fields:
             lines.append(f"pass  # screen {screen.name} has no input fields")
             return lines
         for sf in fields:
             if sf.blank_screen:
-                lines.append("print('\\033[2J\\033[H', end='')  # BLANK SCREEN")
+                lines.append("print('\\033[2J\\033[H' if _tty else '', end='')  # BLANK SCREEN")
                 continue
             if sf.line or sf.column:
                 row = sf.line if sf.line else 1
                 col = sf.column if sf.column else 1
                 lines.append(
-                    f"print(f'\\033[{row};{col}H', end='')  "
-                    f"# Line {row}, Col {col}"
+                    f"print(f'\\033[{row};{col}H' if _tty else '', end='')"
+                    f"  # Line {row}, Col {col}"
                 )
             attr_on, attr_off = _ansi_attrs(sf.attributes)
             if sf.value:
-                lines.append(f"print(f'{attr_on}{sf.value!s}{attr_off}', end='')")
+                lines.append(f"print({sf.value!r}, end='')")
             if sf.using:
                 py = _to_python_name(sf.using)
                 lines.append(f"self.data.{py}.set(input())")
@@ -140,7 +166,7 @@ class ScreenCodegenMixin:
                 lines.append(f"self.data.{py}.set(input())")
             elif sf.from_field:
                 py = _to_python_name(sf.from_field)
-                lines.append(f"print(f'{attr_on}{{self.data.{py}.value}}{attr_off}', end='')")
+                lines.append(f"print(self.data.{py}.value, end='')")
         return lines
 
 

@@ -195,6 +195,13 @@ class CodegenMixin:
         # Publish qualified map to utils for resolve_operand OF/IN resolution
         _utils._qualified_field_map = dict(self._qualified_map)
 
+        # Build reverse collision map: COBOL_FIELD → [qualified_python_names]
+        from collections import defaultdict
+        reverse: dict[str, list[str]] = defaultdict(list)
+        for (field_name, _group), py_name in self._qualified_map.items():
+            reverse[field_name].append(py_name)
+        _utils._collision_reverse_map = dict(reverse)
+
         # Append SCREEN SECTION layout as comments
         screen_comments = self._screen_layout_comments()
         if screen_comments:
@@ -391,6 +398,31 @@ class CodegenMixin:
             from .dli_translator import generate_dli_init
             for init_line in generate_dli_init():
                 lines.append(init_line)
+
+        # ALTER state variables (dynamic GO TO dispatch)
+        from .cfg import build_cfg
+        cfg = build_cfg(self.program)
+        for am in cfg.alter_mappings:
+            py_altered = _to_method_name(am.altered_paragraph)
+            # Find original GO TO target for this paragraph
+            original_target = _to_method_name(am.altered_paragraph)
+            # Search for GO TO in the altered paragraph to find default target
+            for para in self.program.paragraphs:
+                if para.name.upper() == am.altered_paragraph.upper():
+                    for stmt in para.statements:
+                        if stmt.verb == "GO" and stmt.operands:
+                            filtered_ops = [
+                                o for o in stmt.operands
+                                if o.upper() not in ("TO",)
+                            ]
+                            if filtered_ops:
+                                original_target = _to_method_name(filtered_ops[0])
+                            break
+                    break
+            lines.append(
+                f"        self._goto_target_{py_altered} = '{original_target}'"
+                f"  # ALTER default target"
+            )
 
         # Register USE declarative handlers
         for decl in self.program.declaratives:
