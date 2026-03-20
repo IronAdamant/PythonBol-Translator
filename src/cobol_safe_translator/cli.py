@@ -5,6 +5,7 @@ Usage:
     cobol2py map <path> [--output ./report] [--recursive]
     cobol2py prompt <path> [--output /path/to/brief.md] [--recursive]
     cobol2py test <path> [--output ./test-output] [--timeout 10] [--no-execute]
+    cobol2py triage <dir> [--output ./triage] [--recursive]
 """
 
 from __future__ import annotations
@@ -465,6 +466,11 @@ def cmd_translate(args: argparse.Namespace) -> int:
                 for prog, targets in sorted(project_map.unresolved_calls.items()):
                     for t in targets:
                         print(yellow(f"  Unresolved CALL: {prog} -> {t}"))
+            if args.stubs:
+                from .middleware_stubs import generate_stubs
+                stubs = generate_stubs(project_map, Path(args.output) / "stubs")
+                for s in stubs:
+                    print(green(f"  Stub: {s}"))
             return 0
 
         base_out = Path(args.output)
@@ -524,6 +530,63 @@ def cmd_prompt(args: argparse.Namespace) -> int:
 
 
 
+def cmd_triage(args: argparse.Namespace) -> int:
+    """Scan a project directory and produce a TODO triage report."""
+    from .triage import triage_project, format_triage_report, format_triage_json
+
+    p = Path(args.path)
+    if not p.is_dir():
+        print(red(f"Error: triage requires a directory, got: {p}"), file=sys.stderr)
+        return 1
+
+    copy_paths = args.copybook_path
+    config = args.config
+    print(bold(f"Triaging: {p}"))
+
+    triage = triage_project(p, recursive=args.recursive,
+                            copy_paths=copy_paths, config_path=config)
+
+    out_dir = Path(args.output)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Terminal summary
+    print(f"  Programs: {triage.total_programs} scanned, {triage.clean_programs} clean")
+    print(f"  TODOs: {triage.total_todos} total")
+    if triage.category_totals:
+        for cat, count in triage.category_totals.items():
+            print(f"    {cat}: {count}")
+
+    # Write Markdown report
+    md_report = format_triage_report(triage)
+    md_path = out_dir / "TRIAGE.md"
+    md_path.write_text(md_report, encoding="utf-8")
+    print(green(f"  Report: {md_path}"))
+
+    # Optional JSON
+    if args.json:
+        json_report = format_triage_json(triage)
+        json_path = out_dir / "triage.json"
+        json_path.write_text(json_report, encoding="utf-8")
+        print(green(f"  JSON: {json_path}"))
+
+    # Generate middleware stubs if any middleware detected
+    from .project_analyzer import analyze_project
+    from .middleware_stubs import generate_stubs
+    project_map = analyze_project(
+        p, recursive=args.recursive,
+        copy_paths=copy_paths, config_path=config,
+    )
+    stubs = generate_stubs(project_map, out_dir / "stubs")
+    if stubs:
+        for s in stubs:
+            print(green(f"  Stub: {s}"))
+    else:
+        print(f"  No middleware stubs needed (no DB2/CICS/DLI/MQ detected)")
+
+    print(bold(green("Done.")))
+    return 0
+
+
 # --- Main CLI setup ---
 
 def build_parser() -> argparse.ArgumentParser:
@@ -555,6 +618,7 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--incremental", action="store_true", default=False, help="Incremental re-translation")
     tr.add_argument("--tests", action="store_true", default=False, help="Generate pytest tests alongside")
     tr.add_argument("--package", action="store_true", default=False, help="Unified package with cross-program imports")
+    tr.add_argument("--stubs", action="store_true", default=False, help="Generate middleware interface stubs (DB2/CICS/DLI/MQ)")
 
     # map subcommand
     mp = subparsers.add_parser(
@@ -579,6 +643,14 @@ def build_parser() -> argparse.ArgumentParser:
     ts.add_argument("--timeout", type=int, default=10, help="Execution timeout in seconds")
     ts.add_argument("--no-execute", action="store_true", help="Skip execution (validate only)")
 
+    # triage subcommand
+    tg = subparsers.add_parser(
+        "triage", parents=[common],
+        help="Scan a project and produce a TODO triage report for team assignment",
+    )
+    tg.add_argument("--output", "-o", default="./triage", help="Output directory")
+    tg.add_argument("--json", action="store_true", default=False, help="Also emit JSON report")
+
     return parser
 
 
@@ -592,7 +664,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     from .cli_test_runner import cmd_test  # lazy to avoid circular import
-    dispatch = {"translate": cmd_translate, "map": cmd_map, "prompt": cmd_prompt, "test": cmd_test}
+    dispatch = {"translate": cmd_translate, "map": cmd_map, "prompt": cmd_prompt, "test": cmd_test, "triage": cmd_triage}
     handler = dispatch.get(args.command)
     if handler:
         return handler(args)

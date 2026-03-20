@@ -185,6 +185,33 @@ TOOLS: list[dict] = [
             "required": ["path", "output_path"],
         },
     },
+    {
+        "name": "triage_project",
+        "description": (
+            "Scan a COBOL project directory, translate all files, and produce "
+            "a TODO triage report. Returns categorized TODO counts by work stream "
+            "(DB2/SQL, CICS, DLI, File I/O, etc.) for team assignment."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Directory containing COBOL source files",
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "Search subdirectories (default: false)",
+                },
+                "copybook_paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of directories to search for COPY copybooks",
+                },
+            },
+            "required": ["path"],
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -311,6 +338,15 @@ def _handle_translate_directory(params: dict) -> str:
     return json.dumps(result, indent=2)
 
 
+def _handle_triage_project(params: dict) -> str:
+    from .triage import triage_project, format_triage_json
+    d = _validate_dir(params["path"])
+    recursive = params.get("recursive", False)
+    copy_paths = params.get("copybook_paths")
+    triage = triage_project(d, recursive=recursive, copy_paths=copy_paths)
+    return format_triage_json(triage)
+
+
 _TOOL_HANDLERS: dict[str, Callable] = {
     "translate_cobol": _handle_translate_cobol,
     "analyze_cobol": _handle_analyze_cobol,
@@ -318,6 +354,7 @@ _TOOL_HANDLERS: dict[str, Callable] = {
     "list_sensitivities": _handle_list_sensitivities,
     "discover_cobol_files": _handle_discover_cobol_files,
     "translate_directory": _handle_translate_directory,
+    "triage_project": _handle_triage_project,
 }
 
 # ---------------------------------------------------------------------------

@@ -56,7 +56,7 @@ def test_initialize():
 
 
 def test_tools_list_returns_all_tools():
-    """tools/list returns all 6 tools."""
+    """tools/list returns all 7 tools."""
     msgs = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize",
          "params": {"protocolVersion": "2024-11-05", "capabilities": {},
@@ -68,7 +68,7 @@ def test_tools_list_returns_all_tools():
     tools_resp = responses[1]
     assert "result" in tools_resp
     tools = tools_resp["result"]["tools"]
-    assert len(tools) == 6
+    assert len(tools) == 7
     names = {t["name"] for t in tools}
     assert names == {
         "translate_cobol",
@@ -77,6 +77,7 @@ def test_tools_list_returns_all_tools():
         "list_sensitivities",
         "discover_cobol_files",
         "translate_directory",
+        "triage_project",
     }
 
 

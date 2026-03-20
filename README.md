@@ -56,6 +56,12 @@ cobol2py map PAYROLL.cob
 
 # Generate LLM translation brief
 cobol2py prompt PAYROLL.cob > brief.md
+
+# Triage a project — categorize TODOs for team assignment
+cobol2py triage ./src/ --recursive --output ./triage --json
+
+# Translate with middleware interface stubs (DB2/CICS/DLI/MQ)
+cobol2py translate ./src/ --recursive --package --stubs
 ```
 
 ## Use with AI agents
@@ -73,7 +79,7 @@ cobol2py prompt PAYROLL.cob > brief.md
 }
 ```
 
-The MCP server exposes 6 tools: `translate_cobol`, `analyze_cobol`, `generate_brief`, `list_sensitivities`, `discover_cobol_files`, `translate_directory`.
+The MCP server exposes 7 tools: `translate_cobol`, `analyze_cobol`, `generate_brief`, `list_sensitivities`, `discover_cobol_files`, `translate_directory`, `triage_project`.
 
 ### LLM Prompt Brief
 
@@ -193,7 +199,9 @@ src/cobol_safe_translator/
   project_analyzer.py      — Multi-file project analysis and reporting
   test_generator.py        — Automatic test scaffolding for COBOL programs
   batch.py                 — Batch/directory processing
-  cli.py                   — CLI (translate / map / prompt / test)
+  triage.py                — Batch TODO triage for team assignment
+  middleware_stubs.py      — Middleware interface stub generator (DB2/CICS/DLI/MQ)
+  cli.py                   — CLI (translate / map / prompt / test / triage)
   cli_test_runner.py       — Interactive test execution engine
   mcp_server.py            — MCP server for AI coding assistants
   py.typed                 — PEP 561 type marker
@@ -202,12 +210,41 @@ src/cobol_safe_translator/
 ## CLI reference
 
 ```
-cobol2py translate <path|dir> [--output <dir>] [--recursive] [--validate] [--copybook-path <dir>]
+cobol2py translate <path|dir> [--output <dir>] [--recursive] [--validate] [--copybook-path <dir>] [--stubs] [--package]
 cobol2py map       <path|dir> [--output <dir>] [--recursive] [--config protected.json]
 cobol2py prompt    <path|dir> [--output <file|dir>] [--recursive]
 cobol2py test      <path|dir> [--output <dir>] [--recursive] [--timeout N] [--no-execute]
+cobol2py triage    <dir>      [--output <dir>] [--recursive] [--json]
 cobol2py --version
 ```
+
+## Team migration workflow
+
+### Project triage
+
+Scan an entire COBOL project and get a categorized TODO report for team assignment:
+
+```bash
+cobol2py triage ./cobol-src/ --recursive --output ./triage --json
+```
+
+Produces:
+- **TRIAGE.md** — Markdown report with work streams (DB2/SQL, CICS, DLI, File I/O, etc.), per-program breakdown, and suggested skills per category
+- **triage.json** — Machine-readable triage data for tooling integration
+- **stubs/** — Middleware interface stubs (only for middleware the project actually uses)
+
+### Middleware interface stubs
+
+When translating with `--stubs`, the tool generates typed Python interface files for each detected middleware:
+
+| Stub | Generated when | Purpose |
+|------|---------------|---------|
+| `db2_interface.py` | EXEC SQL detected | DB-API 2.0 connection contract |
+| `cics_interface.py` | EXEC CICS detected | Transaction/screen runtime contract |
+| `dli_interface.py` | EXEC DLI detected | Hierarchical DB access contract |
+| `mq_interface.py` | MQPUT/MQGET detected | Message queue contract |
+
+Each stub is a typed class with `NotImplementedError` methods and docstrings explaining what to replace them with. Multiple developers can work against these contracts in parallel before the middleware is wired up.
 
 ## What requires manual wiring
 
