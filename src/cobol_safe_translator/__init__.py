@@ -1,7 +1,7 @@
 """Translate COBOL to Python. Zero dependencies, works offline.
 
-Produces valid Python from enterprise COBOL — 4,705 files tested, 100% syntax validity.
+Produces valid Python from enterprise COBOL — 5,288 files tested, 100% syntax validity.
 Includes MCP server for AI coding assistants. pip install cobol-safe-translator
 """
 
-__version__ = "0.9.0"
+__version__ = "1.0.0"

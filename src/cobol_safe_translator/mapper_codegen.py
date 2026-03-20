@@ -209,21 +209,28 @@ class CodegenMixin:
         # Emit __post_init__ to wire REDEFINES aliases to originals
         wiring = getattr(self, '_redefines_wiring', [])
         if wiring:
+            # Build set of REDEFINES field names for chain resolution
+            redefines_fields = {w[0] for w in wiring}
+            # Map field name → its original for chain following
+            orig_map = {w[0]: w[1] for w in wiring}
+
             lines.append("")
             lines.append("    def __post_init__(self) -> None:")
             lines.append('        """Wire REDEFINES aliases to their original fields."""')
             for field_py, orig_py, offset, sz, is_num, decs in wiring:
+                # Follow REDEFINES chain to root (C REDEFINES B REDEFINES A → use A)
+                root_py = orig_py
+                while root_py in orig_map:
+                    root_py = orig_map[root_py]
                 if offset == -1:
-                    # RedefinesAlias — whole field
                     lines.append(
                         f"        object.__setattr__(self, '{field_py}', "
-                        f"RedefinesAlias(self.{orig_py}, {sz}, {is_num}, {decs}))"
+                        f"RedefinesAlias(self.{root_py}, {sz}, {is_num}, {decs}))"
                     )
                 else:
-                    # RedefinesSlice — byte range
                     lines.append(
                         f"        object.__setattr__(self, '{field_py}', "
-                        f"RedefinesSlice(self.{orig_py}, {offset}, {sz}, {is_num}, {decs}))"
+                        f"RedefinesSlice(self.{root_py}, {offset}, {sz}, {is_num}, {decs}))"
                     )
 
         # Append SCREEN SECTION layout as comments
@@ -392,12 +399,68 @@ class CodegenMixin:
 
         return lines
 
+    def _find_item_by_name(self, name: str) -> DataItem | None:
+        """Find a DataItem by COBOL name across all sections."""
+        upper = name.upper()
+        def _search(items: list[DataItem]) -> DataItem | None:
+            for item in items:
+                if item.name.upper() == upper:
+                    return item
+                if item.children:
+                    found = _search(item.children)
+                    if found:
+                        return found
+            return None
+        return _search(self.program.all_data_items)
+
+    def _has_occurs_depending(self, item: DataItem) -> bool:
+        """Check if an item or its children use OCCURS DEPENDING ON."""
+        if item.occurs_depending:
+            return True
+        return any(self._has_occurs_depending(c) for c in item.children)
+
     def _generate_redefines_field(
         self, item: DataItem, py_name: str, prefix: str,
         parent_group: str | None,
     ) -> list[str]:
         """Generate REDEFINES alias fields."""
         original_py = _to_python_name(item.redefines)
+
+        # Check if the redefined item has OCCURS DEPENDING ON
+        redefined_item = self._find_item_by_name(item.redefines)
+        if redefined_item and self._has_occurs_depending(redefined_item):
+            # Variable-length: emit RedefinesAlias for the whole field,
+            # skip static slicing since offsets are runtime-dependent
+            lines = [f"{prefix}# REDEFINES {item.redefines} (variable-length — dynamic offsets)"]
+            if item.pic:
+                is_num = item.pic.category.name in ("NUMERIC", "EDITED")
+                sz = item.pic.size
+                decs = item.pic.decimals
+                lines.append(
+                    f"{prefix}{py_name}: RedefinesAlias = field("
+                    f"default_factory=lambda: RedefinesAlias(None, {sz}, {is_num}, {decs}))"
+                )
+                if not hasattr(self, '_redefines_wiring'):
+                    self._redefines_wiring = []
+                self._redefines_wiring.append(
+                    (py_name, original_py, -1, sz, is_num, decs)
+                )
+            elif item.children:
+                lines.append(f"{prefix}# TODO(high): group REDEFINES of variable-length"
+                             f" table — children need runtime offset computation")
+                for child in item.children:
+                    child_py = self._resolve_field_name(child, item.name)
+                    if child.pic:
+                        lines.append(f"{prefix}{child_py}: RedefinesAlias = field("
+                                     f"default_factory=lambda: RedefinesAlias(None, {child.pic.size}, "
+                                     f"{child.pic.category.name in ('NUMERIC', 'EDITED')}, {child.pic.decimals}))")
+                        if not hasattr(self, '_redefines_wiring'):
+                            self._redefines_wiring = []
+                        self._redefines_wiring.append(
+                            (child_py, original_py, -1, child.pic.size,
+                             child.pic.category.name in ("NUMERIC", "EDITED"), child.pic.decimals)
+                        )
+            return lines
         lines: list[str] = []
         lines.append(f"{prefix}# REDEFINES {item.redefines}")
 
@@ -694,13 +757,23 @@ class CodegenMixin:
                 continue
 
             # Inline PERFORM VARYING/UNTIL — consume body until END-PERFORM
-            if (stmt.verb == "PERFORM" and stmt.operands
-                    and stmt.operands[0].upper() in ("VARYING", "UNTIL", "WITH")):
-                block_lines, i = self._translate_inline_perform_block(
-                    para.statements, i,
+            # Detect: PERFORM VARYING/UNTIL/WITH (inline) or
+            #         PERFORM para THRU para VARYING/UNTIL (with body)
+            if stmt.verb == "PERFORM" and stmt.operands:
+                upper_ops = [o.upper() for o in stmt.operands]
+                has_inline_kw = upper_ops[0] in ("VARYING", "UNTIL", "WITH")
+                has_thru_inline = (
+                    ("THRU" in upper_ops or "THROUGH" in upper_ops)
+                    and any(kw in upper_ops for kw in ("VARYING", "UNTIL"))
+                    and i + 1 < len(para.statements)
+                    and any(s.verb == "END-PERFORM" for s in para.statements[i + 1:])
                 )
-                lines.extend(block_lines)
-                continue
+                if has_inline_kw or has_thru_inline:
+                    block_lines, i = self._translate_inline_perform_block(
+                        para.statements, i,
+                    )
+                    lines.extend(block_lines)
+                    continue
 
             translated = self._translate_statement(stmt)
             for tl in translated:

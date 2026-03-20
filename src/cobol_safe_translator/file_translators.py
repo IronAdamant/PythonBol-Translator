@@ -300,18 +300,96 @@ def translate_read(ops: list[str], raw: str) -> list[str]:
     return lines
 
 
+_DLI_CALL_TARGETS = frozenset({
+    "CBLTDLI", "AIBTDLI", "PLITDLI", "AERTDLI",
+})
+
+_DLI_FUNC_CODES: dict[str, str] = {
+    "GU": "get_unique", "GHU": "get_unique",
+    "GN": "get_next", "GHN": "get_next",
+    "GNP": "get_next", "GHNP": "get_next",
+    "ISRT": "insert", "REPL": "replace", "DLET": "delete",
+    "PCB": "pcb_call", "CHKP": "checkpoint", "XRST": "restart",
+    "ROLB": "rollback", "ROLL": "rollback",
+}
+
+
 def translate_call(ops: list[str]) -> list[str]:
-    """Translate CALL verb."""
-    if ops:
-        target = ops[0].strip('"').strip("'")
-        py_target = _to_python_name(target)
-        args = [_to_python_name(o) for o in ops[2:] if o.upper() != "USING"]
-        arg_str = ", ".join(f"self.data.{a}.value" for a in args) if args else ""
-        return [
-            f"# CALL '{target}'",
-            f"# TODO(high): implement or import {py_target}({arg_str})",
-        ]
-    return ["# CALL: no target specified"]
+    """Translate CALL verb, with special handling for DLI CALL interface."""
+    if not ops:
+        return ["# CALL: no target specified"]
+
+    target = ops[0].strip('"').strip("'")
+    upper_target = target.upper()
+
+    # DLI CALL interface: CALL 'CBLTDLI' USING func-code, pcb, io-area, ssa...
+    if upper_target in _DLI_CALL_TARGETS:
+        return _translate_dli_call(target, ops)
+
+    py_target = _to_python_name(target)
+    args = [_to_python_name(o) for o in ops[2:] if o.upper() != "USING"]
+    arg_str = ", ".join(f"self.data.{a}.value" for a in args) if args else ""
+    return [
+        f"# CALL '{target}'",
+        f"# TODO(high): implement or import {py_target}({arg_str})",
+    ]
+
+
+def _translate_dli_call(target: str, ops: list[str]) -> list[str]:
+    """Translate CALL 'CBLTDLI'/'AIBTDLI' USING func, pcb, io-area, [ssa...]."""
+    # Parse USING arguments
+    using_args: list[str] = []
+    upper_ops = [o.upper() for o in ops]
+    if "USING" in upper_ops:
+        idx = upper_ops.index("USING") + 1
+        using_args = [o for o in ops[idx:] if o.upper() not in ("BY", "REFERENCE", "CONTENT", "VALUE")]
+
+    lines = [f"# DLI CALL '{target}' — IMS database operation"]
+
+    if not using_args:
+        lines.append(f"self._dli_db.call('{target}')  # no arguments parsed")
+        return lines
+
+    func_code = using_args[0]
+    py_func = _to_python_name(func_code)
+    func_upper = func_code.strip("'\"").upper()
+
+    # Map DLI function code to Python method
+    method = _DLI_FUNC_CODES.get(func_upper, "call")
+    hold = ", hold=True" if func_upper.startswith("GH") else ""
+    parent = ", within_parent=True" if func_upper.endswith("P") and func_upper != "REPL" else ""
+
+    pcb_arg = _to_python_name(using_args[1]) if len(using_args) > 1 else "pcb"
+    io_area = _to_python_name(using_args[2]) if len(using_args) > 2 else "io_area"
+
+    # SSA arguments (segment search arguments) — remaining args
+    ssa_args = [_to_python_name(a) for a in using_args[3:]] if len(using_args) > 3 else []
+    ssa_str = f", ssa=[{', '.join(f'self.data.{s}.value' for s in ssa_args)}]" if ssa_args else ""
+
+    if method in ("get_unique", "get_next"):
+        lines.append(f"_dli_row = self._dli_db.{method}(self.data.{pcb_arg}.value{hold}{parent}{ssa_str})")
+        lines.append("if _dli_row is None:")
+        lines.append('    self._dli_status = "GE"  # not found')
+        lines.append("else:")
+        lines.append(f"    self.data.{io_area}.set(_dli_row)")
+        lines.append('    self._dli_status = "  "  # success')
+    elif method == "insert":
+        lines.append(f"self._dli_db.insert(self.data.{pcb_arg}.value, data=self.data.{io_area}.value{ssa_str})")
+        lines.append('self._dli_status = "  "')
+    elif method == "replace":
+        lines.append(f"self._dli_db.replace(self.data.{pcb_arg}.value, data=self.data.{io_area}.value)")
+        lines.append('self._dli_status = "  "')
+    elif method == "delete":
+        lines.append(f"self._dli_db.delete(self.data.{pcb_arg}.value)")
+        lines.append('self._dli_status = "  "')
+    elif method == "checkpoint":
+        lines.append(f"self._dli_db.checkpoint(self.data.{pcb_arg}.value)")
+    elif method == "rollback":
+        lines.append(f"self._dli_db.rollback()")
+    else:
+        lines.append(f"self._dli_db.call(self.data.{py_func}.value, self.data.{pcb_arg}.value)")
+
+    return lines
 
 
 def translate_initialize(ops: list[str]) -> list[str]:
