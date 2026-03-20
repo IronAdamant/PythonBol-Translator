@@ -210,23 +210,23 @@ class CobolString:
             return ebcdic_key(s)
         return s
 
+    def _self_padded(self, other: object) -> str:
+        """Return self._value padded to match comparison size when other is CobolString."""
+        if isinstance(other, CobolString):
+            return self._value.ljust(max(self.size, other.size))
+        return self._value
+
     def __eq__(self, other: object) -> bool:
         val = self._compare_value(other)
         if val is None:
             return NotImplemented
-        if isinstance(other, CobolString):
-            max_size = max(self.size, other.size)
-            return self._value.ljust(max_size) == val
-        return self._value == val
+        return self._self_padded(other) == val
 
     def __lt__(self, other: object) -> bool:
         val = self._compare_value(other)
         if val is None:
             return NotImplemented
-        if isinstance(other, CobolString):
-            max_size = max(self.size, other.size)
-            return self._cmp_key(self._value.ljust(max_size)) < self._cmp_key(val)
-        return self._cmp_key(self._value) < self._cmp_key(val)
+        return self._cmp_key(self._self_padded(other)) < self._cmp_key(val)
 
     def __str__(self) -> str:
         return self._value

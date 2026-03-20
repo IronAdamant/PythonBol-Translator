@@ -4,4 +4,4 @@ Produces valid Python from enterprise COBOL — 4,705 files tested, 100% syntax 
 Includes MCP server for AI coding assistants. pip install cobol-safe-translator
 """
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"

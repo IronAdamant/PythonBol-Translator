@@ -214,20 +214,7 @@ def resolve_operand(op: str) -> str:
         return f"self.data.{py}{indices}.value"
     # OF/IN qualification: FIELD OF GROUP → resolve via qualified map if available
     if " OF " in upper or " IN " in upper:
-        parts = op.split()
-        field_name = parts[0].upper()
-        # Find the group name (after OF/IN)
-        group_name = ""
-        for j, p in enumerate(parts):
-            if p.upper() in ("OF", "IN") and j + 1 < len(parts):
-                group_name = parts[j + 1].upper()
-                break
-        # Try qualified map first
-        if group_name:
-            qualified = _qualified_field_map.get((field_name, group_name))
-            if qualified:
-                return f"self.data.{qualified}.value"
-        return f"self.data.{_to_python_name(parts[0])}.value"
+        return f"self.data.{_resolve_qualified(op)}.value"
     # Default data name
     return f"self.data.{_to_python_name(op)}.value"
 
@@ -241,6 +228,26 @@ def extract_from_expr(ops: list[str], upper_ops: list[str]) -> str | None:
     return None
 
 
+def _resolve_qualified(op: str) -> str:
+    """Resolve OF/IN qualified COBOL name to a Python field name.
+
+    Looks up the (field, group) pair in the qualified field map, falling
+    back to the plain Python-ised first token.
+    """
+    parts = op.split()
+    field_name = parts[0].upper()
+    group_name = ""
+    for j, p in enumerate(parts):
+        if p.upper() in ("OF", "IN") and j + 1 < len(parts):
+            group_name = parts[j + 1].upper()
+            break
+    if group_name:
+        qualified = _qualified_field_map.get((field_name, group_name))
+        if qualified:
+            return qualified
+    return _to_python_name(parts[0])
+
+
 def resolve_target(op: str) -> str:
     """Resolve a COBOL target operand to a Python assignment target.
 
@@ -252,16 +259,5 @@ def resolve_target(op: str) -> str:
         py, indices = sub
         return f"self.data.{py}{indices}"
     if " OF " in op.upper() or " IN " in op.upper():
-        parts = op.split()
-        field_name = parts[0].upper()
-        group_name = ""
-        for j, p in enumerate(parts):
-            if p.upper() in ("OF", "IN") and j + 1 < len(parts):
-                group_name = parts[j + 1].upper()
-                break
-        if group_name:
-            qualified = _qualified_field_map.get((field_name, group_name))
-            if qualified:
-                return f"self.data.{qualified}"
-        return f"self.data.{_to_python_name(parts[0])}"
+        return f"self.data.{_resolve_qualified(op)}"
     return f"self.data.{_to_python_name(op)}"

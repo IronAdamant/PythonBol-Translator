@@ -109,8 +109,6 @@ def _generate_review_report(
     then produces a Markdown report giving the user three clear choices:
     automated LLM review, guided clarification, or human developer review.
     """
-    import re as _re
-
     lines = python_source.splitlines()
     todos: list[tuple[int, str]] = []
     verify_lines: list[tuple[int, str]] = []

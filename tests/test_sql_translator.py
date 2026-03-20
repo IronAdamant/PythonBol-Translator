@@ -11,10 +11,9 @@ from __future__ import annotations
 
 import ast
 
-import pytest
-
+from cobol_safe_translator.exec_block_handler import _parse_sql_block
 from cobol_safe_translator.models import SqlBlock
-from cobol_safe_translator.preprocessor import strip_exec_blocks, _parse_sql_block
+from cobol_safe_translator.preprocessor import strip_exec_blocks
 from cobol_safe_translator.sql_translator import (
     generate_sql_imports,
     generate_sql_init,

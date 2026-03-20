@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import ast
 
-import pytest
-
 from cobol_safe_translator.cics_translator import (
     has_cics,
     generate_cics_template,

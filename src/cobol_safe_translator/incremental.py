@@ -154,7 +154,6 @@ def _patch_method_ast(
     existing: str, method_name: str, new_method: str,
 ) -> str | None:
     """Replace a method via AST node replacement. Returns None on failure."""
-    import ast
     try:
         tree = ast.parse(existing)
     except SyntaxError:

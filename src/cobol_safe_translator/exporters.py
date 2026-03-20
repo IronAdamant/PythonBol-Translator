@@ -6,6 +6,7 @@ Pipeline position: Analyzer -> SoftwareMap -> **Exporter** -> Reports (MD / JSON
 from __future__ import annotations
 
 import json
+from collections import Counter
 from datetime import datetime
 
 from .models import (
@@ -121,9 +122,7 @@ class MarkdownExporter:
         lines = ["## Procedure Division\n"]
         lines.append("### Paragraphs\n")
         for para in self.program.paragraphs:
-            verb_counts: dict[str, int] = {}
-            for stmt in para.statements:
-                verb_counts[stmt.verb] = verb_counts.get(stmt.verb, 0) + 1
+            verb_counts = Counter(stmt.verb for stmt in para.statements)
             verbs = ", ".join(f"{v}({c})" for v, c in sorted(verb_counts.items()))
             lines.append(f"- **{para.name}** — {len(para.statements)} statements: {verbs}")
         lines.append("")

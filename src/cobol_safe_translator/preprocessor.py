@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .exec_block_handler import strip_exec_blocks, _parse_sql_block  # noqa: F401
+from .exec_block_handler import strip_exec_blocks
 from .models import SqlBlock
 
 # Copybook file extensions to try when searching (in order)
