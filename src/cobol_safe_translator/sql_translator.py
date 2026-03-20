@@ -145,10 +145,7 @@ def translate_sql_block(block: SqlBlock) -> list[str]:
         return ["# SQL: INCLUDE SQLCA — SQL Communication Area", "self._sqlcode = 0"]
 
     if sql_type == "WHENEVER":
-        return [
-            f"# SQL: WHENEVER {block.whenever_condition} {block.whenever_action}",
-            "# (sqlcode checked after each SQL operation)",
-        ]
+        return _translate_whenever(block)
 
     if sql_type in ("DECLARE", "OPEN", "FETCH", "CLOSE"):
         return _translate_cursor_ops(block)
@@ -163,5 +160,36 @@ def translate_sql_block(block: SqlBlock) -> list[str]:
         return ["# SQL: ROLLBACK", "self._sql_connection.rollback()", "self._sqlcode = 0"]
 
     return [f"# SQL: (unrecognized type: {sql_type})", f"# {block.raw_sql}"]
+
+
+def _translate_whenever(block: SqlBlock) -> list[str]:
+    """Translate WHENEVER SQLERROR / NOT FOUND into error handling code."""
+    condition = block.whenever_condition.upper().strip()
+    action = block.whenever_action.strip()
+    upper_action = action.upper()
+
+    lines = [f"# SQL: WHENEVER {condition} {action}"]
+
+    if "CONTINUE" in upper_action:
+        # WHENEVER ... CONTINUE — errors are silently ignored
+        if "NOT FOUND" in condition:
+            lines.append("self._sql_whenever_not_found = 'CONTINUE'")
+        else:
+            lines.append("self._sql_whenever_sqlerror = 'CONTINUE'")
+    elif "GO" in upper_action:
+        # WHENEVER ... GO TO paragraph — jump to error handler
+        target = upper_action.replace("GO", "").replace("TO", "").strip().rstrip(".")
+        if target:
+            py_method = _cobol_to_python_name(target).lower()
+            if "NOT FOUND" in condition:
+                lines.append(f"self._sql_whenever_not_found = '{py_method}'")
+            else:
+                lines.append(f"self._sql_whenever_sqlerror = '{py_method}'")
+            lines.append(f"# After each SQL op, check: if self._sqlcode != 0: self.{py_method}()")
+    else:
+        # PERFORM or other action
+        lines.append(f"# Action: {action}")
+
+    return lines
 
 

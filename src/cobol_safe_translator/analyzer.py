@@ -191,10 +191,29 @@ def analyze(
                 warnings.append(
                     f"GO TO in {para.name}: requires manual review"
                 )
+            elif stmt.verb == "ALTER":
+                warnings.append(
+                    f"ALTER in {para.name}: dynamic control flow — "
+                    f"requires manual restructuring"
+                )
             elif stmt.verb == "COPY":
                 warnings.append(
                     f"COPY statement in {para.name}: unresolved copybook (preprocessor may not have found the copybook file)"
                 )
+
+    # CFG-based unreachable paragraph detection
+    from .cfg import build_cfg
+    cfg = build_cfg(program)
+    for para_name in cfg.unreachable:
+        warnings.append(
+            f"Unreachable paragraph: {para_name} (no incoming edges)"
+        )
+    if cfg.alter_mappings:
+        for am in cfg.alter_mappings:
+            warnings.append(
+                f"ALTER in {am.source_paragraph}: modifies GO TO in "
+                f"{am.altered_paragraph} to target {am.new_target}"
+            )
 
     if sensitivities:
         high_count = sum(1 for s in sensitivities if s.level == SensitivityLevel.HIGH)

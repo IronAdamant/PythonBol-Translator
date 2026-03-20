@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 
 from .models import (
+    AlphabetDefinition,
     CobolProgram,
     ConditionName,
     DataItem,
@@ -111,6 +112,21 @@ _ALT_KEY_RE = re.compile(
 _COLLATING_RE = re.compile(
     r"PROGRAM\s+COLLATING\s+SEQUENCE\s+(?:IS\s+)?([\w-]+)", re.IGNORECASE,
 )
+_ALPHABET_RE = re.compile(
+    r"ALPHABET\s+([\w-]+)\s+(?:IS\s+)?(EBCDIC|STANDARD-1|STANDARD-2|NATIVE|.*?)(?=\s*ALPHABET\b|\s*CLASS\b|\s*PROGRAM\b|\s*CURRENCY\b|\s*DECIMAL-POINT\b|\.\s*$|$)",
+    re.IGNORECASE,
+)
+
+
+def parse_alphabet_definitions(lines: list[str]) -> list[AlphabetDefinition]:
+    """Extract ALPHABET definitions from SPECIAL-NAMES paragraph."""
+    combined = " ".join(l.strip() for l in lines)
+    results: list[AlphabetDefinition] = []
+    for m in _ALPHABET_RE.finditer(combined):
+        name = m.group(1).upper()
+        definition = m.group(2).strip().rstrip(".")
+        results.append(AlphabetDefinition(name=name, definition=definition))
+    return results
 
 
 def parse_environment(lines: list[str]) -> list[FileControl]:
@@ -505,6 +521,9 @@ def _parse_single_program(
     if coll_m:
         collating_sequence = coll_m.group(1).upper()
 
+    # Extract ALPHABET definitions from SPECIAL-NAMES
+    alphabet_definitions = parse_alphabet_definitions(divisions["ENVIRONMENT"])
+
     data_lines = divisions["DATA"]
     file_section, working_storage, linkage_section, report_section, local_storage = parse_data_division(data_lines)
     screen_lines = _extract_screen_lines(data_lines)
@@ -526,6 +545,7 @@ def _parse_single_program(
         paragraphs=paragraphs,
         declaratives=declaratives,
         raw_lines=raw_lines,
+        alphabet_definitions=alphabet_definitions,
     )
 
 
@@ -563,7 +583,7 @@ def parse_cobol(
             source_dir = sp.parent
 
     # Always run preprocessor (handles both COPY resolution and EXEC stripping)
-    source, sql_blocks = resolve_copies(
+    source, sql_blocks, dli_blocks = resolve_copies(
         source,
         copybook_paths,
         source_dir=source_dir,
@@ -577,8 +597,9 @@ def parse_cobol(
     # Parse the first (or only) program
     main_program = _parse_single_program(segments[0], source_path, raw_lines)
 
-    # Attach extracted SQL blocks to the program
+    # Attach extracted SQL/DLI blocks to the program
     main_program.sql_blocks = sql_blocks
+    main_program.dli_blocks = dli_blocks
 
     # Parse any additional programs and attach as nested_programs
     for segment in segments[1:]:

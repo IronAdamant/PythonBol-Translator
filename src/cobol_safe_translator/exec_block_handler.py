@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from .models import SqlBlock
+from .models import DliBlock, SqlBlock
 from .utils import _to_python_name as _cobol_to_python_name
 
 # ── EXEC start / end detection ───────────────────────────────────────────
@@ -359,15 +359,102 @@ def _cics_hint(cics_text: str) -> list[str]:
     return hints
 
 
-def strip_exec_blocks(raw_text: str) -> tuple[str, list[SqlBlock]]:
-    """Replace EXEC CICS/SQL ... END-EXEC blocks with TODO comments.
+# ── DLI regexes ──────────────────────────────────────────────────────────
 
-    Returns a tuple of (processed_text, sql_blocks) where sql_blocks
-    contains structured metadata for each EXEC SQL block found.
+_DLI_VERB_RE = re.compile(
+    r"EXEC\s+DLI\s+(GU|GHU|GN|GHN|GNP|GHNP|ISRT|REPL|DLET)\b",
+    re.IGNORECASE,
+)
+_DLI_SEGMENT_RE = re.compile(
+    r"SEGMENT\s*\(\s*'?([^')]+)'?\s*\)", re.IGNORECASE,
+)
+_DLI_PCB_RE = re.compile(r"USING\s+PCB\s*\(\s*(\d+)\s*\)", re.IGNORECASE)
+_DLI_INTO_RE = re.compile(r"INTO\s+([\w-]+)", re.IGNORECASE)
+_DLI_SSA_RE = re.compile(r"SSA\s*\(\s*([^)]+)\s*\)", re.IGNORECASE)
+
+
+def _parse_dli_block(dli_text: str) -> DliBlock | None:
+    """Parse EXEC DLI text into a structured DliBlock."""
+    try:
+        text = " ".join(dli_text.split())
+        verb_m = _DLI_VERB_RE.search(text)
+        if not verb_m:
+            return None
+        dli_type = verb_m.group(1).upper()
+
+        segment_name = ""
+        seg_m = _DLI_SEGMENT_RE.search(text)
+        if seg_m:
+            segment_name = seg_m.group(1).strip()
+
+        pcb_name = ""
+        pcb_m = _DLI_PCB_RE.search(text)
+        if pcb_m:
+            pcb_name = pcb_m.group(1).strip()
+
+        host_variables: list[str] = []
+        into_m = _DLI_INTO_RE.search(text)
+        if into_m:
+            host_variables.append(into_m.group(1).strip())
+
+        ssa_fields: list[str] = []
+        for ssa_m in _DLI_SSA_RE.finditer(text):
+            ssa_fields.append(ssa_m.group(1).strip())
+
+        return DliBlock(
+            dli_type=dli_type,
+            raw_dli=text,
+            segment_name=segment_name,
+            pcb_name=pcb_name,
+            ssa_fields=ssa_fields,
+            host_variables=host_variables,
+        )
+    except (ValueError, IndexError, KeyError, AttributeError):
+        return None
+
+
+def _dli_hint(dli_text: str) -> list[str]:
+    """Generate Python-equivalent hint lines for an EXEC DLI block."""
+    block = _parse_dli_block(dli_text)
+    if not block:
+        return []
+
+    seg = block.segment_name or "segment"
+    py_seg = _cobol_to_python_name(seg)
+    hints: list[str] = []
+
+    if block.dli_type in ("GU", "GHU"):
+        qual = f" WHERE {', '.join(block.ssa_fields)}" if block.ssa_fields else ""
+        hints.append(f"row = db.get('{py_seg}'{', key=...' if not qual else ''})")
+        if block.host_variables:
+            py_var = _cobol_to_python_name(block.host_variables[0])
+            hints.append(f"self.data.{py_var}.set(row)")
+        if qual:
+            hints.append(f"# SSA qualifiers: {qual.strip()}")
+    elif block.dli_type in ("GN", "GHN", "GNP", "GHNP"):
+        hints.append(f"row = cursor_{py_seg}.fetchone()  # Get Next")
+        if block.host_variables:
+            py_var = _cobol_to_python_name(block.host_variables[0])
+            hints.append(f"self.data.{py_var}.set(row)")
+    elif block.dli_type == "ISRT":
+        hints.append(f"db.insert('{py_seg}', data=record)")
+    elif block.dli_type == "REPL":
+        hints.append(f"db.update('{py_seg}', data=record)")
+    elif block.dli_type == "DLET":
+        hints.append(f"db.delete('{py_seg}')")
+    return hints
+
+
+def strip_exec_blocks(raw_text: str) -> tuple[str, list[SqlBlock], list[DliBlock]]:
+    """Replace EXEC CICS/SQL/DLI ... END-EXEC blocks with TODO comments.
+
+    Returns a tuple of (processed_text, sql_blocks, dli_blocks) where
+    sql_blocks and dli_blocks contain structured metadata for code generation.
     """
     lines = raw_text.splitlines()
     result: list[str] = []
     sql_blocks: list[SqlBlock] = []
+    dli_blocks: list[DliBlock] = []
     i = 0
 
     while i < len(lines):
@@ -433,9 +520,21 @@ def strip_exec_blocks(raw_text: str) -> tuple[str, list[SqlBlock]]:
             hint = _exec_hint(exec_type, original_text)
             if hint:
                 result.append(f"      * Hint: {hint}")
+        elif exec_type == "DLI":
+            dli_block = _parse_dli_block(original_text)
+            if dli_block is not None:
+                dli_blocks.append(dli_block)
+            dli_hints = _dli_hint(original_text)
+            if dli_hints:
+                for dh in dli_hints:
+                    result.append(f"      * EXEC DLI hint: {dh}")
+            else:
+                hint = _exec_hint(exec_type, original_text)
+                if hint:
+                    result.append(f"      * Hint: {hint}")
         else:
             hint = _exec_hint(exec_type, original_text)
             if hint:
                 result.append(f"      * Hint: {hint}")
 
-    return "\n".join(result), sql_blocks
+    return "\n".join(result), sql_blocks, dli_blocks

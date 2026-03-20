@@ -450,6 +450,30 @@ class VerbTranslationMixin:
         lines.append("return")
         return lines
 
+    def _translate_alter(self, ops: list[str]) -> list[str]:
+        """Translate ALTER verb: ALTER para-1 TO [PROCEED TO] para-2.
+
+        Generates a state variable update that modifies which method a
+        GO TO paragraph dispatches to at runtime.
+        """
+        upper_ops = _upper_ops(ops)
+        # Filter out keywords TO, PROCEED
+        filtered = [o for i, o in enumerate(ops)
+                    if upper_ops[i] not in ("TO", "PROCEED")]
+        if len(filtered) < 2:
+            return [
+                f"# ALTER {' '.join(ops)}",
+                "# TODO(high): ALTER requires at least source and target paragraphs",
+            ]
+        altered_para = filtered[0]
+        new_target = filtered[1]
+        py_altered = _to_method_name(altered_para)
+        py_target = _to_method_name(new_target)
+        return [
+            f"# ALTER {altered_para} TO PROCEED TO {new_target}",
+            f"self._goto_target_{py_altered} = '{py_target}'",
+        ]
+
     # --- SCREEN SECTION support ---
 
     def _translate_display_or_screen(self, stmt: CobolStatement) -> list[str]:

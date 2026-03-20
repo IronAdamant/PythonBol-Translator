@@ -5,6 +5,9 @@ module under 500 LOC.
 
 Contains: _screen_layout_comments, _emit_screen_comments,
 _collect_screen_fields, _translate_screen_display, _translate_screen_accept.
+
+Screen I/O uses ANSI escape sequences for cursor positioning — zero
+external dependencies, works on modern terminals including Windows Terminal.
 """
 
 from __future__ import annotations
@@ -31,10 +34,6 @@ class ScreenCodegenMixin:
         for screen in self.program.screen_section:
             lines.append(f"# SCREEN: {screen.name or '(unnamed)'}")
             self._emit_screen_comments(screen, lines, indent=1)
-            lines.append(
-                "#   TODO(high): implement screen I/O"
-                " -- consider curses, prompt_toolkit, or web UI"
-            )
             lines.append("#")
         lines.append("")
         return "\n".join(lines)
@@ -77,7 +76,13 @@ class ScreenCodegenMixin:
         return leaves
 
     def _translate_screen_display(self, screen: ScreenField) -> list[str]:
-        """Generate print() calls for DISPLAY screen-name."""
+        """Generate ANSI-positioned output for DISPLAY screen-name.
+
+        Uses ANSI escape sequences for cursor positioning:
+          \\033[{line};{col}H — move cursor to line, column
+          \\033[2J            — clear screen
+          \\033[7m / \\033[0m  — reverse video on/off
+        """
         lines = [f"# DISPLAY {screen.name}"]
         fields = self._collect_screen_fields(screen)
         if not fields:
@@ -85,22 +90,29 @@ class ScreenCodegenMixin:
             return lines
         for sf in fields:
             if sf.blank_screen:
-                lines.append("print('\\n' * 24)  # BLANK SCREEN")
+                lines.append("print('\\033[2J\\033[H', end='')  # BLANK SCREEN")
                 continue
+            pos = ""
+            if sf.line or sf.column:
+                row = sf.line if sf.line else 1
+                col = sf.column if sf.column else 1
+                pos = f"print(f'\\033[{row};{col}H', end='')  # Line {row}, Col {col}"
+                lines.append(pos)
+            # Apply display attributes
+            attr_on, attr_off = _ansi_attrs(sf.attributes)
             if sf.value:
-                lines.append(f"print({sf.value!r}, end='')")
+                lines.append(f"print(f'{attr_on}{sf.value!s}{attr_off}', end='')")
             if sf.using:
                 py = _to_python_name(sf.using)
-                lines.append(f"print(self.data.{py}.value, end='')")
+                lines.append(f"print(f'{attr_on}{{self.data.{py}.value}}{attr_off}', end='')")
             elif sf.from_field:
                 py = _to_python_name(sf.from_field)
-                lines.append(f"print(self.data.{py}.value, end='')")
-        # Add a trailing newline
-        lines.append("print()  # end of screen")
+                lines.append(f"print(f'{attr_on}{{self.data.{py}.value}}{attr_off}', end='')")
+        lines.append("print()  # flush output")
         return lines
 
     def _translate_screen_accept(self, screen: ScreenField) -> list[str]:
-        """Generate input() calls for ACCEPT screen-name."""
+        """Generate ANSI-positioned input for ACCEPT screen-name."""
         lines = [f"# ACCEPT {screen.name}"]
         fields = self._collect_screen_fields(screen)
         if not fields:
@@ -108,10 +120,18 @@ class ScreenCodegenMixin:
             return lines
         for sf in fields:
             if sf.blank_screen:
-                lines.append("print('\\n' * 24)  # BLANK SCREEN")
+                lines.append("print('\\033[2J\\033[H', end='')  # BLANK SCREEN")
                 continue
+            if sf.line or sf.column:
+                row = sf.line if sf.line else 1
+                col = sf.column if sf.column else 1
+                lines.append(
+                    f"print(f'\\033[{row};{col}H', end='')  "
+                    f"# Line {row}, Col {col}"
+                )
+            attr_on, attr_off = _ansi_attrs(sf.attributes)
             if sf.value:
-                lines.append(f"print({sf.value!r}, end='')")
+                lines.append(f"print(f'{attr_on}{sf.value!s}{attr_off}', end='')")
             if sf.using:
                 py = _to_python_name(sf.using)
                 lines.append(f"self.data.{py}.set(input())")
@@ -120,5 +140,41 @@ class ScreenCodegenMixin:
                 lines.append(f"self.data.{py}.set(input())")
             elif sf.from_field:
                 py = _to_python_name(sf.from_field)
-                lines.append(f"print(self.data.{py}.value, end='')")
+                lines.append(f"print(f'{attr_on}{{self.data.{py}.value}}{attr_off}', end='')")
         return lines
+
+
+def _ansi_attrs(attributes: list[str]) -> tuple[str, str]:
+    """Convert COBOL screen attributes to ANSI escape sequences.
+
+    Returns (on_seq, off_seq) strings to wrap output.
+    """
+    if not attributes:
+        return "", ""
+    codes: list[str] = []
+    for attr in attributes:
+        upper = attr.upper()
+        if "HIGHLIGHT" in upper:
+            codes.append("1")  # bold
+        elif "LOWLIGHT" in upper:
+            codes.append("2")  # dim
+        elif "BLINK" in upper:
+            codes.append("5")  # blink
+        elif "REVERSE" in upper:
+            codes.append("7")  # reverse video
+        elif "UNDERLINE" in upper:
+            codes.append("4")  # underline
+        elif "FOREGROUND" in upper:
+            # Extract color number
+            parts = upper.split()
+            if len(parts) >= 2 and parts[-1].isdigit():
+                codes.append(f"3{parts[-1]}")
+        elif "BACKGROUND" in upper:
+            parts = upper.split()
+            if len(parts) >= 2 and parts[-1].isdigit():
+                codes.append(f"4{parts[-1]}")
+    if not codes:
+        return "", ""
+    on = "\\033[" + ";".join(codes) + "m"
+    off = "\\033[0m"
+    return on, off

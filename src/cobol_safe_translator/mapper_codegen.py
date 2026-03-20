@@ -73,7 +73,6 @@ class CodegenMixin:
 
     def generate(self) -> str:
         """Generate the complete Python module source."""
-        self._use_ebcdic = getattr(self.program, 'collating_sequence', 'NATIVE').upper() == 'EBCDIC'
         self._program_id = self.program.program_id or "UNNAMED"
         self._class_name = _to_python_name(self._program_id).title().replace("_", "")
         parts: list[str] = []
@@ -152,10 +151,22 @@ class CodegenMixin:
             f"from cobol_safe_translator.adapters import {adapter_imports}",
             "",
         ]
+        # Add collation import when EBCDIC or custom alphabet is active
+        if self._use_ebcdic:
+            lines.append("from cobol_safe_translator.ebcdic import ebcdic_key")
+            lines.append("")
+        elif self._custom_alphabet:
+            lines.append("from cobol_safe_translator.ebcdic import build_collation_table, custom_collation_key")
+            lines.append(f"_COLLATION_TABLE = build_collation_table({self._custom_alphabet!r})")
+            lines.append("")
         # Add SQL import when EXEC SQL blocks are present
         if self.program.sql_blocks:
             from .sql_translator import generate_sql_imports
             lines.extend(generate_sql_imports())
+        # Add DLI import when EXEC DLI blocks are present
+        if self.program.dli_blocks:
+            from .dli_translator import generate_dli_imports
+            lines.extend(generate_dli_imports())
         lines.append("")
         return "\n".join(lines)
 
@@ -375,6 +386,12 @@ class CodegenMixin:
             for init_line in generate_sql_init():
                 lines.append(init_line)
 
+        # DLI connection setup (when EXEC DLI blocks are present)
+        if self.program.dli_blocks:
+            from .dli_translator import generate_dli_init
+            for init_line in generate_dli_init():
+                lines.append(init_line)
+
         # Register USE declarative handlers
         for decl in self.program.declaratives:
             handler_name = _to_method_name(decl.section_name)
@@ -389,6 +406,10 @@ class CodegenMixin:
         # Generate SQL operations method (when EXEC SQL blocks are present)
         if self.program.sql_blocks:
             lines.append(self._sql_operations_method())
+
+        # Generate DLI operations method (when EXEC DLI blocks are present)
+        if self.program.dli_blocks:
+            lines.append(self._dli_operations_method())
 
         # Generate methods for declarative sections
         for decl in self.program.declaratives:
@@ -443,6 +464,28 @@ class CodegenMixin:
                 f'{" " + block.table_name if block.table_name else ""}"""'
             )
             code_lines = translate_sql_block(block)
+            for cl in code_lines:
+                lines.append(f"        {cl}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def _dli_operations_method(self) -> str:
+        """Generate methods for each DLI operation found in the source."""
+        from .dli_translator import translate_dli_block
+
+        lines: list[str] = []
+        for idx, block in enumerate(self.program.dli_blocks):
+            dli_type = block.dli_type.lower()
+            seg_py = block.segment_name.replace("-", "_").lower() if block.segment_name else f"op_{idx}"
+            method_name = f"_dli_{dli_type}_{seg_py}"
+
+            lines.append(f"    def {method_name}(self) -> None:")
+            lines.append(
+                f'        """DLI: {block.dli_type}'
+                f'{" " + block.segment_name if block.segment_name else ""}"""'
+            )
+            code_lines = translate_dli_block(block)
             for cl in code_lines:
                 lines.append(f"        {cl}")
             lines.append("")

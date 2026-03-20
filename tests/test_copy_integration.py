@@ -191,9 +191,9 @@ class TestCopyExpansionCobolProjects:
         source_text = sort1f.read_text(encoding="utf-8", errors="replace")
 
         # Without copybook paths: COPY lines become NOT FOUND comments
-        result_without, _ = resolve_copies(source_text, source_dir=str(cbl_dir))
+        result_without, *_ = resolve_copies(source_text, source_dir=str(cbl_dir))
         # With copybook paths: COPY lines are expanded
-        result_with, _ = resolve_copies(
+        result_with, *_ = resolve_copies(
             source_text,
             source_dir=str(cbl_dir),
             copy_paths=[str(cpy_dir)],
@@ -300,7 +300,7 @@ class TestCopyExpansionDbb:
             "           STOP RUN.\n"
         )
         # With copybook path, the first-level COPY should resolve
-        resolved, _ = resolve_copies(source, copy_paths=[str(cpy_dir)])
+        resolved, *_ = resolve_copies(source, copy_paths=[str(cpy_dir)])
         # epsmtcom.cpy content should be inlined (PROCESS-INDICATOR, etc.)
         assert "PROCESS-INDICATOR" in resolved, (
             "First-level COPY should inline epsmtcom.cpy content"
@@ -396,7 +396,7 @@ class TestCopyReplacingCobolProjects:
             "       MAIN-PARA.\n"
             "           STOP RUN.\n"
         )
-        resolved, _ = resolve_copies(source, copy_paths=[str(cpy_dir)])
+        resolved, *_ = resolve_copies(source, copy_paths=[str(cpy_dir)])
 
         # The :tag: pattern should be replaced with INFile
         assert ":tag:" not in resolved, "REPLACING should substitute :tag:"
@@ -440,7 +440,7 @@ class TestCopyReplacingCobolProjects:
             pytest.skip("sort3f.cbl not found")
 
         source_text = sort3f.read_text(encoding="utf-8", errors="replace")
-        resolved, _ = resolve_copies(
+        resolved, *_ = resolve_copies(
             source_text,
             source_dir=str(cbl_dir),
             copy_paths=[str(cpy_dir)],
@@ -529,7 +529,7 @@ class TestCopyReplacingProleap:
             pytest.skip("CopyReplace.cbl not found")
 
         source_text = replace_cbl.read_text(encoding="utf-8", errors="replace")
-        resolved, _ = resolve_copies(source_text, copy_paths=[str(var_dir)])
+        resolved, *_ = resolve_copies(source_text, copy_paths=[str(var_dir)])
 
         # CopyReplace2.cpy contains "That" which should be replaced by "DISPLAY"
         assert "DISPLAY" in resolved, (

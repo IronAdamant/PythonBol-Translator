@@ -15,6 +15,37 @@ from .models import CobolProgram, ScreenField
 from .utils import _to_python_name
 
 
+# CICS RESP code mapping — common return codes
+CICS_RESP_CODES: dict[int, str] = {
+    0: "NORMAL",
+    1: "ERROR",
+    2: "RDATT",
+    5: "MAPFAIL",
+    12: "ITEMERR",
+    13: "NOTFND",
+    14: "DUPREC",
+    16: "INVREQ",
+    17: "IOERR",
+    22: "LENGERR",
+    26: "PGMIDERR",
+    27: "TRANSIDERR",
+    28: "ENDDATA",
+    29: "INVTSREQ",
+    31: "NOTAUTH",
+    39: "NOTOPEN",
+    44: "DISABLED",
+    61: "NOSPOOL",
+    69: "SYSBUSY",
+    70: "SESSBUSY",
+    81: "EXPIRED",
+    84: "TERMERR",
+}
+
+# Regex for extracting RESP/RESP2 from EXEC CICS blocks
+_RESP_RE = re.compile(r"RESP\s*\(\s*'?([^')]+)'?\s*\)", re.IGNORECASE)
+_RESP2_RE = re.compile(r"RESP2\s*\(\s*'?([^')]+)'?\s*\)", re.IGNORECASE)
+
+
 # Regex patterns for extracting CICS metadata from raw statement text
 _SEND_MAP_RE = re.compile(
     r"SEND\s+MAP\s*\(\s*'?([^')]+)'?\s*\)", re.IGNORECASE,
@@ -303,4 +334,59 @@ def generate_cics_template(program: CobolProgram) -> str | None:
         "",
     ])
 
+    # RESP/RESP2 error handling mapping
+    resp_fields = _extract_resp_fields(program)
+    if resp_fields:
+        lines.extend([
+            "",
+            "",
+            "# --- CICS RESP Error Handling ---",
+            "# Map CICS RESP codes to Python exception handling.",
+            "CICS_RESP_CODES = {",
+        ])
+        for code, name in sorted(CICS_RESP_CODES.items()):
+            lines.append(f"    {code}: '{name}',")
+        lines.append("}")
+        lines.extend([
+            "",
+            "",
+            "def check_cics_resp(resp_value, operation=''):",
+            "    \"\"\"Check CICS RESP code and raise on error.\"\"\"",
+            "    code_name = CICS_RESP_CODES.get(resp_value, f'UNKNOWN({resp_value})')",
+            "    if resp_value != 0:",
+            "        raise RuntimeError(",
+            "            f'CICS {operation} failed: RESP={resp_value} ({code_name})'",
+            "        )",
+            "",
+        ])
+        for resp_var, resp2_var in resp_fields:
+            py_resp = _to_python_name(resp_var)
+            lines.extend([
+                f"# RESP variable: {resp_var} -> self.data.{py_resp}",
+            ])
+            if resp2_var:
+                py_resp2 = _to_python_name(resp2_var)
+                lines.append(
+                    f"# RESP2 variable: {resp2_var} -> self.data.{py_resp2}"
+                )
+
     return "\n".join(lines)
+
+
+def _extract_resp_fields(
+    program: CobolProgram,
+) -> list[tuple[str, str]]:
+    """Extract (RESP-var, RESP2-var) pairs from CICS blocks."""
+    texts = _collect_cics_texts(program)
+    pairs: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for text in texts:
+        resp_m = _RESP_RE.search(text)
+        if resp_m:
+            resp_var = resp_m.group(1).strip()
+            if resp_var not in seen:
+                seen.add(resp_var)
+                resp2_m = _RESP2_RE.search(text)
+                resp2_var = resp2_m.group(1).strip() if resp2_m else ""
+                pairs.append((resp_var, resp2_var))
+    return pairs

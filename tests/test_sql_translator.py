@@ -154,7 +154,7 @@ class TestStripExecBlocksReturnsBlocks:
 
     def test_single_sql_block(self):
         raw = "       EXEC SQL SELECT * FROM TABLE END-EXEC\n"
-        text, blocks = strip_exec_blocks(raw)
+        text, blocks, *_ = strip_exec_blocks(raw)
         assert "TODO(high)" in text
         assert len(blocks) == 1
         assert blocks[0].sql_type == "SELECT"
@@ -168,7 +168,7 @@ class TestStripExecBlocksReturnsBlocks:
             "       EXEC SQL CLOSE C1 END-EXEC\n"
             "       EXEC SQL COMMIT END-EXEC\n"
         )
-        text, blocks = strip_exec_blocks(raw)
+        text, blocks, *_ = strip_exec_blocks(raw)
         assert len(blocks) == 6
         types = [b.sql_type for b in blocks]
         assert types == ["INCLUDE", "DECLARE", "OPEN", "FETCH", "CLOSE", "COMMIT"]
@@ -178,13 +178,13 @@ class TestStripExecBlocksReturnsBlocks:
             "       EXEC CICS SEND MAP('MENU') END-EXEC\n"
             "       EXEC SQL COMMIT END-EXEC\n"
         )
-        text, blocks = strip_exec_blocks(raw)
+        text, blocks, *_ = strip_exec_blocks(raw)
         assert len(blocks) == 1
         assert blocks[0].sql_type == "COMMIT"
 
     def test_no_exec_blocks_empty_list(self):
         raw = "       MOVE 1 TO WS-A.\n"
-        text, blocks = strip_exec_blocks(raw)
+        text, blocks, *_ = strip_exec_blocks(raw)
         assert len(blocks) == 0
         assert "MOVE 1 TO WS-A" in text
 

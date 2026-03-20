@@ -61,7 +61,7 @@ class TestExecStrippingUnconditional:
     def test_strip_exec_blocks_public(self):
         """strip_exec_blocks is a public function."""
         raw = "       EXEC CICS SEND MAP('MENU') END-EXEC."
-        result, _ = strip_exec_blocks(raw)
+        result, *_ = strip_exec_blocks(raw)
         assert "TODO(high)" in result
         assert "Original:" in result  # preserves original text in comment
         assert "Hint:" in result  # provides Python-equivalent hint
@@ -191,7 +191,7 @@ class TestRecursiveCopy:
         outer.write_text("       COPY INNER.\n       01 WS-OUTER PIC X(5).\n")
 
         raw = "       COPY OUTER.\n"
-        result, _ = resolve_copies(raw, copybook_paths=[str(tmp_path)])
+        result, *_ = resolve_copies(raw, copybook_paths=[str(tmp_path)])
         assert "WS-INNER" in result
         assert "WS-OUTER" in result
         # Inner COPY should be resolved, not left as COPY statement
@@ -204,7 +204,7 @@ class TestRecursiveCopy:
 
         raw = "       COPY SELFREF.\n"
         # Should terminate (max 10 passes) and still contain the data item
-        result, _ = resolve_copies(raw, copybook_paths=[str(tmp_path)])
+        result, *_ = resolve_copies(raw, copybook_paths=[str(tmp_path)])
         assert "WS-X" in result
 
 
@@ -349,31 +349,31 @@ class TestEbcdic:
 class TestExecHints:
     def test_cics_send_hint(self):
         raw = "       EXEC CICS SEND MAP('MENU') END-EXEC."
-        result, _ = strip_exec_blocks(raw)
+        result, *_ = strip_exec_blocks(raw)
         assert "Hint:" in result
         assert "print()" in result or "template" in result
 
     def test_sql_select_hint(self):
         raw = "       EXEC SQL SELECT * FROM CUSTOMER END-EXEC."
-        result, _ = strip_exec_blocks(raw)
+        result, *_ = strip_exec_blocks(raw)
         assert "EXEC SQL hint:" in result
         assert "cursor.execute" in result
 
     def test_cics_return_hint(self):
         raw = "       EXEC CICS RETURN END-EXEC."
-        result, _ = strip_exec_blocks(raw)
+        result, *_ = strip_exec_blocks(raw)
         assert "Hint:" in result
         assert "return" in result
 
     def test_unknown_verb_no_hint(self):
         """Unknown verbs should not crash, just omit hint."""
         raw = "       EXEC CICS XYZZY END-EXEC."
-        result, _ = strip_exec_blocks(raw)
+        result, *_ = strip_exec_blocks(raw)
         assert "TODO(high)" in result
         # No hint for unknown verb
         assert "Hint:" not in result
 
     def test_sql_commit_hint(self):
         raw = "       EXEC SQL COMMIT END-EXEC."
-        result, _ = strip_exec_blocks(raw)
+        result, *_ = strip_exec_blocks(raw)
         assert "connection.commit()" in result

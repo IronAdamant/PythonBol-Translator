@@ -270,7 +270,8 @@ class TestScreenSectionMapper:
         assert "SCREEN SECTION" in code
         assert "SCREEN: MAIN-SCREEN" in code
         assert "BLANK SCREEN" in code
-        assert 'TODO(high): implement screen I/O' in code
+        # Screen I/O is now implemented with ANSI escape sequences
+        assert "SCREEN:" in code
 
     def test_display_screen_generates_print(self):
         code = self._generate()

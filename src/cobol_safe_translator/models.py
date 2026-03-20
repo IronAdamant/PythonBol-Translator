@@ -105,6 +105,29 @@ class SqlBlock:
     whenever_action: str = ""  # CONTINUE, GO TO, etc.
 
 
+# --- DLI block model ---
+
+@dataclass
+class DliBlock:
+    """An extracted EXEC DLI block with parsed metadata."""
+    dli_type: str  # GU, GN, GNP, GHU, GHN, ISRT, REPL, DLET
+    raw_dli: str
+    segment_name: str = ""
+    pcb_name: str = ""
+    ssa_fields: list[str] = field(default_factory=list)  # segment search args
+    host_variables: list[str] = field(default_factory=list)
+    paragraph_name: str = ""
+
+
+# --- Custom ALPHABET model ---
+
+@dataclass
+class AlphabetDefinition:
+    """A custom alphabet from SPECIAL-NAMES (e.g. ALPHABET MY-ALPHA IS ...)."""
+    name: str
+    definition: str  # "EBCDIC", "STANDARD-1", "STANDARD-2", "NATIVE", or literal sequence
+
+
 # --- Top-level program model ---
 
 @dataclass
@@ -206,6 +229,12 @@ class CobolProgram:
 
     # Extracted EXEC SQL blocks (structured metadata for code generation)
     sql_blocks: list[SqlBlock] = field(default_factory=list)
+
+    # Extracted EXEC DLI blocks (structured metadata for code generation)
+    dli_blocks: list[DliBlock] = field(default_factory=list)
+
+    # Custom ALPHABET definitions from SPECIAL-NAMES
+    alphabet_definitions: list[AlphabetDefinition] = field(default_factory=list)
 
     # Nested/concatenated programs within the same source file
     nested_programs: list[CobolProgram] = field(default_factory=list)

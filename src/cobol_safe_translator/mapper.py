@@ -51,6 +51,18 @@ class PythonMapper(CodegenMixin, ScreenCodegenMixin, VerbTranslationMixin):
     def __init__(self, software_map: SoftwareMap) -> None:
         self.program = software_map.program
         self.smap = software_map
+        # Collation settings (used by _imports and sort_translators)
+        coll_seq = getattr(self.program, 'collating_sequence', 'NATIVE').upper()
+        self._use_ebcdic = coll_seq == 'EBCDIC'
+        self._custom_alphabet = ""
+        if not self._use_ebcdic and coll_seq not in ("NATIVE", "STANDARD-1", "STANDARD-2"):
+            for adef in getattr(self.program, 'alphabet_definitions', []):
+                if adef.name == coll_seq:
+                    if adef.definition.upper() == "EBCDIC":
+                        self._use_ebcdic = True
+                    else:
+                        self._custom_alphabet = adef.definition
+                    break
         self._sensitive_names: set[str] = {
             f.data_name.upper() for f in software_map.sensitivities
         }
@@ -150,6 +162,10 @@ class PythonMapper(CodegenMixin, ScreenCodegenMixin, VerbTranslationMixin):
         # GO TO — translate to method call + return
         if verb == "GO":
             return self._translate_goto(stmt.operands, stmt.raw_text)
+
+        # ALTER — dynamic GO TO target modification
+        if verb == "ALTER":
+            return self._translate_alter(stmt.operands)
 
         # Fallback IF/EVALUATE (when block translator can't handle them)
         if verb == "IF":

@@ -374,7 +374,7 @@ def resolve_copies(
     if search:
         result = _resolve_copy_statements(result, search)
 
-    # Always strip EXEC blocks (also extracts SqlBlock metadata)
-    result, sql_blocks = strip_exec_blocks(result)
+    # Always strip EXEC blocks (also extracts SqlBlock/DliBlock metadata)
+    result, sql_blocks, dli_blocks = strip_exec_blocks(result)
 
-    return result, sql_blocks
+    return result, sql_blocks, dli_blocks
