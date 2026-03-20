@@ -46,8 +46,7 @@ def translate_display(
                 no_advancing = True
             operands = operands[:i]  # WITH is always a clause marker, never a data name
             break
-    for op in operands:
-        parts.append(resolve(op))
+    parts = [resolve(op) for op in operands]
     end_kwarg = ", end=''" if no_advancing else ""
     if parts:
         return [f"print({', '.join(parts)}, sep=''{end_kwarg})"]
@@ -122,10 +121,7 @@ def translate_move(ops: list[str]) -> list[str]:
         fig = FIGURATIVE_RESOLVE.get(source.upper())
         src_expr = fig if fig is not None else _resolve_operand(source)
 
-    results: list[str] = []
-    for t in targets:
-        results.append(f"{_resolve_target(t)}.set({src_expr})")
-    return results
+    return [f"{_resolve_target(t)}.set({src_expr})" for t in targets]
 
 
 def _parse_varying_clause(

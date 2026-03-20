@@ -151,10 +151,7 @@ def translate_multiply(
         targets = [t for t in raw_targets if t.upper() not in _ARITHMETIC_KEYWORDS]
         if not targets:
             return [f"# MULTIPLY: missing target operand: {' '.join(ops)}"]
-        results = []
-        for t in targets:
-            results.append(f"{_resolve_target(t)}.multiply({source})")
-        return results
+        return [f"{_resolve_target(t)}.multiply({source})" for t in targets]
     return [f"# MULTIPLY: could not parse operands: {' '.join(ops)}"]
 
 
@@ -210,10 +207,7 @@ def translate_divide(
         targets = [t for t in raw_targets if t.upper() not in _ARITHMETIC_KEYWORDS]
         if not targets:
             return [f"# DIVIDE: missing target operand: {' '.join(ops)}"]
-        results: list[str] = []
-        for t in targets:
-            results.append(f"{_resolve_target(t)}.divide({divisor})")
-        return results
+        return [f"{_resolve_target(t)}.divide({divisor})" for t in targets]
     if "BY" in upper_ops:
         by_idx = upper_ops.index("BY")
         if by_idx == 0:

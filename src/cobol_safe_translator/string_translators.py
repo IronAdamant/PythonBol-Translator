@@ -357,7 +357,6 @@ def translate_inspect(
                 lines.append(f"self.data.{py_counter}.set(len(str({field_expr}.value)))")
         else:
             # Apply BEFORE/AFTER bounds then count
-            op = "{sub}" if not search_char else "{sub}"
             lines.extend(_emit_bounded_op(field_expr, before_expr, after_expr, "{sub}", "_region"))
             if search_char:
                 char_expr = resolve(search_char)

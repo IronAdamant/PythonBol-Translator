@@ -17,7 +17,7 @@ from pathlib import Path
 
 from . import batch as _batch
 from .analyzer import analyze
-from .cli import bold, green, red, yellow, _to_python_filename
+from .cli import bold, green, red, _to_python_filename
 from .mapper import generate_python
 from .parser import parse_cobol_file
 from .validation import validate_generated_python

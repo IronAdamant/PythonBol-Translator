@@ -13,7 +13,7 @@ import json
 import re
 from pathlib import Path
 
-from .models import CobolProgram, DataItem, Paragraph, SoftwareMap
+from .models import CobolProgram, DataItem, Paragraph
 from .analyzer import analyze
 from .mapper import generate_python, PythonMapper
 from .parser import parse_cobol_file
