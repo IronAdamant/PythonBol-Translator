@@ -73,6 +73,7 @@ class CodegenMixin:
 
     def generate(self) -> str:
         """Generate the complete Python module source."""
+        self._use_ebcdic = getattr(self.program, 'collating_sequence', 'NATIVE').upper() == 'EBCDIC'
         self._program_id = self.program.program_id or "UNNAMED"
         self._class_name = _to_python_name(self._program_id).title().replace("_", "")
         parts: list[str] = []
@@ -192,17 +193,14 @@ class CodegenMixin:
         lines.append("")
         return "\n".join(lines)
 
-    def _data_item_fields(
-        self, item: DataItem, indent: int = 1, parent_occurs: list[int] | None = None,
-        parent_group: str | None = None,
-    ) -> list[str]:
-        """Generate dataclass fields for a data item and its children."""
-        lines: list[str] = []
-        prefix = "    " * indent
-        py_name = _to_python_name(item.name)
+    def _resolve_field_name(self, item: DataItem, parent_group: str | None) -> str:
+        """Resolve a data item's Python field name with collision and dedup handling.
 
-        # Build the occurs chain (outer -> inner nesting)
-        occurs_chain = (parent_occurs or []) + ([item.occurs] if item.occurs else [])
+        Qualifies colliding names with the parent group prefix and deduplicates
+        repeated names (e.g., multiple FILLER items).  Updates ``self._qualified_map``
+        and ``self._field_name_counts`` as side effects.
+        """
+        py_name = _to_python_name(item.name)
 
         # Qualify colliding names with parent group prefix
         if (py_name in self._colliding_names and parent_group
@@ -218,6 +216,16 @@ class CodegenMixin:
             py_name = f"{py_name}_{count}"
         else:
             self._field_name_counts[py_name] = 0
+
+        return py_name
+
+    def _emit_item_annotations(self, item: DataItem, prefix: str) -> list[str]:
+        """Generate metadata comment lines for a data item.
+
+        Includes sensitivity warnings and attribute annotations (EXTERNAL,
+        GLOBAL, JUSTIFIED, BLANK WHEN ZERO, OCCURS DEPENDING).
+        """
+        lines: list[str] = []
 
         # Sensitivity warning
         if item.name.upper() in self._sensitive_names:
@@ -239,6 +247,76 @@ class CodegenMixin:
         if item.occurs_depending:
             lines.append(f"{prefix}# OCCURS DEPENDING ON {item.occurs_depending} — dynamic array sizing")
 
+        return lines
+
+    def _generate_pic_field(
+        self, item: DataItem, py_name: str, prefix: str, occurs_chain: list[int],
+    ) -> list[str]:
+        """Generate the field definition for a PIC-based data item."""
+        lines: list[str] = []
+        usage_upper = (item.usage or "").upper()
+
+        # COMP-1/COMP-2 -> float (single/double precision floating-point)
+        if usage_upper in ("COMP-1", "COMP-2", "COMPUTATIONAL-1", "COMPUTATIONAL-2"):
+            inner = "0.0"
+            type_name = "float"
+        # COMP-5 -> native binary int (no PIC-based truncation)
+        elif usage_upper in ("COMP-5", "COMPUTATIONAL-5"):
+            inner = "0"
+            type_name = "int"
+        elif item.pic.category in (PicCategory.NUMERIC, PicCategory.EDITED):
+            dec = item.pic.decimals
+            int_digits = item.pic.size - dec
+            signed = "True" if item.pic.signed else "False"
+            init = resolve_figurative(item.value, numeric=True) if item.value else "0"
+            inner = f"CobolDecimal({int_digits}, {dec}, {signed}, {init!r})"
+            type_name = "CobolDecimal"
+        else:
+            init = resolve_figurative(item.value, numeric=False) if item.value else ""
+            ebcdic_arg = ", ebcdic=True" if getattr(self, '_use_ebcdic', False) else ""
+            inner = f"CobolString({item.pic.size}, {init!r}{ebcdic_arg})"
+            type_name = "CobolString"
+
+        if occurs_chain:
+            expr = _wrap_occurs(inner, occurs_chain)
+            lines.append(
+                f"{prefix}{py_name}: list = field(default_factory=lambda: {expr})"
+            )
+        else:
+            if type_name in ("float", "int"):
+                lines.append(f"{prefix}{py_name}: {type_name} = {inner}")
+            else:
+                lines.append(
+                    f"{prefix}{py_name}: {type_name} = field(default_factory=lambda: {inner})"
+                )
+
+        return lines
+
+    def _generate_index_field(
+        self, py_name: str, prefix: str, occurs_chain: list[int],
+    ) -> list[str]:
+        """Generate the field definition for an INDEX usage item."""
+        lines: list[str] = []
+        if occurs_chain:
+            expr = _wrap_occurs("1", occurs_chain)
+            lines.append(
+                f"{prefix}{py_name}: list = field(default_factory=lambda: {expr})"
+            )
+        else:
+            lines.append(f"{prefix}{py_name}: int = 1")
+        return lines
+
+    def _data_item_fields(
+        self, item: DataItem, indent: int = 1, parent_occurs: list[int] | None = None,
+        parent_group: str | None = None,
+    ) -> list[str]:
+        """Generate dataclass fields for a data item and its children."""
+        prefix = "    " * indent
+        occurs_chain = (parent_occurs or []) + ([item.occurs] if item.occurs else [])
+        py_name = self._resolve_field_name(item, parent_group)
+
+        lines: list[str] = self._emit_item_annotations(item, prefix)
+
         if item.children:
             # Group item — add a comment
             lines.append(f"{prefix}# Group: {item.name} (level {item.level:02d})")
@@ -247,49 +325,9 @@ class CodegenMixin:
             for child in item.children:
                 lines.extend(self._data_item_fields(child, indent, occurs_chain, item.name))
         elif item.pic:
-            usage_upper = (item.usage or "").upper()
-
-            # COMP-1/COMP-2 -> float (single/double precision floating-point)
-            if usage_upper in ("COMP-1", "COMP-2", "COMPUTATIONAL-1", "COMPUTATIONAL-2"):
-                inner = "0.0"
-                type_name = "float"
-            # COMP-5 -> native binary int (no PIC-based truncation)
-            elif usage_upper in ("COMP-5", "COMPUTATIONAL-5"):
-                inner = "0"
-                type_name = "int"
-            elif item.pic.category in (PicCategory.NUMERIC, PicCategory.EDITED):
-                dec = item.pic.decimals
-                int_digits = item.pic.size - dec
-                signed = "True" if item.pic.signed else "False"
-                init = resolve_figurative(item.value, numeric=True) if item.value else "0"
-                inner = f"CobolDecimal({int_digits}, {dec}, {signed}, {init!r})"
-                type_name = "CobolDecimal"
-            else:
-                init = resolve_figurative(item.value, numeric=False) if item.value else ""
-                inner = f"CobolString({item.pic.size}, {init!r})"
-                type_name = "CobolString"
-
-            if occurs_chain:
-                expr = _wrap_occurs(inner, occurs_chain)
-                lines.append(
-                    f"{prefix}{py_name}: list = field(default_factory=lambda: {expr})"
-                )
-            else:
-                if type_name in ("float", "int"):
-                    lines.append(f"{prefix}{py_name}: {type_name} = {inner}")
-                else:
-                    lines.append(
-                        f"{prefix}{py_name}: {type_name} = field(default_factory=lambda: {inner})"
-                    )
+            lines.extend(self._generate_pic_field(item, py_name, prefix, occurs_chain))
         elif item.usage and item.usage.upper() == "INDEX":
-            # INDEX usage -- 1-based index value (no PIC needed)
-            if occurs_chain:
-                expr = _wrap_occurs("1", occurs_chain)
-                lines.append(
-                    f"{prefix}{py_name}: list = field(default_factory=lambda: {expr})"
-                )
-            else:
-                lines.append(f"{prefix}{py_name}: int = 1")
+            lines.extend(self._generate_index_field(py_name, prefix, occurs_chain))
         else:
             # No PIC — group-level or filler
             lines.append(f"{prefix}# {item.name}: no PIC clause (group level)")

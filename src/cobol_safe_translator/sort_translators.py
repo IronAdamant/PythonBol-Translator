@@ -144,12 +144,16 @@ def compute_field_offsets(items: list[DataItem]) -> dict[str, tuple[int, int, bo
 def _build_key_lambda(
     keys: list[tuple[str, list[str]]],
     field_offsets: dict[str, tuple[int, int, bool]] | None = None,
+    use_ebcdic: bool = False,
 ) -> str:
     """Build a Python lambda for sorted() key from ASCENDING/DESCENDING keys.
 
     When *field_offsets* is provided, generates substring extraction from
     fixed-format string records. Falls back to whole-string comparison
     when field offset information is unavailable.
+
+    When *use_ebcdic* is True, string accessors are wrapped with
+    ``ebcdic_key()`` so that sorting uses EBCDIC collation order.
     """
     if not keys:
         return ""
@@ -166,13 +170,21 @@ def _build_key_lambda(
                         f"if isinstance(r, str) else r['{_to_python_name(f)}'])"
                     )
                 else:
-                    accessor = (
+                    raw_accessor = (
                         f"(r[{start}:{end}] "
                         f"if isinstance(r, str) else r['{_to_python_name(f)}'])"
                     )
+                    if use_ebcdic:
+                        accessor = f"ebcdic_key({raw_accessor})"
+                    else:
+                        accessor = raw_accessor
             else:
                 py = _to_python_name(f)
-                accessor = f"(r['{py}'] if isinstance(r, dict) else str(r))"
+                raw_accessor = f"(r['{py}'] if isinstance(r, dict) else str(r))"
+                if use_ebcdic:
+                    accessor = f"ebcdic_key({raw_accessor})"
+                else:
+                    accessor = raw_accessor
             parts.append(accessor)
     if len(parts) == 1:
         return f"key=lambda r: {parts[0]}"
@@ -188,14 +200,15 @@ def _emit_sort_call(
     keys: list[tuple[str, list[str]]],
     target: str,
     field_offsets: dict[str, tuple[int, int, bool]] | None = None,
+    use_ebcdic: bool = False,
 ) -> list[str]:
     """Emit one or two lines that sort *target* in place using *keys*."""
     if not keys:
         return [f"{target}.sort()"]
     if _all_descending(keys):
         asc = [("ASCENDING", fs) for _, fs in keys]
-        return [f"{target}.sort({_build_key_lambda(asc, field_offsets)}, reverse=True)"]
-    return [f"{target}.sort({_build_key_lambda(keys, field_offsets)})"]
+        return [f"{target}.sort({_build_key_lambda(asc, field_offsets, use_ebcdic)}, reverse=True)"]
+    return [f"{target}.sort({_build_key_lambda(keys, field_offsets, use_ebcdic)})"]
 
 
 def _emit_read_loop(py_file: str, list_var: str) -> list[str]:
@@ -236,12 +249,16 @@ def _emit_proc_call(proc: tuple[str, str | None], label: str) -> list[str]:
 def translate_sort(
     ops: list[str],
     file_section: list[DataItem] | None = None,
+    use_ebcdic: bool = False,
 ) -> list[str]:
     """Translate SORT verb to Python.
 
     When *file_section* is provided, field offsets are computed from the SD
     record definition so the sort lambda extracts fields by column position
     instead of sorting whole lines.
+
+    When *use_ebcdic* is True, string sort keys are wrapped with
+    ``ebcdic_key()`` for EBCDIC collation order.
     """
     if not ops:
         return ["# SORT: no operands"]
@@ -276,7 +293,7 @@ def translate_sort(
         lines.append(f"{rec_var} = []")
         for uf in using:
             lines.extend(_emit_read_loop(_to_python_name(uf), rec_var))
-        lines.extend(_emit_sort_call(keys, rec_var, field_offsets))
+        lines.extend(_emit_sort_call(keys, rec_var, field_offsets, use_ebcdic))
         for gf in giving:
             lines.extend(_emit_write_loop(_to_python_name(gf), rec_var))
         return lines
@@ -286,7 +303,7 @@ def translate_sort(
         lines.append(f"{rec_var} = []")
         for uf in using:
             lines.extend(_emit_read_loop(_to_python_name(uf), rec_var))
-        lines.extend(_emit_sort_call(keys, rec_var, field_offsets))
+        lines.extend(_emit_sort_call(keys, rec_var, field_offsets, use_ebcdic))
         lines.append(f"self._sort_sorted = list({rec_var})")
         lines.extend(_emit_proc_call(out_proc, "OUTPUT PROCEDURE"))
         return lines
@@ -295,7 +312,7 @@ def translate_sort(
     if in_proc and giving:
         lines.append(f"self._sort_work = []")
         lines.extend(_emit_proc_call(in_proc, "INPUT PROCEDURE"))
-        lines.extend(_emit_sort_call(keys, f"self._sort_work", field_offsets))
+        lines.extend(_emit_sort_call(keys, f"self._sort_work", field_offsets, use_ebcdic))
         for gf in giving:
             lines.extend(_emit_write_loop(_to_python_name(gf), f"self._sort_work"))
         return lines
@@ -304,7 +321,7 @@ def translate_sort(
     if in_proc and out_proc:
         lines.append(f"self._sort_work = []")
         lines.extend(_emit_proc_call(in_proc, "INPUT PROCEDURE"))
-        lines.extend(_emit_sort_call(keys, f"self._sort_work", field_offsets))
+        lines.extend(_emit_sort_call(keys, f"self._sort_work", field_offsets, use_ebcdic))
         lines.append(f"self._sort_sorted = list(self._sort_work)")
         lines.extend(_emit_proc_call(out_proc, "OUTPUT PROCEDURE"))
         return lines

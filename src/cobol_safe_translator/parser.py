@@ -108,6 +108,9 @@ _RECORD_KEY_RE = re.compile(
 _ALT_KEY_RE = re.compile(
     r"ALTERNATE\s+RECORD\s+KEY\s+(?:IS\s+)?([\w-]+)", re.IGNORECASE,
 )
+_COLLATING_RE = re.compile(
+    r"PROGRAM\s+COLLATING\s+SEQUENCE\s+(?:IS\s+)?([\w-]+)", re.IGNORECASE,
+)
 
 
 def parse_environment(lines: list[str]) -> list[FileControl]:
@@ -494,6 +497,14 @@ def _parse_single_program(
 
     program_id, author = parse_identification(divisions["IDENTIFICATION"])
     file_controls = parse_environment(divisions["ENVIRONMENT"])
+
+    # Extract PROGRAM COLLATING SEQUENCE from ENVIRONMENT DIVISION
+    collating_sequence = "NATIVE"
+    env_combined = " ".join(l.strip() for l in divisions["ENVIRONMENT"])
+    coll_m = _COLLATING_RE.search(env_combined)
+    if coll_m:
+        collating_sequence = coll_m.group(1).upper()
+
     data_lines = divisions["DATA"]
     file_section, working_storage, linkage_section, report_section, local_storage = parse_data_division(data_lines)
     screen_lines = _extract_screen_lines(data_lines)
@@ -504,6 +515,7 @@ def _parse_single_program(
         program_id=program_id,
         source_path=source_path,
         author=author,
+        collating_sequence=collating_sequence,
         file_controls=file_controls,
         file_section=file_section,
         working_storage=working_storage,

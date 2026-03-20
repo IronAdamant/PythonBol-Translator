@@ -220,7 +220,7 @@ class CobolString:
         val = self._compare_value(other)
         if val is None:
             return NotImplemented
-        return self._self_padded(other) == val
+        return self._cmp_key(self._self_padded(other)) == self._cmp_key(val)
 
     def __lt__(self, other: object) -> bool:
         val = self._compare_value(other)

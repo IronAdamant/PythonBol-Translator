@@ -94,7 +94,7 @@ class PythonMapper(CodegenMixin, ScreenCodegenMixin, VerbTranslationMixin):
             "UNSTRING": lambda s: strt.translate_unstring(s.operands, self._resolve_operand),
             "INSPECT": lambda s: strt.translate_inspect(s.operands, self._resolve_operand),
             "INITIALIZE": lambda s: st.translate_initialize(s.operands),
-            "SORT": lambda s: sort_t.translate_sort(s.operands, self.program.file_section),
+            "SORT": lambda s: sort_t.translate_sort(s.operands, self.program.file_section, getattr(self.program, 'collating_sequence', 'NATIVE').upper() == 'EBCDIC'),
             "MERGE": lambda s: sort_t.translate_merge(s.operands),
             "RELEASE": lambda s: sort_t.translate_release(s.operands),
             "RETURN": lambda s: sort_t.translate_return_verb(s.operands, s.raw_text),
@@ -307,18 +307,23 @@ class PythonMapper(CodegenMixin, ScreenCodegenMixin, VerbTranslationMixin):
                 from_idx = upper_ops.index("FROM")
                 if from_idx + 1 < len(ops):
                     source = ops[from_idx + 1]
-            return [
-                f"# JSON GENERATE {target} FROM {source}",
-                f"import json",
-                f"# TODO(high): {_to_python_name(target)} = json.dumps(field_mapping)",
-            ]
+            py_target = _to_python_name(target)
+            py_source = _to_python_name(source) if source else py_target
+            lines = ["import json"]
+            # Build a dict from the source group's fields
+            lines.append(f"_json_data = {{k: str(getattr(self.data.{py_source}, k, '')) for k in vars(self.data.{py_source}) if not k.startswith('_')}}")
+            lines.append(f"self.data.{py_target}.set(json.dumps(_json_data))")
+            return lines
         if sub == "PARSE":
             source = ops[1] if len(ops) > 1 else "SOURCE"
-            return [
-                f"# JSON PARSE {source}",
-                f"import json",
-                f"# TODO(high): parsed = json.loads({_to_python_name(source)})",
-            ]
+            py_source = _to_python_name(source)
+            lines = ["import json"]
+            lines.append(f"_parsed = json.loads(str(self.data.{py_source}.value))")
+            lines.append(f"for _k, _v in _parsed.items():")
+            lines.append(f"    _field = getattr(self.data, _k, None)")
+            lines.append(f"    if _field is not None and hasattr(_field, 'set'):")
+            lines.append(f"        _field.set(_v)")
+            return lines
         return [f"# TODO(high): unsupported JSON sub-verb {sub}", f"# {raw}"]
 
     def _translate_xml(self, ops: list[str], raw: str) -> list[str]:
@@ -337,18 +342,26 @@ class PythonMapper(CodegenMixin, ScreenCodegenMixin, VerbTranslationMixin):
                 from_idx = upper_ops.index("FROM")
                 if from_idx + 1 < len(ops):
                     source = ops[from_idx + 1]
-            return [
-                f"# XML GENERATE {target} FROM {source}",
-                f"import xml.etree.ElementTree as ET",
-                f"# TODO(high): build XML from {_to_python_name(source or target)} fields using ET",
-            ]
+            py_target = _to_python_name(target)
+            py_source = _to_python_name(source) if source else py_target
+            lines = ["import xml.etree.ElementTree as ET"]
+            lines.append(f"_root = ET.Element('{py_source}')")
+            lines.append(f"for _k in vars(self.data.{py_source}):")
+            lines.append(f"    if not _k.startswith('_'):")
+            lines.append(f"        _el = ET.SubElement(_root, _k)")
+            lines.append(f"        _el.text = str(getattr(self.data.{py_source}, _k, ''))")
+            lines.append(f"self.data.{py_target}.set(ET.tostring(_root, encoding='unicode'))")
+            return lines
         if sub == "PARSE":
             source = ops[1] if len(ops) > 1 else "SOURCE"
-            return [
-                f"# XML PARSE {source}",
-                f"import xml.etree.ElementTree as ET",
-                f"# TODO(high): tree = ET.fromstring({_to_python_name(source)})",
-            ]
+            py_source = _to_python_name(source)
+            lines = ["import xml.etree.ElementTree as ET"]
+            lines.append(f"_tree = ET.fromstring(str(self.data.{py_source}.value))")
+            lines.append(f"for _el in _tree:")
+            lines.append(f"    _field = getattr(self.data, _el.tag, None)")
+            lines.append(f"    if _field is not None and hasattr(_field, 'set'):")
+            lines.append(f"        _field.set(_el.text or '')")
+            return lines
         return [f"# TODO(high): unsupported XML sub-verb {sub}", f"# {raw}"]
 
 

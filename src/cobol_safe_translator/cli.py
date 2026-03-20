@@ -226,7 +226,8 @@ def _translate_single(src: Path, out_dir: Path, config: str | None,
                       copy_paths: list[str] | None = None,
                       validate: bool = False,
                       tests: bool = False,
-                      incremental: bool = False) -> int:
+                      incremental: bool = False,
+                      ebcdic: bool = False) -> int:
     """Translate one COBOL file to Python; write to out_dir."""
     if incremental:
         return _translate_single_incremental(
@@ -238,6 +239,9 @@ def _translate_single(src: Path, out_dir: Path, config: str | None,
     rc, program, smap = _parse_and_analyze(args, "Translating")
     if rc != 0 or program is None or smap is None:
         return rc
+
+    if ebcdic:
+        program.collating_sequence = "EBCDIC"
 
     python_source = generate_python(smap)
 
@@ -440,6 +444,7 @@ def cmd_translate(args: argparse.Namespace) -> int:
     validate = args.validate
     tests = args.tests
     incremental = args.incremental
+    ebcdic = args.ebcdic
 
     if p.is_dir():
         # Package mode: unified Python package with cross-program imports
@@ -467,12 +472,14 @@ def cmd_translate(args: argparse.Namespace) -> int:
         def process(src: Path, out_dir: Path) -> int:
             return _translate_single(
                 src, out_dir, config, copy_paths, validate, tests, incremental,
+                ebcdic,
             )
 
         return _batch.run_batch(p, base_out, args.recursive, process)
 
     return _translate_single(
         p, Path(args.output), config, copy_paths, validate, tests, incremental,
+        ebcdic,
     )
 
 
@@ -534,6 +541,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--config", "-c", default=None, help="Path to protected.json config")
     common.add_argument("--recursive", "-r", action="store_true", help="Recurse into subdirectories")
     common.add_argument("--copybook-path", "-I", action="append", default=[], help="COPY copybook search dir (repeatable)")
+    common.add_argument("--ebcdic", action="store_true", help="Use EBCDIC collating sequence for string comparisons")
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 

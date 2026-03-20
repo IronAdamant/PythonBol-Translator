@@ -187,6 +187,7 @@ class CobolProgram:
 
     # IDENTIFICATION
     author: str = ""
+    collating_sequence: str = "NATIVE"  # NATIVE, EBCDIC, or custom alphabet name
 
     # ENVIRONMENT
     file_controls: list[FileControl] = field(default_factory=list)

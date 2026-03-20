@@ -220,8 +220,7 @@ def translate_divide(
         if by_idx + 1 >= len(ops):
             return [f"# DIVIDE BY: missing divisor: {' '.join(ops)}"]
         divisor = resolve(ops[by_idx + 1])
-        return [f"# TODO(high): DIVIDE BY without GIVING — manual translation required",
-                f"# {dividend} / {divisor}"]
+        return [f"{_resolve_target(ops[0])}.divide({divisor})"]
     return [f"# DIVIDE: could not parse operands: {' '.join(ops)}"]
 
 
