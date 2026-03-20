@@ -197,4 +197,6 @@ class TestEdgeCases:
 
     def test_unbalanced_parens(self):
         result = translate_condition("(WS-A > 5", {})
-        assert result == "True"
+        # Auto-fix: appends missing closing paren
+        assert "self.data.ws_a.value > 5" in result
+        assert result.count("(") == result.count(")")

@@ -11,6 +11,7 @@ Pipeline position: Called by mapper.py._translate_condition()
 
 from __future__ import annotations
 
+from .function_translators import translate_function_intrinsic
 from .utils import resolve_operand
 
 _CMP_OPS = frozenset({">", "<", "==", "!=", ">=", "<="})
@@ -182,6 +183,14 @@ def _handle_not(tokens: list[str], i: int, n: int, result: list[str],
             subj = result.pop() if result else "True"
             result.append(f"not str({subj}).isalpha()")
             return i + 2
+        if nxt == 'ALPHABETIC-UPPER':
+            subj = result.pop() if result else "True"
+            result.append(f"not (str({subj}).isupper() and str({subj}).isalpha())")
+            return i + 2
+        if nxt == 'ALPHABETIC-LOWER':
+            subj = result.pop() if result else "True"
+            result.append(f"not (str({subj}).islower() and str({subj}).isalpha())")
+            return i + 2
         if nxt in condition_lookup:
             parent, val = condition_lookup[nxt]
             result.append(_condition_88_expr(parent, val, negate=True))
@@ -287,13 +296,42 @@ def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) ->
             i += 2  # skip OF/IN + group-name
             continue
         if t == 'FUNCTION':
-            # COBOL intrinsic function: FUNCTION NUMVAL(x) etc.
-            # Can't translate — use 0 as placeholder
             if i + 1 < n:
-                i += 2  # skip FUNCTION + function-name
+                func_token = tokens[i + 1]
+                paren_pos = func_token.find('(')
+                consumed = 2
+                if paren_pos >= 0:
+                    func_name = func_token[:paren_pos]
+                    raw_inner = func_token[paren_pos + 1:]
+                    if raw_inner.endswith(')'):
+                        raw_inner = raw_inner[:-1]
+                    raw_args = raw_inner.strip()
+                else:
+                    func_name = func_token
+                    raw_args = ''
+                    if i + 2 < n and tokens[i + 2] == '(':
+                        arg_parts: list[str] = []
+                        j = i + 3
+                        depth = 1
+                        while j < n and depth > 0:
+                            if tokens[j] == '(':
+                                depth += 1
+                            elif tokens[j] == ')':
+                                depth -= 1
+                                if depth == 0:
+                                    break
+                            arg_parts.append(tokens[j])
+                            j += 1
+                        raw_args = ' '.join(arg_parts)
+                        consumed = j + 1 - i
+                translated = translate_function_intrinsic(
+                    func_name, raw_args, resolve_operand,
+                )
+                result.append(translated if translated else '0')
+                i += consumed
             else:
+                result.append('0')
                 i += 1
-            result.append("0")
             continue
         if t == 'NOT':
             i = _handle_not(tokens, i, n, result, condition_lookup)
@@ -306,6 +344,16 @@ def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) ->
         if t == 'ALPHABETIC':
             subj = result.pop() if result else "True"
             result.append(f"str({subj}).isalpha()")
+            i += 1
+            continue
+        if t == 'ALPHABETIC-UPPER':
+            subj = result.pop() if result else "True"
+            result.append(f"(str({subj}).isupper() and str({subj}).isalpha())")
+            i += 1
+            continue
+        if t == 'ALPHABETIC-LOWER':
+            subj = result.pop() if result else "True"
+            result.append(f"(str({subj}).islower() and str({subj}).isalpha())")
             i += 1
             continue
         if t in _SIGN_WORDS and result:
@@ -347,27 +395,87 @@ def _translate_inner(cond: str, condition_lookup: dict[str, tuple[str, str]]) ->
 
 
 def _fix_not_grouping(tokens: list[str]) -> list[str]:
-    """Wrap 'not X op Y' patterns into 'not (X op Y)' for correct precedence."""
+    """Wrap 'not X op Y ...' patterns into 'not (X op Y ...)' for correct precedence."""
     fixed: list[str] = []
     j = 0
     while j < len(tokens):
-        if (tokens[j] == "not" and j + 3 < len(tokens)
-                and tokens[j + 2] in _CMP_OPS and tokens[j + 1] != '('):
-            fixed.extend(["not", "(", tokens[j + 1], tokens[j + 2], tokens[j + 3], ")"])
-            j += 4
+        if tokens[j] == "not" and j + 1 < len(tokens) and tokens[j + 1] == '(':
+            # Already parenthesized — pass through
+            fixed.append(tokens[j])
+            j += 1
+        elif (tokens[j] == "not" and j + 3 < len(tokens)
+                and tokens[j + 2] in _CMP_OPS):
+            # Collect RHS: may be multi-token (e.g., not X == Y and Z)
+            fixed.extend(["not", "(", tokens[j + 1], tokens[j + 2]])
+            k = j + 3
+            # Grab tokens until we hit and/or/end
+            while k < len(tokens) and tokens[k] not in ('and', 'or'):
+                fixed.append(tokens[k])
+                k += 1
+            fixed.append(")")
+            j = k
         else:
             fixed.append(tokens[j])
             j += 1
     return fixed
 
 
+def _fix_unbalanced_parens(expr: str) -> str:
+    """Auto-fix unbalanced parentheses."""
+    opens = expr.count('(')
+    closes = expr.count(')')
+    if opens > closes:
+        expr += ')' * (opens - closes)
+    elif closes > opens:
+        # Strip trailing orphan close parens
+        diff = closes - opens
+        while diff > 0 and expr.endswith(')'):
+            expr = expr[:-1].rstrip()
+            diff -= 1
+    return expr
+
+
+def _fix_double_operators(expr: str) -> str:
+    """Deduplicate consecutive identical operators (e.g., '== ==' → '==')."""
+    import re
+    expr = re.sub(r'(==\s*){2,}', '== ', expr)
+    expr = re.sub(r'(!=\s*){2,}', '!= ', expr)
+    expr = re.sub(r'\band\s+and\b', 'and', expr)
+    expr = re.sub(r'\bor\s+or\b', 'or', expr)
+    expr = re.sub(r'\bnot\s+not\b', 'not', expr)
+    return expr
+
+
+def _fix_trailing_operator(expr: str) -> str:
+    """Strip dangling operator at end of expression."""
+    import re
+    return re.sub(r'\s+(==|!=|>=|<=|>|<|and|or|not)\s*$', '', expr)
+
+
 def _validate_condition(joined: str) -> str:
-    """Validate that a translated condition is syntactically valid Python."""
-    if joined.count("(") != joined.count(")"):
+    """Validate translated condition, attempting auto-fixes on SyntaxError."""
+    if not joined:
         return "True"
-    if joined and joined != "True":
-        try:
-            compile(joined, '<cond>', 'eval')
-        except SyntaxError:
-            return "True"
-    return joined if joined else "True"
+    if joined == "True":
+        return joined
+
+    # First attempt: try as-is
+    fixed = _fix_unbalanced_parens(joined)
+    try:
+        compile(fixed, '<cond>', 'eval')
+        return fixed
+    except SyntaxError:
+        pass
+
+    # Second attempt: fix double operators and trailing operators
+    fixed = _fix_double_operators(fixed)
+    fixed = _fix_trailing_operator(fixed)
+    fixed = _fix_unbalanced_parens(fixed)
+    try:
+        compile(fixed, '<cond>', 'eval')
+        return fixed
+    except SyntaxError:
+        pass
+
+    # All recovery failed
+    return "True  # condition could not be translated"

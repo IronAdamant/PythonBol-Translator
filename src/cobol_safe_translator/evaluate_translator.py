@@ -303,9 +303,88 @@ def translate_inline_evaluate(
     resolve_operand_fn: Callable[[str], str],
     indent: int = 0,
 ) -> list[str]:
-    """Translate an inline EVALUATE (all packed in one statement)."""
-    return [
-        _indent_line(f"# EVALUATE (inline, too complex for auto-translation):", indent),
-        _indent_line(f"# {stmt.raw_text}", indent),
-        _indent_line(f"# TODO(high): translate inline EVALUATE manually", indent),
-    ]
+    """Translate an inline EVALUATE (all packed in one statement).
+
+    Splits operands on WHEN keywords and generates if/elif/else.
+    Falls back to a TODO comment for unparseable cases.
+    """
+    ops = list(stmt.operands)
+    upper = _upper_ops(ops)
+
+    # Find WHEN positions
+    when_indices = [i for i, t in enumerate(upper) if t == "WHEN"]
+    if not when_indices:
+        return [
+            _indent_line(f"# EVALUATE (inline): {stmt.raw_text}", indent),
+            _indent_line(f"# TODO(high): no WHEN found in inline EVALUATE", indent),
+        ]
+
+    # Subject is everything before first WHEN
+    subj_tokens = ops[:when_indices[0]]
+    subj_text = " ".join(subj_tokens).strip().upper()
+    is_true_subject = subj_text == "TRUE"
+    subject_expr = None
+    if not is_true_subject and subj_tokens:
+        subject_expr = resolve_operand_fn(subj_tokens[0])
+
+    # Split into WHEN clauses: each clause is (value_tokens, body_tokens)
+    clauses: list[tuple[list[str], list[str]]] = []
+    for ci, wi in enumerate(when_indices):
+        # End of this clause is start of next WHEN or end of ops
+        next_wi = when_indices[ci + 1] if ci + 1 < len(when_indices) else len(ops)
+        clause_tokens = ops[wi + 1:next_wi]
+        # Separate value from body: body starts after value tokens
+        # For EVALUATE TRUE, entire clause is a condition + body statements
+        # For simple cases, value is first token, rest is body
+        if not clause_tokens:
+            continue
+        if clause_tokens[0].upper() == "OTHER":
+            clauses.append((["OTHER"], clause_tokens[1:]))
+        elif is_true_subject:
+            # For EVALUATE TRUE, try to find where condition ends and body begins
+            # Heuristic: body starts at first COBOL verb
+            _verbs = frozenset({
+                'MOVE', 'DISPLAY', 'PERFORM', 'ADD', 'SUBTRACT', 'MULTIPLY',
+                'DIVIDE', 'COMPUTE', 'SET', 'CALL', 'GO', 'STOP', 'STRING',
+                'UNSTRING', 'INSPECT', 'ACCEPT', 'READ', 'WRITE', 'OPEN',
+                'CLOSE', 'INITIALIZE', 'EVALUATE', 'IF', 'CONTINUE',
+            })
+            split_at = len(clause_tokens)
+            for si, st in enumerate(clause_tokens):
+                if st.upper() in _verbs:
+                    split_at = si
+                    break
+            clauses.append((clause_tokens[:split_at], clause_tokens[split_at:]))
+        else:
+            clauses.append(([clause_tokens[0]], clause_tokens[1:]))
+
+    if not clauses:
+        return [
+            _indent_line(f"# EVALUATE (inline): {stmt.raw_text}", indent),
+            _indent_line(f"# TODO(high): could not parse inline EVALUATE clauses", indent),
+        ]
+
+    lines: list[str] = []
+    for ci, (val_tokens, body_tokens) in enumerate(clauses):
+        val_upper = [v.upper() for v in val_tokens]
+        if val_upper == ["OTHER"]:
+            if ci > 0:
+                lines.append(_indent_line("else:", indent))
+            else:
+                lines.append(_indent_line("if True:  # WHEN OTHER", indent))
+        else:
+            if is_true_subject:
+                cond = translate_cond_fn(" ".join(val_tokens))
+            elif subject_expr:
+                cond = f"{subject_expr} == {resolve_operand_fn(val_tokens[0])}"
+            else:
+                cond = "True"
+            prefix = "if" if ci == 0 else "elif"
+            lines.append(_indent_line(f"{prefix} {cond}:", indent))
+
+        if body_tokens:
+            lines.append(_indent_line(f"pass  # {' '.join(body_tokens)}", indent + 1))
+        else:
+            lines.append(_indent_line("pass", indent + 1))
+
+    return lines

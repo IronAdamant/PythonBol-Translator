@@ -143,7 +143,7 @@ cobol2py test program.cob
 
 ```bash
 pytest tests/ -v
-# 1,004 tests covering parser, analyzer, mapper, conditions, blocks, SEARCH,
+# 1,028 tests covering parser, analyzer, mapper, conditions, blocks, SEARCH,
 # SORT/MERGE, FUNCTION intrinsics, REPORT WRITER, SCREEN SECTION, COPY expansion,
 # nested programs, group MOVE, SQL translation, adapters, CLI, batch, validation,
 # and 60+ behavioral end-to-end tests

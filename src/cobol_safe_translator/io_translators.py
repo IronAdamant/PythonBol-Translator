@@ -28,11 +28,24 @@ def translate_accept(ops: list[str], raw: str) -> list[str]:
         from_idx = upper_ops.index("FROM")
         source = upper_ops[from_idx + 1] if from_idx + 1 < len(upper_ops) else ""
         if source == "DATE":
+            # Check for YYYYMMDD modifier (4-digit year variant)
+            next_token = upper_ops[from_idx + 2] if from_idx + 2 < len(upper_ops) else ""
+            if next_token == "YYYYMMDD":
+                return [
+                    "import datetime as _dt",
+                    f"self.data.{target}.set(_dt.datetime.now().strftime('%Y%m%d'))",
+                ]
             return [
                 "import datetime as _dt",
                 f"self.data.{target}.set(_dt.datetime.now().strftime('%y%m%d'))",
             ]
         if source == "DAY":
+            next_token = upper_ops[from_idx + 2] if from_idx + 2 < len(upper_ops) else ""
+            if next_token == "YYYYDDD":
+                return [
+                    "import datetime as _dt",
+                    f"self.data.{target}.set(_dt.datetime.now().strftime('%Y%j'))",
+                ]
             return [
                 "import datetime as _dt",
                 f"self.data.{target}.set(_dt.datetime.now().strftime('%y%j'))",

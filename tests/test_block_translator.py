@@ -160,10 +160,11 @@ class TestTranslateInlineIf:
 # --- translate_inline_evaluate ---
 
 class TestTranslateInlineEvaluate:
-    def test_emits_todo(self):
+    def test_basic_inline_evaluate(self):
         stmt = _make("EVALUATE", "TRUE", "WHEN", "WS-A", ">", "0")
         lines = translate_inline_evaluate(stmt, _cond, _resolve, indent=0)
-        assert any("TODO(high)" in line for line in lines)
+        combined = "\n".join(lines)
+        assert "if" in combined
 
 
 # --- translate_if_block ---

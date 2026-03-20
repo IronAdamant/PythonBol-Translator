@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .function_translators import translate_function_intrinsic
+from .function_translators import _resolve_expr_ext, translate_function_intrinsic
 from .utils import _is_numeric_literal, _upper_ops, resolve_target as _resolve_target
 
 
@@ -288,82 +288,15 @@ def translate_compute(
         targets = [t for t in ops[:eq_idx] if t.upper() != "ROUNDED"]
         expr_parts = ops[eq_idx + 1:]
 
-        # Detect LENGTH OF pattern — translate to len()
-        resolved: list[str] = []
-        i = 0
-        while i < len(expr_parts):
-            part = expr_parts[i]
-            upper_part = part.upper()
-            # Free-format compiler directives (>>ELSE, >>END-IF) — stop here
-            if part.startswith(">>"):
-                break
-            # COPY statement leaked into COMPUTE — stop here
-            if upper_part == "COPY":
-                break
-            # FUNCTION intrinsic — translate known functions inline
-            if upper_part == "FUNCTION" and i + 1 < len(expr_parts):
-                func_token = expr_parts[i + 1]
-                # Split function name from parenthesized arguments
-                paren_pos = func_token.find("(")
-                consumed = 2  # FUNCTION + func_name/func_name(args)
-                if paren_pos >= 0:
-                    func_name = func_token[:paren_pos]
-                    raw_inner = func_token[paren_pos + 1:]
-                    if raw_inner.endswith(")"):
-                        raw_inner = raw_inner[:-1]
-                    raw_args = raw_inner.strip()
-                else:
-                    func_name = func_token
-                    raw_args = ""
-                    # Check for space-separated parens: FUNCTION LENGTH ( args )
-                    if i + 2 < len(expr_parts) and expr_parts[i + 2] == "(":
-                        # Collect tokens until closing )
-                        arg_tokens: list[str] = []
-                        j = i + 3
-                        depth = 1
-                        while j < len(expr_parts) and depth > 0:
-                            if expr_parts[j] == "(":
-                                depth += 1
-                            elif expr_parts[j] == ")":
-                                depth -= 1
-                                if depth == 0:
-                                    break
-                            arg_tokens.append(expr_parts[j])
-                            j += 1
-                        raw_args = " ".join(arg_tokens)
-                        consumed = j + 1 - i  # skip past closing )
-                translated = translate_function_intrinsic(func_name, raw_args, resolve)
-                if translated is not None:
-                    resolved.append(translated)
-                else:
-                    # Use bare 0 — no inline comment (would break expressions)
-                    resolved.append("0")
-                i += consumed
-            elif upper_part == "LENGTH" and i + 2 < len(expr_parts) and expr_parts[i + 1].upper() == "OF":
-                field = expr_parts[i + 2]
-                resolved.append(f"len(str({resolve(field)}))")
-                i += 3
-            elif upper_part in ('OF', 'IN') and i + 1 < len(expr_parts):
-                # Qualification: skip OF/IN and the group name
-                i += 2
-            elif part in _COMPUTE_OPERATORS:
-                resolved.append(part)
-                i += 1
-            elif upper_part in _BITWISE_OPS:
-                resolved.append(_BITWISE_OPS[upper_part])
-                i += 1
-            else:
-                resolved.append(resolve(part))
-                i += 1
-        # Strip trailing operator (from multi-line COMPUTE split at line boundary)
-        while resolved and resolved[-1] in ('+', '-', '*', '/', '&', '|', '^', '<<', '>>'):
-            resolved.pop()
-        expr = " ".join(resolved)
-        if not expr:
+        if not expr_parts:
             return [
                 f"# COMPUTE: {' '.join(ops)}",
                 f"# TODO(high): COMPUTE has no right-hand side — manual translation required",
             ]
+        # Resolve expression via unified walker
+        expr, has_unknown_func = _resolve_expr_ext(
+            " ".join(expr_parts), resolve,
+        )
         # Validate expression syntax — emit TODO on parse failure
         try:
             compile(expr, '<compute>', 'eval')
@@ -373,9 +306,11 @@ def translate_compute(
                 f"# TODO(high): expression could not be translated — manual review required",
             ]
         results = [f"# COMPUTE: {' '.join(ops)}"]
+        if has_unknown_func:
+            results.append(f"# TODO(high): unknown FUNCTION intrinsic replaced with 0 — verify")
         for t in targets:
             results.append(
-                f"{_resolve_target(t)}.set({expr}{rounded_arg})  # TODO(high): verify expression translation"
+                f"{_resolve_target(t)}.set({expr}{rounded_arg})"
             )
         return results
     return [f"# COMPUTE: could not parse operands: {' '.join(ops)}"]

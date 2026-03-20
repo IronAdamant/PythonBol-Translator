@@ -87,6 +87,12 @@ _FUNCTION_INTRINSICS_VAR: dict[str, str] = {
 _EXPR_OPERATORS = frozenset({'+', '-', '*', '/', '**', '(', ')'})
 _ARITH_EXPR_OPS = frozenset({'+', '-', '*', '/', '**'})
 
+# COBOL bitwise operators → Python equivalents
+_BITWISE_OPS: dict[str, str] = {
+    "B-AND": "&", "B-OR": "|", "B-XOR": "^", "B-NOT": "~",
+    "B-SHIFT-L": "<<", "B-SHIFT-R": ">>",
+}
+
 
 def _split_args_by_comma(raw_args: str) -> list[str] | None:
     """Split function arguments by comma at top-level paren depth.
@@ -217,33 +223,77 @@ def _resolve_expr(expr: str, resolve: Callable[[str], str]) -> str:
     Walks tokens left-to-right:
     - Operators and parens pass through
     - FUNCTION keyword triggers recursive intrinsic translation
+    - LENGTH OF pattern translates to len()
+    - Bitwise operators (B-AND, B-OR, etc.) map to Python equivalents
+    - Free-format directives (>>) and COPY leaks terminate parsing
     - Numeric literals pass through
     - Everything else is resolved as a data name
+
+    Returns: (python_expr, had_unknown_func) tuple when called as
+    _resolve_expr_ext(), or just python_expr from _resolve_expr().
     """
+    py_expr, _ = _resolve_expr_ext(expr, resolve)
+    return py_expr
+
+
+def _resolve_expr_ext(expr: str, resolve: Callable[[str], str]) -> tuple[str, bool]:
+    """Resolve COBOL expression to Python. Returns (expr, had_unknown_func)."""
     tokens = _tokenize_expr(expr)
     if not tokens:
-        return '0'
+        return '0', False
     result: list[str] = []
+    had_unknown_func = False
     i = 0
-    while i < len(tokens):
+    n = len(tokens)
+    while i < n:
         tok = tokens[i]
         upper = tok.upper()
+
+        # Free-format compiler directives (>>ELSE, >>END-IF) — stop
+        if tok.startswith('>>'):
+            break
+        # COPY statement leaked into expression — stop
+        if upper == 'COPY':
+            break
 
         if tok in _EXPR_OPERATORS:
             result.append(tok)
             i += 1
-        elif upper in ('OF', 'IN') and i + 1 < len(tokens):
+        elif upper in _BITWISE_OPS:
+            result.append(_BITWISE_OPS[upper])
+            i += 1
+        elif upper in ('OF', 'IN') and i + 1 < n:
             # OF/IN qualification: skip qualifier and group name
             i += 2
-        elif upper == 'FUNCTION' and i + 1 < len(tokens):
-            # Nested FUNCTION call
-            func_name = tokens[i + 1]
-            if i + 2 < len(tokens) and tokens[i + 2] == '(':
+        elif upper == 'LENGTH' and i + 2 < n and tokens[i + 1].upper() == 'OF':
+            field = tokens[i + 2]
+            result.append(f"len(str({resolve(field)}))")
+            i += 3
+        elif upper == 'FUNCTION' and i + 1 < n:
+            # FUNCTION call — handle attached parens, space-separated parens, or no-arg
+            func_token = tokens[i + 1]
+            paren_pos = func_token.find('(')
+            if paren_pos >= 0:
+                # Attached parens: FUNCTION LENGTH(WS-TEXT)
+                func_name = func_token[:paren_pos]
+                raw_inner = func_token[paren_pos + 1:]
+                if raw_inner.endswith(')'):
+                    raw_inner = raw_inner[:-1]
+                raw_args = raw_inner.strip()
+                translated = translate_function_intrinsic(func_name, raw_args, resolve)
+                if translated is not None:
+                    result.append(translated)
+                else:
+                    result.append('0')
+                    had_unknown_func = True
+                i += 2
+            elif i + 2 < n and tokens[i + 2] == '(':
                 # Space-separated parens: collect until matching )
+                func_name = func_token
                 arg_parts: list[str] = []
                 j = i + 3
                 depth = 1
-                while j < len(tokens) and depth > 0:
+                while j < n and depth > 0:
                     if tokens[j] == '(':
                         depth += 1
                     elif tokens[j] == ')':
@@ -256,12 +306,21 @@ def _resolve_expr(expr: str, resolve: Callable[[str], str]) -> str:
                 translated = translate_function_intrinsic(
                     func_name, nested_args, resolve
                 )
-                result.append(translated if translated is not None else '0')
+                if translated is not None:
+                    result.append(translated)
+                else:
+                    result.append('0')
+                    had_unknown_func = True
                 i = j + 1
             else:
                 # No-arg function
+                func_name = func_token
                 translated = translate_function_intrinsic(func_name, '', resolve)
-                result.append(translated if translated is not None else '0')
+                if translated is not None:
+                    result.append(translated)
+                else:
+                    result.append('0')
+                    had_unknown_func = True
                 i += 2
         elif _is_numeric_literal(tok):
             result.append(tok)
@@ -273,7 +332,12 @@ def _resolve_expr(expr: str, resolve: Callable[[str], str]) -> str:
             result.append(resolve(tok))
             i += 1
 
-    return ' '.join(result) if result else '0'
+    # Strip trailing operator (from multi-line COMPUTE split at line boundary)
+    while result and result[-1] in ('+', '-', '*', '/', '&', '|', '^', '<<', '>>'):
+        result.pop()
+
+    py_expr = ' '.join(result) if result else '0'
+    return py_expr, had_unknown_func
 
 
 def translate_function_intrinsic(

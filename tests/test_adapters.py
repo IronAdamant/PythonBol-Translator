@@ -641,3 +641,84 @@ class TestIndexedFileAdapter:
         assert fa.status == "00"
         assert fa.eof is False
         assert fa._mode is None
+
+    def test_open_extend_appends(self, tmp_path):
+        """OPEN EXTEND adds records without clearing existing data."""
+        db_file = str(tmp_path / "extend.dat")
+        fa = IndexedFileAdapter(db_file, record_key="id")
+        fa.open_output()
+        fa.write("First", key="001")
+        fa.close()
+
+        fa.open_extend()
+        fa.write("Second", key="002")
+        fa.close()
+
+        fa.open_input()
+        assert fa.read() == "First"
+        assert fa.read() == "Second"
+        assert fa.read() is None
+        fa.close()
+
+    def test_start_less_than(self, tmp_path):
+        """START with LESS positions before the specified key."""
+        db_file = str(tmp_path / "less.dat")
+        fa = IndexedFileAdapter(db_file, record_key="id", access_mode="DYNAMIC")
+        fa.open_output()
+        fa.write("Alpha", key="A01")
+        fa.write("Beta", key="B01")
+        fa.write("Gamma", key="C01")
+        fa.close()
+
+        fa.open_input()
+        fa.start(key="C01", comparison="LESS")
+        assert fa.status == "00"
+        rec = fa.read()
+        # Should read record before C01
+        assert rec in ("Alpha", "Beta")
+        fa.close()
+
+    def test_start_not_less(self, tmp_path):
+        """START with NOT LESS (>=) positions at or after the specified key."""
+        db_file = str(tmp_path / "notless.dat")
+        fa = IndexedFileAdapter(db_file, record_key="id", access_mode="DYNAMIC")
+        fa.open_output()
+        fa.write("Alpha", key="A01")
+        fa.write("Beta", key="B01")
+        fa.write("Gamma", key="C01")
+        fa.close()
+
+        fa.open_input()
+        fa.start(key="B01", comparison="NOT LESS")
+        assert fa.status == "00"
+        assert fa.read() == "Beta"
+        assert fa.read() == "Gamma"
+        fa.close()
+
+    def test_persistence_across_open_close(self, tmp_path):
+        """Data persists after close and is readable on re-open."""
+        db_file = str(tmp_path / "persist.dat")
+        fa = IndexedFileAdapter(db_file, record_key="id")
+        fa.open_output()
+        fa.write("Persistent", key="P01")
+        fa.close()
+
+        # Create a completely new adapter instance
+        fa2 = IndexedFileAdapter(db_file, record_key="id")
+        fa2.open_input()
+        assert fa2.read() == "Persistent"
+        fa2.close()
+
+    def test_start_past_end_then_read_gives_eof(self, tmp_path):
+        """START past all records means next READ returns EOF."""
+        db_file = str(tmp_path / "past_end.dat")
+        fa = IndexedFileAdapter(db_file, record_key="id", access_mode="DYNAMIC")
+        fa.open_output()
+        fa.write("Only", key="A01")
+        fa.close()
+
+        fa.open_input()
+        fa.start(key="Z99", comparison="GREATER")
+        assert fa.read() is None
+        assert fa.eof is True
+        fa.close()
