@@ -282,6 +282,97 @@ class GroupView:
             offset += sz
 
 
+class RedefinesAlias:
+    """Alias for a REDEFINES field — shares storage with the original item.
+
+    When WS-B REDEFINES WS-A, both fields refer to the same underlying
+    bytes. This class wraps the original field and reinterprets its
+    value according to the REDEFINES item's PIC clause.
+    """
+
+    def __init__(
+        self,
+        original: CobolDecimal | CobolString,
+        size: int,
+        is_numeric: bool = False,
+        decimals: int = 0,
+    ) -> None:
+        self._original = original
+        self._size = size
+        self._is_numeric = is_numeric
+        self._decimals = decimals
+
+    @property
+    def value(self) -> str | Decimal:
+        raw = str(self._original.value).ljust(self._size)[:self._size]
+        if self._is_numeric:
+            stripped = raw.strip()
+            try:
+                if self._decimals:
+                    return Decimal(stripped) if stripped else Decimal(0)
+                return Decimal(int(stripped)) if stripped else Decimal(0)
+            except (ValueError, ArithmeticError):
+                return Decimal(0)
+        return raw
+
+    def set(self, val: str | int | float | Decimal) -> None:
+        self._original.set(val)
+
+    def __str__(self) -> str:
+        return str(self.value)
+
+    def __repr__(self) -> str:
+        return f"RedefinesAlias({self._original!r}, size={self._size})"
+
+
+class RedefinesSlice:
+    """A slice of a group REDEFINES — reads/writes to a byte range.
+
+    When a group item REDEFINES another item, each child field maps
+    to a specific byte offset within the original item's value.
+    """
+
+    def __init__(
+        self,
+        original: CobolDecimal | CobolString,
+        offset: int,
+        size: int,
+        is_numeric: bool = False,
+        decimals: int = 0,
+    ) -> None:
+        self._original = original
+        self._offset = offset
+        self._size = size
+        self._is_numeric = is_numeric
+        self._decimals = decimals
+
+    @property
+    def value(self) -> str | Decimal:
+        raw = str(self._original.value).ljust(self._offset + self._size)
+        chunk = raw[self._offset:self._offset + self._size]
+        if self._is_numeric:
+            stripped = chunk.strip()
+            try:
+                if self._decimals:
+                    return Decimal(stripped) if stripped else Decimal(0)
+                return Decimal(int(stripped)) if stripped else Decimal(0)
+            except (ValueError, ArithmeticError):
+                return Decimal(0)
+        return chunk
+
+    def set(self, val: str | int | float | Decimal) -> None:
+        raw = str(self._original.value).ljust(self._offset + self._size)
+        new_val = str(val).ljust(self._size)[:self._size]
+        new_raw = raw[:self._offset] + new_val + raw[self._offset + self._size:]
+        self._original.set(new_raw)
+
+    def __str__(self) -> str:
+        return str(self.value)
+
+    def __repr__(self) -> str:
+        return f"RedefinesSlice(offset={self._offset}, size={self._size})"
+
+
 class FileAdapter:
     """File adapter for generated code with read and write support.
 

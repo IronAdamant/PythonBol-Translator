@@ -141,6 +141,9 @@ class CodegenMixin:
         adapter_imports = "CobolDecimal, CobolString, FileAdapter"
         if has_indexed:
             adapter_imports += ", IndexedFileAdapter"
+        # Add REDEFINES adapters if any data items use REDEFINES
+        if self._has_redefines(self.program.all_data_items):
+            adapter_imports += ", RedefinesAlias, RedefinesSlice"
         lines = [
             "from __future__ import annotations",
             "",
@@ -201,6 +204,26 @@ class CodegenMixin:
         for (field_name, _group), py_name in self._qualified_map.items():
             reverse[field_name].append(py_name)
         _utils._collision_reverse_map = dict(reverse)
+
+        # Emit __post_init__ to wire REDEFINES aliases to originals
+        wiring = getattr(self, '_redefines_wiring', [])
+        if wiring:
+            lines.append("")
+            lines.append("    def __post_init__(self) -> None:")
+            lines.append('        """Wire REDEFINES aliases to their original fields."""')
+            for field_py, orig_py, offset, sz, is_num, decs in wiring:
+                if offset == -1:
+                    # RedefinesAlias — whole field
+                    lines.append(
+                        f"        object.__setattr__(self, '{field_py}', "
+                        f"RedefinesAlias(self.{orig_py}, {sz}, {is_num}, {decs}))"
+                    )
+                else:
+                    # RedefinesSlice — byte range
+                    lines.append(
+                        f"        object.__setattr__(self, '{field_py}', "
+                        f"RedefinesSlice(self.{orig_py}, {offset}, {sz}, {is_num}, {decs}))"
+                    )
 
         # Append SCREEN SECTION layout as comments
         screen_comments = self._screen_layout_comments()
@@ -324,6 +347,16 @@ class CodegenMixin:
             lines.append(f"{prefix}{py_name}: int = 1")
         return lines
 
+    @staticmethod
+    def _has_redefines(items: list[DataItem]) -> bool:
+        """Check if any data item uses REDEFINES."""
+        for item in items:
+            if item.redefines:
+                return True
+            if item.children and CodegenMixin._has_redefines(item.children):
+                return True
+        return False
+
     def _data_item_fields(
         self, item: DataItem, indent: int = 1, parent_occurs: list[int] | None = None,
         parent_group: str | None = None,
@@ -334,6 +367,12 @@ class CodegenMixin:
         py_name = self._resolve_field_name(item, parent_group)
 
         lines: list[str] = self._emit_item_annotations(item, prefix)
+
+        # REDEFINES — emit alias pointing to the original field
+        if item.redefines:
+            return lines + self._generate_redefines_field(
+                item, py_name, prefix, parent_group,
+            )
 
         if item.children:
             # Group item — add a comment
@@ -349,6 +388,73 @@ class CodegenMixin:
         else:
             # No PIC — group-level or filler
             lines.append(f"{prefix}# {item.name}: no PIC clause (group level)")
+
+        return lines
+
+    def _generate_redefines_field(
+        self, item: DataItem, py_name: str, prefix: str,
+        parent_group: str | None,
+    ) -> list[str]:
+        """Generate REDEFINES alias fields."""
+        original_py = _to_python_name(item.redefines)
+        lines: list[str] = []
+        lines.append(f"{prefix}# REDEFINES {item.redefines}")
+
+        if item.children:
+            # Group REDEFINES — each child is a RedefinesSlice
+            offset = 0
+            for child in item.children:
+                child_py = self._resolve_field_name(child, item.name)
+                if child.pic:
+                    is_num = child.pic.category.name in ("NUMERIC", "EDITED")
+                    decs = child.pic.decimals
+                    sz = child.pic.size
+                    lines.append(
+                        f"{prefix}{child_py}: RedefinesSlice = field("
+                        f"default_factory=lambda: RedefinesSlice("
+                        f"None, {offset}, {sz}, {is_num}, {decs}))"
+                    )
+                    # Track for __post_init__ wiring
+                    if not hasattr(self, '_redefines_wiring'):
+                        self._redefines_wiring = []
+                    self._redefines_wiring.append(
+                        (child_py, original_py, offset, sz, is_num, decs)
+                    )
+                    offset += sz
+                elif child.children:
+                    # Nested group within REDEFINES — recurse as slices
+                    for grandchild in child.children:
+                        if grandchild.pic:
+                            gc_py = self._resolve_field_name(grandchild, child.name)
+                            gc_num = grandchild.pic.category.name in ("NUMERIC", "EDITED")
+                            gc_decs = grandchild.pic.decimals
+                            gc_sz = grandchild.pic.size
+                            lines.append(
+                                f"{prefix}{gc_py}: RedefinesSlice = field("
+                                f"default_factory=lambda: RedefinesSlice("
+                                f"None, {offset}, {gc_sz}, {gc_num}, {gc_decs}))"
+                            )
+                            if not hasattr(self, '_redefines_wiring'):
+                                self._redefines_wiring = []
+                            self._redefines_wiring.append(
+                                (gc_py, original_py, offset, gc_sz, gc_num, gc_decs)
+                            )
+                            offset += gc_sz
+        elif item.pic:
+            # Elementary REDEFINES — whole-field alias
+            is_num = item.pic.category.name in ("NUMERIC", "EDITED")
+            decs = item.pic.decimals
+            sz = item.pic.size
+            lines.append(
+                f"{prefix}{py_name}: RedefinesAlias = field("
+                f"default_factory=lambda: RedefinesAlias("
+                f"None, {sz}, {is_num}, {decs}))"
+            )
+            if not hasattr(self, '_redefines_wiring'):
+                self._redefines_wiring = []
+            self._redefines_wiring.append(
+                (py_name, original_py, -1, sz, is_num, decs)  # -1 = alias, not slice
+            )
 
         return lines
 

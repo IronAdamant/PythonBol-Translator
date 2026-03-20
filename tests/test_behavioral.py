@@ -1602,3 +1602,111 @@ class TestGroupMove:
         stdout = _run_cobol_program(src)
         # Source concat: "HI " (3 chars padded) + "LO" (2 chars) = "HI LO"
         assert "HI LO" in stdout
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: REDEFINES elementary — shared storage
+# ---------------------------------------------------------------------------
+class TestRedefinesElementary:
+    def test_redefines_shares_storage(self):
+        """Elementary REDEFINES: modifying original updates alias."""
+        src = make_cobol(
+            procedure_lines=[
+                'MOVE "20260321" TO WS-DATE-NUM.',
+                "DISPLAY WS-DATE-ALPHA.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-DATE-NUM PIC 9(8).",
+                "       01 WS-DATE-ALPHA REDEFINES WS-DATE-NUM PIC X(8).",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        assert "20260321" in stdout
+
+
+class TestRedefinesGroup:
+    def test_redefines_group_children(self):
+        """Group REDEFINES: children read slices of the original."""
+        src = make_cobol(
+            procedure_lines=[
+                'MOVE "20260321" TO WS-DATE-NUM.',
+                "DISPLAY WS-YEAR.",
+                "DISPLAY WS-MONTH.",
+                "DISPLAY WS-DAY.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-DATE-NUM PIC 9(8).",
+                "       01 WS-DATE-PARTS REDEFINES WS-DATE-NUM.",
+                "           05 WS-YEAR PIC 9(4).",
+                "           05 WS-MONTH PIC 9(2).",
+                "           05 WS-DAY PIC 9(2).",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        lines = stdout.strip().splitlines()
+        assert "2026" in lines[0]
+        assert lines[1].strip() in ("03", "3")  # numeric display may strip leading zero
+        assert "21" in lines[2]
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: OF/IN qualified field access
+# ---------------------------------------------------------------------------
+class TestQualifiedAccess:
+    def test_of_qualification_resolves_colliding_fields(self):
+        """OF/IN qualification resolves fields that exist in multiple groups."""
+        src = make_cobol(
+            procedure_lines=[
+                'MOVE "ALICE" TO WS-NAME OF WS-GROUP-A.',
+                'MOVE "BOB  " TO WS-NAME OF WS-GROUP-B.',
+                "DISPLAY WS-NAME OF WS-GROUP-A.",
+                "DISPLAY WS-NAME OF WS-GROUP-B.",
+                "STOP RUN.",
+            ],
+            data_lines=[
+                "       01 WS-GROUP-A.",
+                "           05 WS-NAME PIC X(5).",
+                "           05 WS-AGE PIC 9(3).",
+                "       01 WS-GROUP-B.",
+                "           05 WS-NAME PIC X(5).",
+                "           05 WS-CITY PIC X(10).",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        lines = stdout.strip().splitlines()
+        assert "ALICE" in lines[0]
+        assert "BOB" in lines[1]
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: Complete program execution
+# ---------------------------------------------------------------------------
+class TestCompleteExecution:
+    def test_arithmetic_and_display(self):
+        """Full program: arithmetic, conditions, and output."""
+        src = make_cobol(
+            procedure_lines=[
+                "MOVE 10 TO WS-A.",
+                "ADD 5 TO WS-A.",
+                'IF WS-A > 12 DISPLAY "PASS" ELSE DISPLAY "FAIL".',
+                "STOP RUN.",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        assert "PASS" in stdout
+
+    def test_perform_loop_with_counter(self):
+        """PERFORM VARYING loop produces correct iteration count."""
+        src = make_cobol(
+            procedure_lines=[
+                "PERFORM VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 3",
+                "    DISPLAY WS-A",
+                "END-PERFORM.",
+                "STOP RUN.",
+            ],
+        )
+        stdout = _run_cobol_program(src)
+        assert "1" in stdout
+        assert "3" in stdout

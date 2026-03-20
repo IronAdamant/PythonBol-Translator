@@ -19,6 +19,43 @@ _qualified_field_map: dict[tuple[str, str], str] = {}
 _collision_reverse_map: dict[str, list[str]] = {}
 
 
+def coalesce_qualified(ops: list[str]) -> list[str]:
+    """Merge OF/IN qualified names into single operands.
+
+    Converts ['WS-NAME', 'OF', 'WS-GROUP-A', 'TO', 'WS-B']
+    into     ['WS-NAME OF WS-GROUP-A', 'TO', 'WS-B'].
+    Supports multi-level: ['F', 'OF', 'G1', 'OF', 'G2'] → ['F OF G1 OF G2'].
+    """
+    if not ops:
+        return ops
+    result: list[str] = []
+    i = 0
+    while i < len(ops):
+        token = ops[i]
+        # Check if next token is OF/IN — coalesce into qualified name
+        if (i + 2 < len(ops)
+                and ops[i + 1].upper() in ("OF", "IN")
+                and token.upper() not in ("TO", "FROM", "BY", "GIVING",
+                    "INTO", "UNTIL", "DEPENDING", "ON", "REPLACING",
+                    "TALLYING", "DELIMITED", "CORRESPONDING", "CORR")):
+            parts = [token, ops[i + 1], ops[i + 2]]
+            i += 3
+            # Continue coalescing chained OF/IN
+            while (i + 1 < len(ops)
+                   and ops[i].upper() in ("OF", "IN")):
+                parts.append(ops[i])
+                if i + 1 < len(ops):
+                    parts.append(ops[i + 1])
+                    i += 2
+                else:
+                    break
+            result.append(" ".join(parts))
+        else:
+            result.append(token)
+            i += 1
+    return result
+
+
 def _indent_line(line: str, indent: int) -> str:
     """Indent a line by *indent* levels (4 spaces each)."""
     return ("    " * indent) + line
@@ -240,17 +277,18 @@ def extract_from_expr(ops: list[str], upper_ops: list[str]) -> str | None:
 def _resolve_qualified(op: str) -> str:
     """Resolve OF/IN qualified COBOL name to a Python field name.
 
-    Looks up the (field, group) pair in the qualified field map, falling
-    back to the plain Python-ised first token.
+    Supports multi-level qualification: FIELD OF GROUP-1 OF GROUP-2.
+    Tries each group name in the chain against the qualified field map.
     """
     parts = op.split()
     field_name = parts[0].upper()
-    group_name = ""
+    # Collect all group names in the qualification chain
+    group_names: list[str] = []
     for j, p in enumerate(parts):
         if p.upper() in ("OF", "IN") and j + 1 < len(parts):
-            group_name = parts[j + 1].upper()
-            break
-    if group_name:
+            group_names.append(parts[j + 1].upper())
+    # Try each group name — most specific (immediate parent) first
+    for group_name in group_names:
         qualified = _qualified_field_map.get((field_name, group_name))
         if qualified:
             return qualified

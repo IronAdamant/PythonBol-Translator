@@ -33,6 +33,7 @@ from .utils import (
     _sanitize_numeric,
     _to_python_name,
     _upper_ops,
+    coalesce_qualified,
     resolve_operand as _resolve_operand_base,
 )
 
@@ -147,6 +148,12 @@ class PythonMapper(CodegenMixin, ScreenCodegenMixin, VerbTranslationMixin):
 
     def _translate_statement(self, stmt: CobolStatement) -> list[str]:
         """Translate a single COBOL statement to Python line(s)."""
+        # Coalesce OF/IN qualified names before verb dispatch
+        stmt = CobolStatement(
+            verb=stmt.verb,
+            raw_text=stmt.raw_text,
+            operands=coalesce_qualified(stmt.operands),
+        )
         verb = stmt.verb
 
         # Fast-path: dispatch dict for simple 1:1 verb mappings

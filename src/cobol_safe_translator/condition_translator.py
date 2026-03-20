@@ -421,14 +421,15 @@ class _CondParser:
         # FUNCTION intrinsic
         if pk == 'FUNCTION':
             return self._function_call()
-        # Regular token
+        # Regular token — collect OF/IN qualification before resolving
         raw = self._advance()
-        resolved = resolve_operand(raw)
-        # Skip trailing OF/IN qualification
+        # Append trailing OF/IN qualification to build full qualified name
         while self._peek() in ('OF', 'IN'):
-            self._advance()
+            qualifier_kw = self._advance()  # OF or IN
             if self.pos < self.n:
-                self._advance()
+                group_name = self._advance()
+                raw = f"{raw} {qualifier_kw} {group_name}"
+        resolved = resolve_operand(raw)
         return resolved
 
     def _function_call(self) -> str:
