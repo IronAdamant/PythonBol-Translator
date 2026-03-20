@@ -53,8 +53,8 @@ The parser auto-detects format by examining the first 80 lines. Ambiguous files 
 |--------|---------|-------|
 | VALUE | Full | Initial value extracted, figurative constants resolved |
 | OCCURS | Full | Fixed count; multi-dimensional subscripts with chained `[i][j]` indexing |
-| OCCURS DEPENDING ON | Partial | Fixed count extracted; variable-length not modeled |
-| REDEFINES | Parsed | Name stored but no memory overlay modeled |
+| OCCURS DEPENDING ON | Partial | Fixed count extracted; variable-length not modeled. REDEFINES guard prevents incorrect static byte slicing when ODO is present |
+| REDEFINES | Full | Memory overlay via RedefinesAlias/RedefinesSlice; chained resolution (C REDEFINES B REDEFINES A → uses A); __post_init__ wiring |
 
 ### REPORT SECTION
 
@@ -120,12 +120,12 @@ The parser auto-detects format by examining the first 80 lines. Ambiguous files 
 | `READ file` | `self.file.read()` | With AT END/EOF detection |
 | `WRITE record` | `self.file.write(...)` | FROM clause supported |
 | `REWRITE record` | `self.file.write(...)` | Approximated as write |
-| `DELETE file` | TODO stub | File record deletion |
-| `START file` | TODO stub | File positioning |
+| `DELETE file` | `self.file.delete(key=...)` | With KEY IS clause and INVALID KEY handler |
+| `START file` | `self.file.start(key=..., comparison=...)` | KEY IS (EQUAL, GREATER, NOT LESS, >=) with INVALID KEY |
 | `CALL "prog"` | TODO comment | External dependency flagged |
 | `STOP RUN` / `GOBACK` | `return` | |
 | `EXIT PROGRAM/PERFORM` | `return` / `break` | |
-| `GO TO` | `raise NotImplementedError` | Requires manual restructuring |
+| `GO TO` | `self.paragraph()` + `return` | Direct method call; ALTER-modified paragraphs use `getattr` dynamic dispatch |
 
 ### COMPUTE FUNCTION Intrinsics (41)
 
@@ -210,11 +210,8 @@ The two-pass condition translator handles:
 
 ## Known Limitations
 
-1. **GO TO** — Emits `raise NotImplementedError`; requires manual restructuring
-2. **Nested programs** — Only single-program files supported
-3. **REDEFINES logic** — Field name stored but no memory overlay modeled
-4. **OCCURS DEPENDING ON** — Fixed count only; variable-length arrays not supported
-5. **INSPECT CONVERTING** — Emits TODO; TALLYING and REPLACING are translated
-6. **EVALUATE WHEN THRU/THROUGH** — Range comparisons emit placeholder `if True:`
-7. **SET TO FALSE** — Non-standard extension; emits TODO
-8. **Nested OCCURS data initialization** — Multi-dimensional tables generate TODO for nested list structures; subscript translation works correctly
+1. **OCCURS DEPENDING ON** — Fixed count extracted; variable-length arrays not dynamically resized. REDEFINES guard prevents incorrect static byte slicing when ODO is present
+2. **SET TO FALSE** — Non-standard extension; emits TODO
+3. **Nested OCCURS data initialization** — Multi-dimensional tables generate TODO for nested list structures; subscript translation works correctly
+4. **RENAMES (level 66)** — Ignored during parsing
+5. **SEARCH ALL** — Binary search approximated as linear scan with comment

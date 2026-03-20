@@ -2,7 +2,7 @@
 
 **Translate COBOL to Python. Zero dependencies. Works offline.**
 
-Produces valid Python from real enterprise COBOL — tested on 4,705 files across 42 projects with 100% syntax validity. Handles the structural heavy lifting of mainframe migration so developers and AI agents can focus on business logic and middleware integration.
+Produces valid Python from real enterprise COBOL — tested on 5,288 files across 32 projects with 100% syntax validity. Handles the structural heavy lifting of mainframe migration so developers and AI agents can focus on business logic and middleware integration.
 
 Ships with an MCP server for AI coding assistants and a CLI for direct use.
 
@@ -92,9 +92,9 @@ The prompt brief is 3-4x more token-efficient than raw COBOL source, containing 
 |----------|----------|
 | **Data Division** | PIC clauses (9/X/A/S/V/P/edited), levels 01-49/77/88, OCCURS (multi-dimensional), REDEFINES, WORKING-STORAGE, FILE SECTION, LINKAGE SECTION, LOCAL-STORAGE, REPORT SECTION, SCREEN SECTION |
 | **Data types** | USAGE COMP/COMP-3/BINARY (CobolDecimal), COMP-1/COMP-2 (float), COMP-5 (int), INDEX (int), DISPLAY (default) |
-| **Data attributes** | EXTERNAL, GLOBAL, JUSTIFIED RIGHT, BLANK WHEN ZERO, OCCURS DEPENDING ON, SYNCHRONIZED |
+| **Data attributes** | EXTERNAL, GLOBAL, JUSTIFIED RIGHT, BLANK WHEN ZERO, OCCURS DEPENDING ON (guard), SYNCHRONIZED |
 | **Arithmetic** | ADD, SUBTRACT, MULTIPLY, DIVIDE (INTO/BY/GIVING/REMAINDER), COMPUTE (complex expressions), ON SIZE ERROR, ROUNDED (ROUND_HALF_UP) |
-| **Control flow** | IF/ELSE (multi-line + inline), EVALUATE TRUE/variable/ALSO with WHEN THRU, PERFORM (simple/UNTIL/TIMES/VARYING/THRU), nested loops, GO TO (method call + return), GO TO DEPENDING ON, EXIT PERFORM |
+| **Control flow** | IF/ELSE (multi-line + inline), EVALUATE TRUE/variable/ALSO with WHEN THRU (range comparison), PERFORM (simple/UNTIL/TIMES/VARYING/THRU), nested loops, GO TO (method call + return, ALTER dynamic dispatch), GO TO DEPENDING ON, EXIT PERFORM |
 | **String ops** | STRING (DELIMITED BY, WITH POINTER), UNSTRING (multi-delimiter, WITH POINTER, TALLYING), INSPECT (TALLYING/REPLACING/CONVERTING with BEFORE/AFTER INITIAL), MOVE (simple/ALL/CORRESPONDING/FUNCTION/group-level) |
 | **Table ops** | SEARCH/SEARCH ALL, SORT/MERGE (USING/GIVING, INPUT/OUTPUT PROCEDURE), RELEASE, RETURN |
 | **File I/O** | OPEN (INPUT/OUTPUT/EXTEND/I-O), CLOSE, READ (INTO + AT END/NOT AT END body), WRITE (FROM + AFTER/BEFORE ADVANCING), REWRITE, DELETE, START (KEY IS) |
@@ -137,13 +137,13 @@ cobol2py test program.cob
 #   Result: 6/6 checks passed
 ```
 
-**Corpus validation: 5,282/5,282 files produce valid Python (100.00%)** across 44 test projects including NIST CCVS85 conformance suite (459 files), IBM CICS banking, enterprise DB2, French government tax code, GnuCOBOL test suite, AS/400 ILE, COBOL-in-24-Hours (118 files), and a Minecraft server written in COBOL.
+**Corpus validation: 5,288/5,288 files produce valid Python (100.00%)** across 32 test projects including NIST CCVS85 conformance suite (459 files), IBM CICS banking, enterprise DB2, French government tax code, GnuCOBOL test suite, AS/400 ILE, COBOL-in-24-Hours (118 files), and a Minecraft server written in COBOL.
 
 ## Test suite
 
 ```bash
 pytest tests/ -v
-# 1,028 tests covering parser, analyzer, mapper, conditions, blocks, SEARCH,
+# 1,033 tests covering parser, analyzer, mapper, conditions, blocks, SEARCH,
 # SORT/MERGE, FUNCTION intrinsics, REPORT WRITER, SCREEN SECTION, COPY expansion,
 # nested programs, group MOVE, SQL translation, adapters, CLI, batch, validation,
 # and 60+ behavioral end-to-end tests
@@ -157,28 +157,44 @@ src/cobol_safe_translator/
   parser.py                — COBOL parser (free/fixed format, nested programs, screen section)
   pic_parser.py            — PIC clause parsing and classification
   procedure_parser.py      — PROCEDURE DIVISION + DECLARATIVES splitting
-  preprocessor.py          — COPY resolution (recursive), EXEC SQL/CICS extraction
+  preprocessor.py          — COPY resolution (recursive), EXEC block extraction
+  line_preprocessor.py     — Fixed/free format line continuation handling
   analyzer.py              — Sensitivity detection, dependency extraction, statistics
   mapper.py                — Python code generator (core orchestration)
   mapper_codegen.py        — Code generation mixin (data class, program class, header)
   mapper_verbs.py          — Verb translation mixin (MOVE, GO TO, PERFORM, arithmetic)
-  condition_translator.py  — Two-pass COBOL condition → Python expression
-  statement_translators.py — Arithmetic, PERFORM, READ, WRITE, I/O verbs
+  condition_translator.py  — Recursive descent COBOL condition → Python expression
+  block_translator.py      — IF/EVALUATE/SEARCH block reconstruction
+  evaluate_translator.py   — EVALUATE TRUE/variable/ALSO with WHEN THRU ranges
+  statement_translators.py — PERFORM, MOVE, miscellaneous verb dispatch
+  arithmetic_translators.py — ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE
   function_translators.py  — 41 FUNCTION intrinsic mappings
-  sql_translator.py        — EXEC SQL → DB-API 2.0 Python code generator
+  string_translators.py    — STRING, UNSTRING, INSPECT, SET
+  file_translators.py      — OPEN, CLOSE, READ, WRITE, REWRITE, DELETE, START, CALL
+  io_translators.py        — ACCEPT, DISPLAY, REWRITE
   sort_translators.py      — SORT, MERGE, RELEASE, RETURN
   report_parser.py         — REPORT SECTION parser
   report_translators.py    — INITIATE, GENERATE, TERMINATE
-  string_translators.py    — STRING, UNSTRING, INSPECT, SET
-  io_translators.py        — ACCEPT, REWRITE, ON SIZE ERROR
-  block_translator.py      — IF/EVALUATE/SEARCH block reconstruction
-  adapters.py              — CobolDecimal, CobolString, FileAdapter, GroupView
-  validation.py            — Runtime import validation
+  screen_parser.py         — SCREEN SECTION parser
+  screen_codegen.py        — Screen code generation (ANSI cursor positioning)
+  sql_translator.py        — EXEC SQL → DB-API 2.0 Python code generator
+  cics_translator.py       — EXEC CICS → Flask/hint translation
+  dli_translator.py        — EXEC DLI (IMS database) translation
+  exec_block_handler.py    — EXEC block extraction (SQL/CICS/DLI)
+  cfg.py                   — Control flow graph (unreachable detection, ALTER)
+  adapters.py              — CobolDecimal, CobolString, FileAdapter, GroupView, RedefinesAlias
+  indexed_file_adapter.py  — Indexed (VSAM-style) file I/O runtime
+  incremental.py           — AST-based + regex-fallback incremental translation
+  validation.py            — Runtime import validation (syntax, import, instantiate)
   ebcdic.py                — EBCDIC collation (cp037)
+  utils.py                 — Shared utilities (_to_python_name, numeric parsing)
   exporters.py             — Markdown and JSON report exporters
   prompt_generator.py      — LLM translation brief generator
+  project_analyzer.py      — Multi-file project analysis and reporting
+  test_generator.py        — Automatic test scaffolding for COBOL programs
   batch.py                 — Batch/directory processing
   cli.py                   — CLI (translate / map / prompt / test)
+  cli_test_runner.py       — Interactive test execution engine
   mcp_server.py            — MCP server for AI coding assistants
   py.typed                 — PEP 561 type marker
 ```
@@ -193,14 +209,14 @@ cobol2py test      <path|dir> [--output <dir>] [--recursive] [--timeout N] [--no
 cobol2py --version
 ```
 
-## What this tool does NOT include
+## What requires manual wiring
 
-| Not included | What you need to do |
+| Generated as hints | What you need to do |
 |---|---|
-| **EXEC CICS** (online transactions) | Re-implement using Flask, FastAPI, or your transaction framework |
-| **EXEC DLI** (IMS database) | Replace with your hierarchical DB or API equivalent |
+| **EXEC CICS** (online transactions) | Flask template + RESP/RESP2 hints generated; wire to your transaction framework |
+| **EXEC DLI** (IMS database) | DLI call structure generated; connect to your hierarchical DB or API |
 | **MQ / messaging** | Use `ibm_mq`, `pika` (RabbitMQ), or your message broker |
-| **VSAM runtime** | Replace with SQLite, key-value store, or indexed file library |
+| **VSAM runtime** | IndexedFileAdapter included; wire to SQLite or your indexed file library |
 | **JCL job control** | Replace with cron, Airflow, Prefect, or your scheduler |
 | **External CALL targets** | Implement or source the called programs separately |
 
