@@ -134,22 +134,26 @@ def diff_programs(old_fp: dict, new_fp: dict) -> dict:
     return result
 
 
-def _patch_method(existing: str, method_name: str, new_method: str) -> str:
+def _patch_method(existing: str, method_name: str, new_method: str) -> tuple[str, bool]:
     """Replace a single method in the existing Python source.
 
     Locates the method by its ``def`` signature and replaces everything
     up to (but not including) the next ``def``, ``class``, or
     ``if __name__`` line at the same or lower indentation.
+
+    Returns (patched_source, success).
     """
+    # Flexible pattern: allows optional decorators and varied signatures
     pattern = re.compile(
-        rf'(    def {re.escape(method_name)}\(self\) -> None:.*?)'
-        rf'(?=\n    def |\nclass |\nif __name__|\Z)',
+        rf'((?:[ \t]*@\w+.*\n)*'
+        rf'    def {re.escape(method_name)}\(self[^)]*\)[^:]*:.*?)'
+        rf'(?=\n    def |\n(?:[ \t]*@\w+.*\n)*    def |\nclass |\nif __name__|\Z)',
         re.DOTALL,
     )
     match = pattern.search(existing)
     if match:
-        return existing[:match.start()] + new_method + existing[match.end():]
-    return existing
+        return existing[:match.start()] + new_method + existing[match.end():], True
+    return existing, False
 
 
 def incremental_translate(
@@ -201,6 +205,7 @@ def incremental_translate(
     mapper = PythonMapper(smap)
 
     patched = existing
+    patch_failures: list[str] = []
     for para_name in diff["paragraphs_modified"]:
         # Find the paragraph in the new program
         para = next(
@@ -215,7 +220,17 @@ def incremental_translate(
         new_method = mapper._paragraph_method(para)
 
         # Find and replace the old method in the existing source
-        patched = _patch_method(patched, method_name, new_method)
+        patched, ok = _patch_method(patched, method_name, new_method)
+        if not ok:
+            patch_failures.append(para_name)
+
+    # If any patches failed, fall back to full retranslation
+    if patch_failures:
+        source = generate_python(smap)
+        save_fingerprint(new_fp, fp_path)
+        diff["reason"] = f"patch failed for {', '.join(patch_failures)}; full retranslation"
+        diff["full_retranslation_needed"] = True
+        return source, diff
 
     save_fingerprint(new_fp, fp_path)
     diff["reason"] = f"patched {len(diff['paragraphs_modified'])} paragraphs"

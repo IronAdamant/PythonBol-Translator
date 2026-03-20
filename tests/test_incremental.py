@@ -189,7 +189,7 @@ class TestPatchMethod:
             '        """Paragraph: ALPHA"""\n'
             "        print('new')\n"
         )
-        patched = _patch_method(existing, "alpha", new_method)
+        patched, ok = _patch_method(existing, "alpha", new_method)
         assert "print('new')" in patched
         assert "print('old')" not in patched
         # beta must be preserved
@@ -212,7 +212,7 @@ class TestPatchMethod:
             "    def alpha(self) -> None:\n"
             "        print('replaced')\n"
         )
-        patched = _patch_method(existing, "alpha", new_method)
+        patched, ok = _patch_method(existing, "alpha", new_method)
         assert "print('replaced')" in patched
         assert "print('keep me')" in patched
         assert "print('also keep')" in patched
