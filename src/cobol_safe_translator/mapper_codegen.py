@@ -27,6 +27,7 @@ from .models import (
     PicCategory,
     UseDeclaration,
 )
+from . import utils as _utils
 from .utils import (
     _to_method_name,
     _to_python_name,
@@ -40,6 +41,31 @@ def _wrap_occurs(inner: str, occurs_chain: list[int]) -> str:
     for n in reversed(occurs_chain):
         expr = f"[{expr} for _ in range({n})]"
     return expr
+
+
+def _find_colliding_names(items: list[DataItem]) -> set[str]:
+    """Pre-scan data items to find elementary field names that appear in multiple groups.
+
+    Returns a set of Python field names that collide and need group-qualification.
+    """
+    from collections import defaultdict
+    # Map python_name → set of parent group names
+    name_to_parents: dict[str, set[str]] = defaultdict(set)
+
+    def _walk(children: list[DataItem], parent_name: str) -> None:
+        for item in children:
+            if item.children:
+                _walk(item.children, item.name)
+            else:
+                py = _to_python_name(item.name)
+                if py != 'filler':
+                    name_to_parents[py].add(parent_name)
+
+    for item in items:
+        if item.children:
+            _walk(item.children, item.name)
+
+    return {name for name, parents in name_to_parents.items() if len(parents) > 1}
 
 
 class CodegenMixin:
@@ -147,8 +173,15 @@ class CodegenMixin:
         lines.append("")
 
         self._field_name_counts: dict[str, int] = {}
+        # Pre-scan: detect field name collisions across groups
+        self._colliding_names: set[str] = _find_colliding_names(all_items)
+        # Mapping: (COBOL_FIELD_UPPER, PARENT_GROUP_UPPER) → python_name
+        self._qualified_map: dict[tuple[str, str], str] = {}
         for item in all_items:
             lines.extend(self._data_item_fields(item, indent=1))
+
+        # Publish qualified map to utils for resolve_operand OF/IN resolution
+        _utils._qualified_field_map = dict(self._qualified_map)
 
         # Append SCREEN SECTION layout as comments
         screen_comments = self._screen_layout_comments()
@@ -161,6 +194,7 @@ class CodegenMixin:
 
     def _data_item_fields(
         self, item: DataItem, indent: int = 1, parent_occurs: list[int] | None = None,
+        parent_group: str | None = None,
     ) -> list[str]:
         """Generate dataclass fields for a data item and its children."""
         lines: list[str] = []
@@ -169,6 +203,13 @@ class CodegenMixin:
 
         # Build the occurs chain (outer -> inner nesting)
         occurs_chain = (parent_occurs or []) + ([item.occurs] if item.occurs else [])
+
+        # Qualify colliding names with parent group prefix
+        if (py_name in self._colliding_names and parent_group
+                and not item.children and py_name != 'filler'):
+            qualified = f"{_to_python_name(parent_group)}_{py_name}"
+            self._qualified_map[(item.name.upper(), parent_group.upper())] = qualified
+            py_name = qualified
 
         # Deduplicate field names (e.g., multiple FILLER items)
         if py_name in self._field_name_counts:
@@ -204,7 +245,7 @@ class CodegenMixin:
             if item.occurs:
                 lines.append(f"{prefix}_{py_name}_occurs: int = {item.occurs}")
             for child in item.children:
-                lines.extend(self._data_item_fields(child, indent, occurs_chain))
+                lines.extend(self._data_item_fields(child, indent, occurs_chain, item.name))
         elif item.pic:
             usage_upper = (item.usage or "").upper()
 

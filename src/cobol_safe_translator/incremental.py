@@ -8,6 +8,7 @@ unchanged paragraphs in the existing Python output.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import re
@@ -137,13 +138,95 @@ def diff_programs(old_fp: dict, new_fp: dict) -> dict:
 def _patch_method(existing: str, method_name: str, new_method: str) -> tuple[str, bool]:
     """Replace a single method in the existing Python source.
 
-    Locates the method by its ``def`` signature and replaces everything
-    up to (but not including) the next ``def``, ``class``, or
-    ``if __name__`` line at the same or lower indentation.
+    Tries AST-based replacement first (robust to formatting changes),
+    falls back to regex if the source doesn't parse.
 
     Returns (patched_source, success).
     """
-    # Flexible pattern: allows optional decorators and varied signatures
+    result = _patch_method_ast(existing, method_name, new_method)
+    if result is not None:
+        return result, True
+    # Fallback: regex-based patching
+    return _patch_method_regex(existing, method_name, new_method)
+
+
+def _patch_method_ast(
+    existing: str, method_name: str, new_method: str,
+) -> str | None:
+    """Replace a method via AST node replacement. Returns None on failure."""
+    import ast
+    try:
+        tree = ast.parse(existing)
+    except SyntaxError:
+        return None
+
+    # Find the class containing the target method
+    target_class = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if item.name == method_name:
+                        target_class = node
+                        break
+            if target_class:
+                break
+
+    if target_class is None:
+        return None
+
+    # Find target method's line range
+    target_idx = None
+    for i, item in enumerate(target_class.body):
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if item.name == method_name:
+                target_idx = i
+                break
+
+    if target_idx is None:
+        return None
+
+    # Use line numbers to do text replacement (preserves formatting elsewhere)
+    target_node = target_class.body[target_idx]
+    start_line = target_node.lineno  # 1-based
+    if target_idx + 1 < len(target_class.body):
+        end_line = target_class.body[target_idx + 1].lineno
+    else:
+        end_line = None
+
+    lines = existing.split('\n')
+    # Handle decorator lines (they come before the def)
+    actual_start = start_line
+    for dec in getattr(target_node, 'decorator_list', []):
+        actual_start = min(actual_start, dec.lineno)
+
+    if end_line is not None:
+        # Replace lines from start to just before next item
+        before = lines[:actual_start - 1]
+        after = lines[end_line - 1:]
+        new_lines = new_method.rstrip('\n').split('\n')
+        result_lines = before + new_lines + [''] + after
+    else:
+        # Last method in class — replace to end of class
+        before = lines[:actual_start - 1]
+        new_lines = new_method.rstrip('\n').split('\n')
+        # Find where the class ends (next non-indented line or EOF)
+        class_end = len(lines)
+        for k in range(actual_start, len(lines)):
+            stripped = lines[k]
+            if stripped and not stripped.startswith(' ') and not stripped.startswith('\t'):
+                class_end = k
+                break
+        after = lines[class_end:]
+        result_lines = before + new_lines + [''] + after
+
+    return '\n'.join(result_lines)
+
+
+def _patch_method_regex(
+    existing: str, method_name: str, new_method: str,
+) -> tuple[str, bool]:
+    """Regex-based method replacement. Fallback for unparseable sources."""
     pattern = re.compile(
         rf'((?:[ \t]*@\w+.*\n)*'
         rf'    def {re.escape(method_name)}\(self[^)]*\)[^:]*:.*?)'

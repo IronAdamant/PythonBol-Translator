@@ -143,27 +143,14 @@ class VerbTranslationMixin:
         if not common:
             return [f"# MOVE CORRESPONDING: no common field names between {src_name} and {tgt_name}"]
         results = [f"# MOVE CORRESPONDING {src_name} TO {tgt_name}"]
-        src_py = _to_python_name(src_name)
-        tgt_py = _to_python_name(tgt_name)
+        from . import utils as _utils
+        qmap = _utils._qualified_field_map
         for name in sorted(common):
             field_py = _to_python_name(name)
-            # Try group-qualified names first (group_field); fall back to bare field
-            src_qual = f"{src_py}_{field_py}"
-            tgt_qual = f"{tgt_py}_{field_py}"
-            src_has_qual = any(
-                _to_python_name(it.name) == src_qual
-                for it in self.program.all_data_items
-            )
-            tgt_has_qual = any(
-                _to_python_name(it.name) == tgt_qual
-                for it in self.program.all_data_items
-            )
-            if src_has_qual and tgt_has_qual:
-                results.append(f"self.data.{tgt_qual}.set(self.data.{src_qual}.value)")
-            else:
-                # Flat model: same field name in both groups — assignment is a no-op,
-                # emit it anyway so the generated code is explicit and reviewable
-                results.append(f"self.data.{field_py}.set(self.data.{field_py}.value)  # same field — verify group qualification")
+            # Use qualified map for resolution
+            src_resolved = qmap.get((name, src_name.upper()), field_py)
+            tgt_resolved = qmap.get((name, tgt_name.upper()), field_py)
+            results.append(f"self.data.{tgt_resolved}.set(self.data.{src_resolved}.value)")
         return results
 
     def _find_group_children(self, group_name: str) -> list[str]:
@@ -326,13 +313,14 @@ class VerbTranslationMixin:
         if not common:
             return [f"# {verb} CORRESPONDING: no common field names between {src_name} and {tgt_name}"]
         method = "add" if verb == "ADD" else "subtract"
-        results = [
-            f"# {verb} CORRESPONDING {src_name} {to_kw} {tgt_name}",
-            f"# TODO(high): flat data model cannot distinguish group-qualified fields — verify operations",
-        ]
+        results = [f"# {verb} CORRESPONDING {src_name} {to_kw} {tgt_name}"]
+        from . import utils as _utils
+        qmap = _utils._qualified_field_map
         for name in sorted(common):
-            py = _to_python_name(name)
-            results.append(f"self.data.{py}.{method}(self.data.{py}.value)")
+            field_py = _to_python_name(name)
+            src_resolved = qmap.get((name, src_name.upper()), field_py)
+            tgt_resolved = qmap.get((name, tgt_name.upper()), field_py)
+            results.append(f"self.data.{tgt_resolved}.{method}(self.data.{src_resolved}.value)")
         return results
 
     def _get_paragraph_range(self, start: str, end: str) -> list[str]:

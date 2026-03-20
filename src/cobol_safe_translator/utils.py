@@ -10,6 +10,10 @@ from __future__ import annotations
 import keyword
 import re
 
+# Module-level registry: (COBOL_FIELD_UPPER, PARENT_GROUP_UPPER) → python_name
+# Set by mapper_codegen during code generation for OF/IN qualification resolution.
+_qualified_field_map: dict[tuple[str, str], str] = {}
+
 
 def _indent_line(line: str, indent: int) -> str:
     """Indent a line by *indent* levels (4 spaces each)."""
@@ -208,10 +212,22 @@ def resolve_operand(op: str) -> str:
     if sub:
         py, indices = sub
         return f"self.data.{py}{indices}.value"
-    # OF/IN qualification: FIELD OF GROUP → take field before OF
+    # OF/IN qualification: FIELD OF GROUP → resolve via qualified map if available
     if " OF " in upper or " IN " in upper:
-        field = op.split()[0]
-        return f"self.data.{_to_python_name(field)}.value"
+        parts = op.split()
+        field_name = parts[0].upper()
+        # Find the group name (after OF/IN)
+        group_name = ""
+        for j, p in enumerate(parts):
+            if p.upper() in ("OF", "IN") and j + 1 < len(parts):
+                group_name = parts[j + 1].upper()
+                break
+        # Try qualified map first
+        if group_name:
+            qualified = _qualified_field_map.get((field_name, group_name))
+            if qualified:
+                return f"self.data.{qualified}.value"
+        return f"self.data.{_to_python_name(parts[0])}.value"
     # Default data name
     return f"self.data.{_to_python_name(op)}.value"
 
@@ -236,6 +252,16 @@ def resolve_target(op: str) -> str:
         py, indices = sub
         return f"self.data.{py}{indices}"
     if " OF " in op.upper() or " IN " in op.upper():
-        fld = op.split()[0]
-        return f"self.data.{_to_python_name(fld)}"
+        parts = op.split()
+        field_name = parts[0].upper()
+        group_name = ""
+        for j, p in enumerate(parts):
+            if p.upper() in ("OF", "IN") and j + 1 < len(parts):
+                group_name = parts[j + 1].upper()
+                break
+        if group_name:
+            qualified = _qualified_field_map.get((field_name, group_name))
+            if qualified:
+                return f"self.data.{qualified}"
+        return f"self.data.{_to_python_name(parts[0])}"
     return f"self.data.{_to_python_name(op)}"

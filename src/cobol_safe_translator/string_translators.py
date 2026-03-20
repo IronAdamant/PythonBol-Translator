@@ -321,8 +321,9 @@ def translate_inspect(
             lines.extend(_emit_bounded_op(field_expr, before_expr, after_expr, op))
             lines.append(f"{field_expr}.set(_val)")
             return lines
-        return [f"# INSPECT {field} CONVERTING",
-                f"# TODO(high): INSPECT CONVERTING — incomplete clause: {' '.join(ops)}"]
+        # No TO keyword — emit comment with original COBOL
+        return [f"# INSPECT {field} CONVERTING {' '.join(ops[conv_idx + 1:])}",
+                f"# INSPECT CONVERTING without TO clause — verify original COBOL"]
 
     if "TALLYING" in upper_ops:
         tally_idx = upper_ops.index("TALLYING")
