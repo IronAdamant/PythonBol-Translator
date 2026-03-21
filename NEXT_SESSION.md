@@ -1,22 +1,23 @@
 # Next Session Plan — PythonBol-Translator
 
-> **Updated:** 2026-03-21 (Session 27, v1.0.1)
+> **Updated:** 2026-03-21 (Session 28, v1.1.2)
 > **Purpose:** Reminder file for next work session. Delete after completing.
 
 ## Current State
 
-- **Version:** 1.0.1
-- **Tests:** 1,033 pass, 2 skipped
+- **Version:** 1.1.2
+- **Tests:** 1,031 pass, 2 skipped
 - **Corpus:** 5,288/5,288 valid Python (100%) across 32 projects
-- **Source:** 45 modules, ~14.4K LOC
+- **Source:** 45 modules, ~14.2K LOC (156 lines removed in v1.1.2 cleanup)
 - **Intrinsics:** 41 functions
 
 ## Priority 1: Complexity Hotspots
 
-### mapper_codegen.py (821 LOC, +64% over guideline)
+### mapper_codegen.py (~780 LOC, +56% over guideline)
 - `_program_class()` has 7 nesting levels and 114 lines
 - `_data_class()` has 5 nesting levels
 - Primary candidate for decomposition into smaller helpers
+- v1.1.2: removed dead generate() method, duplicate _find_item_by_name, hasattr guards
 
 ### translate_evaluate_block (159 lines, 32 branches)
 - Multi-subject EVALUATE complexity in evaluate_translator.py
@@ -47,4 +48,5 @@
 - [x] Dead code removal (Session 27 — 6 items removed)
 - [x] README/SUPPORTED_SUBSET metrics refresh (Session 27)
 - [x] Remove legacy docs — Stele now handles indexing
+- [x] Deep codebase audit & cleanup (Session 28 — dead code, DRY, match/case, adapter simplification, test dedup)
 - [ ] Update GLOBAL_AGENTS.md to reflect Stele replacing legacy doc requirements (do when working on Stele project)

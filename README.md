@@ -169,7 +169,7 @@ Large enterprise migrations with thousands of programs and deeply nested copyboo
 
 ```bash
 pytest tests/ -v
-# 1,033 tests covering parser, analyzer, mapper, conditions, blocks, SEARCH,
+# 1,031 tests covering parser, analyzer, mapper, conditions, blocks, SEARCH,
 # SORT/MERGE, FUNCTION intrinsics, REPORT WRITER, SCREEN SECTION, COPY expansion,
 # nested programs, group MOVE, SQL translation, adapters, CLI, batch, validation,
 # and 60+ behavioral end-to-end tests
@@ -213,7 +213,7 @@ src/cobol_safe_translator/
   incremental.py           — AST-based + regex-fallback incremental translation
   validation.py            — Runtime import validation (syntax, import, instantiate)
   ebcdic.py                — EBCDIC collation (cp037)
-  utils.py                 — Shared utilities (_to_python_name, numeric parsing)
+  utils.py                 — Shared utilities (_to_python_name, numeric parsing, shared constants)
   exporters.py             — Markdown and JSON report exporters
   prompt_generator.py      — LLM translation brief generator
   project_analyzer.py      — Multi-file project analysis and reporting
