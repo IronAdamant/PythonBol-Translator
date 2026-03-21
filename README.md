@@ -143,7 +143,26 @@ cobol2py test program.cob
 #   Result: 6/6 checks passed
 ```
 
-**Corpus validation: 5,288/5,288 files produce valid Python (100.00%)** across 32 test projects including NIST CCVS85 conformance suite (459 files), IBM CICS banking, enterprise DB2, French government tax code, GnuCOBOL test suite, AS/400 ILE, COBOL-in-24-Hours (118 files), and a Minecraft server written in COBOL.
+**Corpus validation** across 32 test projects including NIST CCVS85 conformance suite (459 files), IBM CICS banking, enterprise DB2, French government tax code, GnuCOBOL test suite, AS/400 ILE, COBOL-in-24-Hours (118 files), and a Minecraft server written in COBOL:
+
+| Check | Result | What it means |
+|-------|--------|---------------|
+| **Syntax validity** | 5,288/5,288 (100%) | Every file produces Python that `ast.parse` accepts |
+| **Full validation** | 5,031/5,288 (95.1%) | Import + instantiate the generated class |
+| **Validate failures** | 257 (4.9%) | Runtime wiring (REDEFINES edge cases, nested field refs) — not syntax errors |
+
+### Performance
+
+Translation is **CPU-bound and runs entirely offline** — no network, no API calls, no external services. Actual throughput depends on your hardware and the size/complexity of the COBOL source:
+
+| Corpus size | Typical time | Notes |
+|------------|-------------|-------|
+| Single file | < 1 second | Instant for most programs |
+| 100 files | 10–30 seconds | Small project |
+| 1,000 files | 1–5 minutes | Medium enterprise project |
+| 5,288 files (full corpus) | 5–10 minutes | Depends on disk I/O and CPU |
+
+Large enterprise migrations with thousands of programs and deeply nested copybook chains will take proportionally longer. The translator processes files sequentially — for maximum throughput on large projects, consider splitting into batches or running on faster hardware.
 
 ## Test suite
 
