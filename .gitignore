@@ -28,5 +28,25 @@ out2/
 .chisel/
 .mcp.json
 
-# Test artifacts
+# Test artifacts (corpus test creates runtime output files)
 CUSTRPT.DAT
+*.idx
+*.Dat
+*.DAT
+*.dat
+*.IMG
+ERRLOG
+ERRFILE
+BEEP
+DISPLAY
+OUTFILE
+OUTFIL1
+OUTFIL2
+PRTLINE
+Printer
+RPTFILE
+TESTFILE
+WEATOUT
+HOSPOUT
+MEMRPT
+CHEATSHT

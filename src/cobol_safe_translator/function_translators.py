@@ -361,7 +361,7 @@ def translate_function_intrinsic(
     # Handle TRIM with LEADING/TRAILING modifiers
     if upper_name == "TRIM" and raw_args:
         parts = raw_args.split()
-        if len(parts) >= 2:
+        if parts and len(parts) >= 2:
             modifier = parts[-1].upper()
             if modifier == "LEADING":
                 arg = _resolve_expr(' '.join(parts[:-1]), resolve)

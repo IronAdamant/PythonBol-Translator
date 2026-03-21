@@ -147,4 +147,5 @@ class TestTranslateReturnVerb:
     def test_return_without_into(self):
         lines = translate_return_verb(["SORT-FILE"], "RETURN SORT-FILE")
         combined = "\n".join(lines)
-        assert "_record = self._sort_sorted.pop(0)" in combined
+        assert "_record = self._sort_sorted[0]" in combined
+        assert "self._sort_sorted = self._sort_sorted[1:]" in combined

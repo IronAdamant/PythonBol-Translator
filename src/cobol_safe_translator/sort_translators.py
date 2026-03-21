@@ -447,9 +447,11 @@ def translate_return_verb(ops: list[str], raw: str) -> list[str]:
 
     lines = [f"# RETURN {ops[0]}", f"if self._sort_sorted:"]
     if into_target:
-        lines.append(f"    self.data.{into_target}.set(self._sort_sorted.pop(0))")
+        lines.append(f"    self.data.{into_target}.set(self._sort_sorted[0])")
+        lines.append(f"    self._sort_sorted = self._sort_sorted[1:]")
     else:
-        lines.append(f"    _record = self._sort_sorted.pop(0)")
+        lines.append(f"    _record = self._sort_sorted[0]")
+        lines.append(f"    self._sort_sorted = self._sort_sorted[1:]")
     lines.append("else:")
     if at_end_stmts:
         # AT END body — only runs when no more records

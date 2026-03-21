@@ -265,7 +265,8 @@ def _merge_spaced_subscripts(tokens: list[str]) -> list[str]:
             # Merge: attach (inner) to the identifier
             inner = " ".join(inner_tokens)
             result[-1] = f"{result[-1]}({inner})"
-            i = j + 1  # skip past closing ")"
+            # Skip past closing ")" — if unmatched, j == len(tokens)
+            i = j + 1 if j < len(tokens) else j
         else:
             result.append(tok)
             i += 1

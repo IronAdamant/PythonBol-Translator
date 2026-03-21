@@ -209,43 +209,9 @@ def _collect_leaf_fields(sf: ScreenField) -> list[ScreenField]:
     return leaves
 
 
-def generate_cics_template(program: CobolProgram) -> str | None:
-    """Generate a Flask application template from CICS patterns.
-
-    Returns None if the program doesn't use CICS.
-    """
-    if not has_cics(program):
-        return None
-
-    pid = _to_python_name(program.program_id or "cics_app")
-
-    # Extract CICS metadata from raw statements
-    maps = _extract_maps(program)
-    transids = _extract_transids(program)
-    commareas = _extract_commareas(program)
-
-    lines = [
-        '"""',
-        f"Flask application template generated from CICS program:"
-        f" {program.program_id}",
-        "",
-        "This is a STARTING POINT for migrating CICS online transactions"
-        " to a web application.",
-        "Review and modify before production use.",
-        "",
-        "Install: pip install flask",
-        f"Run: flask --app {pid}_flask run",
-        '"""',
-        "",
-        "from flask import Flask, render_template, request,"
-        " session, redirect, url_for",
-        "",
-        f"app = Flask(__name__)",
-        'app.secret_key = "TODO-change-this-secret-key"',
-        "",
-    ]
-
-    # Generate route for each MAP
+def _cics_route_section(maps: list[str]) -> list[str]:
+    """Generate Flask route(s) from CICS MAP names."""
+    lines: list[str] = []
     if maps:
         for map_name in maps:
             py_map = _to_python_name(map_name)
@@ -270,7 +236,6 @@ def generate_cics_template(program: CobolProgram) -> str | None:
                 f'    return render_template("{py_map}.html", **commarea)',
             ])
     else:
-        # No maps found -- generate a generic route
         lines.extend([
             "",
             '@app.route("/", methods=["GET", "POST"])',
@@ -283,37 +248,33 @@ def generate_cics_template(program: CobolProgram) -> str | None:
             '    commarea = session.get("commarea", {})',
             '    return render_template("index.html", **commarea)',
         ])
+    return lines
 
-    # Generate COMMAREA as session state
+
+def _cics_hint_section(
+    commareas: list[str], transids: list[str],
+) -> list[str]:
+    """Generate COMMAREA and TRANSID hint comments."""
+    lines: list[str] = []
     if commareas:
-        lines.extend([
-            "",
-            "",
-            "# COMMAREA fields (stored in Flask session):",
-        ])
+        lines.extend(["", "", "# COMMAREA fields (stored in Flask session):"])
         for field in commareas:
             lines.append(f"#   {field}")
-
-    # Generate TRANSID mapping
     if transids:
-        lines.extend([
-            "",
-            "",
-            "# CICS Transaction IDs:",
-        ])
+        lines.extend(["", "", "# CICS Transaction IDs:"])
         for tid in transids:
             lines.append(f"#   {tid} -> /{_to_python_name(tid)}")
+    return lines
 
-    # Generate HTML template hints
-    lines.extend([
-        "",
-        "",
+
+def _cics_html_section(program: CobolProgram) -> list[str]:
+    """Generate HTML template hints from SCREEN SECTION."""
+    lines = [
+        "", "",
         "# --- HTML Template Generation ---",
         "# Place templates in templates/ directory.",
         "#",
-    ])
-
-    # Generate simple HTML from SCREEN SECTION if available
+    ]
     if program.screen_section:
         for screen in program.screen_section:
             html = _generate_html_from_screen(screen)
@@ -325,50 +286,83 @@ def generate_cics_template(program: CobolProgram) -> str | None:
                 for html_line in html:
                     lines.append(f"# {html_line}")
                 lines.append("#")
+    return lines
 
+
+def _cics_resp_section(program: CobolProgram) -> list[str]:
+    """Generate RESP/RESP2 error handling code."""
+    resp_fields = _extract_resp_fields(program)
+    if not resp_fields:
+        return []
+    lines = [
+        "", "",
+        "# --- CICS RESP Error Handling ---",
+        "# Map CICS RESP codes to Python exception handling.",
+        "CICS_RESP_CODES = {",
+    ]
+    for code, name in sorted(CICS_RESP_CODES.items()):
+        lines.append(f"    {code}: '{name}',")
+    lines.append("}")
     lines.extend([
-        "",
-        "",
-        'if __name__ == "__main__":',
-        "    app.run(debug=True)",
+        "", "",
+        "def check_cics_resp(resp_value, operation=''):",
+        "    \"\"\"Check CICS RESP code and raise on error.\"\"\"",
+        "    code_name = CICS_RESP_CODES.get(resp_value, f'UNKNOWN({resp_value})')",
+        "    if resp_value != 0:",
+        "        raise RuntimeError(",
+        "            f'CICS {operation} failed: RESP={resp_value} ({code_name})'",
+        "        )",
         "",
     ])
+    for resp_var, resp2_var in resp_fields:
+        py_resp = _to_python_name(resp_var)
+        lines.append(f"# RESP variable: {resp_var} -> self.data.{py_resp}")
+        if resp2_var:
+            py_resp2 = _to_python_name(resp2_var)
+            lines.append(
+                f"# RESP2 variable: {resp2_var} -> self.data.{py_resp2}"
+            )
+    return lines
 
-    # RESP/RESP2 error handling mapping
-    resp_fields = _extract_resp_fields(program)
-    if resp_fields:
-        lines.extend([
-            "",
-            "",
-            "# --- CICS RESP Error Handling ---",
-            "# Map CICS RESP codes to Python exception handling.",
-            "CICS_RESP_CODES = {",
-        ])
-        for code, name in sorted(CICS_RESP_CODES.items()):
-            lines.append(f"    {code}: '{name}',")
-        lines.append("}")
-        lines.extend([
-            "",
-            "",
-            "def check_cics_resp(resp_value, operation=''):",
-            "    \"\"\"Check CICS RESP code and raise on error.\"\"\"",
-            "    code_name = CICS_RESP_CODES.get(resp_value, f'UNKNOWN({resp_value})')",
-            "    if resp_value != 0:",
-            "        raise RuntimeError(",
-            "            f'CICS {operation} failed: RESP={resp_value} ({code_name})'",
-            "        )",
-            "",
-        ])
-        for resp_var, resp2_var in resp_fields:
-            py_resp = _to_python_name(resp_var)
-            lines.extend([
-                f"# RESP variable: {resp_var} -> self.data.{py_resp}",
-            ])
-            if resp2_var:
-                py_resp2 = _to_python_name(resp2_var)
-                lines.append(
-                    f"# RESP2 variable: {resp2_var} -> self.data.{py_resp2}"
-                )
+
+def generate_cics_template(program: CobolProgram) -> str | None:
+    """Generate a Flask application template from CICS patterns.
+
+    Returns None if the program doesn't use CICS.
+    """
+    if not has_cics(program):
+        return None
+
+    pid = _to_python_name(program.program_id or "cics_app")
+    maps = _extract_maps(program)
+    transids = _extract_transids(program)
+    commareas = _extract_commareas(program)
+
+    lines = [
+        '"""',
+        f"Flask application template generated from CICS program:"
+        f" {program.program_id}",
+        "",
+        "This is a STARTING POINT for migrating CICS online transactions"
+        " to a web application.",
+        "Review and modify before production use.",
+        "",
+        "Install: pip install flask",
+        f"Run: flask --app {pid}_flask run",
+        '"""',
+        "",
+        "from flask import Flask, render_template, request,"
+        " session, redirect, url_for",
+        "",
+        f"app = Flask(__name__)",
+        'app.secret_key = "TODO-change-this-secret-key"',
+        "",
+    ]
+    lines.extend(_cics_route_section(maps))
+    lines.extend(_cics_hint_section(commareas, transids))
+    lines.extend(_cics_html_section(program))
+    lines.extend(["", "", 'if __name__ == "__main__":', "    app.run(debug=True)", ""])
+    lines.extend(_cics_resp_section(program))
 
     return "\n".join(lines)
 

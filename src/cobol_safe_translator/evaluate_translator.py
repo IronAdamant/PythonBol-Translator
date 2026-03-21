@@ -109,7 +109,7 @@ def _translate_evaluate_also(
                     continue
                 if j < len(is_true) and is_true[j]:
                     cond_parts.append(translate_cond_fn(part_text))
-                elif j < len(subject_exprs) and subject_exprs[j]:
+                elif j < len(subject_exprs) and subject_exprs[j] and part:
                     cond_parts.append(
                         f"{subject_exprs[j]} == {resolve_operand_fn(part[0])}"
                     )

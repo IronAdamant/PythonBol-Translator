@@ -248,6 +248,7 @@ def resolve_operand(op: str) -> str:
     if rm:
         name, start, length = rm.group(1), int(rm.group(2)), int(rm.group(3))
         py = _to_python_name(name)
+        start = max(start, 1)  # COBOL positions are 1-based; clamp invalid 0
         return f"str(self.data.{py}.value)[{start - 1}:{start - 1 + length}]"
     # Subscript access: TABLE(IDX) or TABLE(1) — no colon
     sub = _resolve_subscript_base(op)

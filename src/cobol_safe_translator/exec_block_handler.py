@@ -87,6 +87,137 @@ def _normalize_sql(sql_text: str) -> tuple[str, str]:
     return text, text.upper().strip()
 
 
+def _try_include(text: str, upper: str) -> SqlBlock | None:
+    if upper.startswith("INCLUDE") and "SQLCA" in upper:
+        return SqlBlock(sql_type="INCLUDE", raw_sql=text)
+    return None
+
+
+def _try_whenever(text: str, upper: str) -> SqlBlock | None:
+    m = re.match(r"WHENEVER\s+(SQLERROR|NOT\s+FOUND)\s+(.*)", upper)
+    if m:
+        return SqlBlock(
+            sql_type="WHENEVER", raw_sql=text,
+            whenever_condition=m.group(1).strip(),
+            whenever_action=m.group(2).strip(),
+        )
+    return None
+
+
+def _try_declare(text: str, upper: str) -> SqlBlock | None:
+    m = re.match(r"DECLARE\s+(\S+)\s+CURSOR\s+FOR\s+(.*)", text, re.IGNORECASE)
+    if m:
+        body = m.group(2).strip()
+        return SqlBlock(
+            sql_type="DECLARE", raw_sql=text,
+            cursor_name=m.group(1).strip(),
+            host_variables=_HOST_VAR_RE.findall(body),
+            sql_body=body,
+        )
+    return None
+
+
+def _try_open(text: str, upper: str) -> SqlBlock | None:
+    m = re.match(r"OPEN\s+(\S+)\s*$", text, re.IGNORECASE)
+    if m:
+        return SqlBlock(sql_type="OPEN", raw_sql=text, cursor_name=m.group(1).strip())
+    return None
+
+
+def _try_fetch(text: str, upper: str) -> SqlBlock | None:
+    m = re.match(r"FETCH\s+(\S+)\s+INTO\s+(.*)", text, re.IGNORECASE)
+    if m:
+        return SqlBlock(
+            sql_type="FETCH", raw_sql=text,
+            cursor_name=m.group(1).strip(),
+            into_variables=_HOST_VAR_RE.findall(m.group(2)),
+        )
+    return None
+
+
+def _try_close(text: str, upper: str) -> SqlBlock | None:
+    m = re.match(r"CLOSE\s+(\S+)\s*$", text, re.IGNORECASE)
+    if m:
+        return SqlBlock(sql_type="CLOSE", raw_sql=text, cursor_name=m.group(1).strip())
+    return None
+
+
+def _try_select_into(text: str, upper: str) -> SqlBlock | None:
+    m = re.match(r"(SELECT\s+.+?)\s+INTO\s+(.+?)\s+FROM\s+(.*)", text, re.IGNORECASE)
+    if m:
+        from_part = m.group(3).strip()
+        table_m = re.match(r"\S+", from_part)
+        return SqlBlock(
+            sql_type="SELECT", raw_sql=text,
+            into_variables=_HOST_VAR_RE.findall(m.group(2)),
+            host_variables=_HOST_VAR_RE.findall(from_part),
+            sql_body=f"{m.group(1).strip()} FROM {from_part}",
+            table_name=table_m.group(0) if table_m else "",
+        )
+    return None
+
+
+def _try_insert(text: str, upper: str) -> SqlBlock | None:
+    m = re.match(r"INSERT\s+INTO\s+(\S+)\b(.*)", text, re.IGNORECASE)
+    if m:
+        return SqlBlock(
+            sql_type="INSERT", raw_sql=text,
+            table_name=m.group(1).strip(),
+            host_variables=_HOST_VAR_RE.findall(text), sql_body=text,
+        )
+    return None
+
+
+def _try_update(text: str, upper: str) -> SqlBlock | None:
+    m = re.match(r"UPDATE\s+(\S+)\b(.*)", text, re.IGNORECASE)
+    if m:
+        return SqlBlock(
+            sql_type="UPDATE", raw_sql=text,
+            table_name=m.group(1).strip(),
+            host_variables=_HOST_VAR_RE.findall(text), sql_body=text,
+        )
+    return None
+
+
+def _try_delete(text: str, upper: str) -> SqlBlock | None:
+    m = re.match(r"DELETE\s+FROM\s+(\S+)\b(.*)", text, re.IGNORECASE)
+    if m:
+        return SqlBlock(
+            sql_type="DELETE", raw_sql=text,
+            table_name=m.group(1).strip(),
+            host_variables=_HOST_VAR_RE.findall(text), sql_body=text,
+        )
+    return None
+
+
+def _try_bare_select(text: str, upper: str) -> SqlBlock | None:
+    m = re.match(r"SELECT\b(.*)", text, re.IGNORECASE)
+    if m:
+        table_m = re.search(r"FROM\s+(\S+)", text, re.IGNORECASE)
+        return SqlBlock(
+            sql_type="SELECT", raw_sql=text,
+            host_variables=_HOST_VAR_RE.findall(text), sql_body=text,
+            table_name=table_m.group(1) if table_m else "",
+        )
+    return None
+
+
+def _try_commit_rollback(text: str, upper: str) -> SqlBlock | None:
+    if upper.startswith("COMMIT"):
+        return SqlBlock(sql_type="COMMIT", raw_sql=text)
+    if upper.startswith("ROLLBACK"):
+        return SqlBlock(sql_type="ROLLBACK", raw_sql=text)
+    return None
+
+
+# Ordered parser chain — SELECT INTO must precede bare SELECT
+_SQL_PARSERS = [
+    _try_include, _try_whenever, _try_declare, _try_open,
+    _try_fetch, _try_close, _try_select_into, _try_insert,
+    _try_update, _try_delete, _try_bare_select, _try_commit_rollback,
+]
+
+
 def _parse_sql_block(sql_text: str) -> SqlBlock | None:
     """Parse EXEC SQL text into a structured SqlBlock.
 
@@ -94,112 +225,10 @@ def _parse_sql_block(sql_text: str) -> SqlBlock | None:
     """
     try:
         text, upper = _normalize_sql(sql_text)
-
-        if upper.startswith("INCLUDE") and "SQLCA" in upper:
-            return SqlBlock(sql_type="INCLUDE", raw_sql=text)
-
-        m = re.match(r"WHENEVER\s+(SQLERROR|NOT\s+FOUND)\s+(.*)", upper)
-        if m:
-            return SqlBlock(
-                sql_type="WHENEVER", raw_sql=text,
-                whenever_condition=m.group(1).strip(),
-                whenever_action=m.group(2).strip(),
-            )
-
-        m = re.match(
-            r"DECLARE\s+(\S+)\s+CURSOR\s+FOR\s+(.*)", text, re.IGNORECASE,
-        )
-        if m:
-            cursor_name = m.group(1).strip()
-            body = m.group(2).strip()
-            return SqlBlock(
-                sql_type="DECLARE", raw_sql=text,
-                cursor_name=cursor_name,
-                host_variables=_HOST_VAR_RE.findall(body),
-                sql_body=body,
-            )
-
-        m = re.match(r"OPEN\s+(\S+)\s*$", text, re.IGNORECASE)
-        if m:
-            return SqlBlock(
-                sql_type="OPEN", raw_sql=text,
-                cursor_name=m.group(1).strip(),
-            )
-
-        m = re.match(r"FETCH\s+(\S+)\s+INTO\s+(.*)", text, re.IGNORECASE)
-        if m:
-            return SqlBlock(
-                sql_type="FETCH", raw_sql=text,
-                cursor_name=m.group(1).strip(),
-                into_variables=_HOST_VAR_RE.findall(m.group(2)),
-            )
-
-        m = re.match(r"CLOSE\s+(\S+)\s*$", text, re.IGNORECASE)
-        if m:
-            return SqlBlock(
-                sql_type="CLOSE", raw_sql=text,
-                cursor_name=m.group(1).strip(),
-            )
-
-        m = re.match(
-            r"(SELECT\s+.+?)\s+INTO\s+(.+?)\s+FROM\s+(.*)",
-            text, re.IGNORECASE,
-        )
-        if m:
-            select_part = m.group(1).strip()
-            from_part = m.group(3).strip()
-            table_m = re.match(r"\S+", from_part)
-            return SqlBlock(
-                sql_type="SELECT", raw_sql=text,
-                into_variables=_HOST_VAR_RE.findall(m.group(2)),
-                host_variables=_HOST_VAR_RE.findall(from_part),
-                sql_body=f"{select_part} FROM {from_part}",
-                table_name=table_m.group(0) if table_m else "",
-            )
-
-        m = re.match(r"INSERT\s+INTO\s+(\S+)\b(.*)", text, re.IGNORECASE)
-        if m:
-            return SqlBlock(
-                sql_type="INSERT", raw_sql=text,
-                table_name=m.group(1).strip(),
-                host_variables=_HOST_VAR_RE.findall(text),
-                sql_body=text,
-            )
-
-        m = re.match(r"UPDATE\s+(\S+)\b(.*)", text, re.IGNORECASE)
-        if m:
-            return SqlBlock(
-                sql_type="UPDATE", raw_sql=text,
-                table_name=m.group(1).strip(),
-                host_variables=_HOST_VAR_RE.findall(text),
-                sql_body=text,
-            )
-
-        m = re.match(r"DELETE\s+FROM\s+(\S+)\b(.*)", text, re.IGNORECASE)
-        if m:
-            return SqlBlock(
-                sql_type="DELETE", raw_sql=text,
-                table_name=m.group(1).strip(),
-                host_variables=_HOST_VAR_RE.findall(text),
-                sql_body=text,
-            )
-
-        # Bare SELECT (without INTO -- e.g. SELECT * FROM ...)
-        m = re.match(r"SELECT\b(.*)", text, re.IGNORECASE)
-        if m:
-            table_m = re.search(r"FROM\s+(\S+)", text, re.IGNORECASE)
-            return SqlBlock(
-                sql_type="SELECT", raw_sql=text,
-                host_variables=_HOST_VAR_RE.findall(text),
-                sql_body=text,
-                table_name=table_m.group(1) if table_m else "",
-            )
-
-        if upper.startswith("COMMIT"):
-            return SqlBlock(sql_type="COMMIT", raw_sql=text)
-        if upper.startswith("ROLLBACK"):
-            return SqlBlock(sql_type="ROLLBACK", raw_sql=text)
-
+        for parser in _SQL_PARSERS:
+            result = parser(text, upper)
+            if result is not None:
+                return result
         return None
     except (ValueError, IndexError, KeyError, AttributeError):
         return None

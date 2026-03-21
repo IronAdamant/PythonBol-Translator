@@ -207,29 +207,9 @@ class CodegenMixin:
         _utils._collision_reverse_map = dict(reverse)
 
         # Emit __post_init__ to wire REDEFINES aliases to originals
-        wiring = getattr(self, '_redefines_wiring', [])
-        if wiring:
-            # Map field name → its original for chain following
-            orig_map = {w[0]: w[1] for w in wiring}
-
-            lines.append("")
-            lines.append("    def __post_init__(self) -> None:")
-            lines.append('        """Wire REDEFINES aliases to their original fields."""')
-            for field_py, orig_py, offset, sz, is_num, decs in wiring:
-                # Follow REDEFINES chain to root (C REDEFINES B REDEFINES A → use A)
-                root_py = orig_py
-                while root_py in orig_map:
-                    root_py = orig_map[root_py]
-                if offset == -1:
-                    lines.append(
-                        f"        object.__setattr__(self, '{field_py}', "
-                        f"RedefinesAlias(self.{root_py}, {sz}, {is_num}, {decs}))"
-                    )
-                else:
-                    lines.append(
-                        f"        object.__setattr__(self, '{field_py}', "
-                        f"RedefinesSlice(self.{root_py}, {offset}, {sz}, {is_num}, {decs}))"
-                    )
+        post_init = self._emit_post_init_wiring()
+        if post_init:
+            lines.extend(post_init)
 
         # Append SCREEN SECTION layout as comments
         screen_comments = self._screen_layout_comments()
@@ -239,6 +219,32 @@ class CodegenMixin:
         lines.append("")
         lines.append("")
         return "\n".join(lines)
+
+    def _emit_post_init_wiring(self) -> list[str]:
+        """Generate __post_init__ lines to wire REDEFINES aliases to originals."""
+        wiring = getattr(self, '_redefines_wiring', [])
+        if not wiring:
+            return []
+        orig_map = {w[0]: w[1] for w in wiring}
+        lines: list[str] = []
+        lines.append("")
+        lines.append("    def __post_init__(self) -> None:")
+        lines.append('        """Wire REDEFINES aliases to their original fields."""')
+        for field_py, orig_py, offset, sz, is_num, decs in wiring:
+            root_py = orig_py
+            while root_py in orig_map:
+                root_py = orig_map[root_py]
+            if offset == -1:
+                lines.append(
+                    f"        object.__setattr__(self, '{field_py}', "
+                    f"RedefinesAlias(self.{root_py}, {sz}, {is_num}, {decs}))"
+                )
+            else:
+                lines.append(
+                    f"        object.__setattr__(self, '{field_py}', "
+                    f"RedefinesSlice(self.{root_py}, {offset}, {sz}, {is_num}, {decs}))"
+                )
+        return lines
 
     def _resolve_field_name(self, item: DataItem, parent_group: str | None) -> str:
         """Resolve a data item's Python field name with collision and dedup handling.
@@ -520,18 +526,9 @@ class CodegenMixin:
 
         return lines
 
-    def _program_class(self) -> str:
-        """Generate the main program class with paragraph methods."""
-        class_name = self._class_name
-        data_class = f"{class_name}Data"
-
-        lines = [f"class {class_name}Program:"]
-        lines.append(f'    """Translated from COBOL program {self._program_id}."""')
-        lines.append("")
-        lines.append(f"    def __init__(self) -> None:")
-        lines.append(f"        self.data = {data_class}()")
-
-        # File adapters
+    def _generate_file_adapters(self) -> list[str]:
+        """Generate FileAdapter/IndexedFileAdapter init lines for __init__."""
+        lines: list[str] = []
         for fc in self.program.file_controls:
             py_name = _to_python_name(fc.select_name)
             safe_path = fc.assign_to.replace("\\", "\\\\")
@@ -554,27 +551,16 @@ class CodegenMixin:
                     f'        # FILE STATUS linked: self.data.{py_status}'
                     f' updated from self.{py_name}.status after each I/O'
                 )
+        return lines
 
-        # SQL connection setup (when EXEC SQL blocks are present)
-        if self.program.sql_blocks:
-            from .sql_translator import generate_sql_init
-            for init_line in generate_sql_init():
-                lines.append(init_line)
-
-        # DLI connection setup (when EXEC DLI blocks are present)
-        if self.program.dli_blocks:
-            from .dli_translator import generate_dli_init
-            for init_line in generate_dli_init():
-                lines.append(init_line)
-
-        # ALTER state variables (dynamic GO TO dispatch)
+    def _generate_alter_state_vars(self) -> list[str]:
+        """Generate ALTER dynamic GO TO state variable init lines."""
         from .cfg import build_cfg
         cfg = build_cfg(self.program)
+        lines: list[str] = []
         for am in cfg.alter_mappings:
             py_altered = _to_method_name(am.altered_paragraph)
-            # Find original GO TO target for this paragraph
             original_target = _to_method_name(am.altered_paragraph)
-            # Search for GO TO in the altered paragraph to find default target
             for para in self.program.paragraphs:
                 if para.name.upper() == am.altered_paragraph.upper():
                     for stmt in para.statements:
@@ -591,6 +577,36 @@ class CodegenMixin:
                 f"        self._goto_target_{py_altered} = '{original_target}'"
                 f"  # ALTER default target"
             )
+        return lines
+
+    def _program_class(self) -> str:
+        """Generate the main program class with paragraph methods."""
+        class_name = self._class_name
+        data_class = f"{class_name}Data"
+
+        lines = [f"class {class_name}Program:"]
+        lines.append(f'    """Translated from COBOL program {self._program_id}."""')
+        lines.append("")
+        lines.append(f"    def __init__(self) -> None:")
+        lines.append(f"        self.data = {data_class}()")
+
+        # File adapters
+        lines.extend(self._generate_file_adapters())
+
+        # SQL connection setup (when EXEC SQL blocks are present)
+        if self.program.sql_blocks:
+            from .sql_translator import generate_sql_init
+            for init_line in generate_sql_init():
+                lines.append(init_line)
+
+        # DLI connection setup (when EXEC DLI blocks are present)
+        if self.program.dli_blocks:
+            from .dli_translator import generate_dli_init
+            for init_line in generate_dli_init():
+                lines.append(init_line)
+
+        # ALTER state variables (dynamic GO TO dispatch)
+        lines.extend(self._generate_alter_state_vars())
 
         # Register USE declarative handlers
         for decl in self.program.declaratives:
