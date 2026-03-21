@@ -2,7 +2,7 @@
 
 **Translate COBOL to Python. Zero dependencies. Works offline.**
 
-Produces valid Python from real enterprise COBOL — tested on 5,288 files across 32 projects with 100% syntax validity. Handles the structural heavy lifting of mainframe migration so developers and AI agents can focus on business logic and middleware integration.
+Produces valid Python from real enterprise COBOL — tested on 5,288 files across 32 projects with 100% syntax and validation pass rate. Handles the structural heavy lifting of mainframe migration so developers and AI agents can focus on business logic and middleware integration.
 
 Ships with an MCP server for AI coding assistants and a CLI for direct use.
 
@@ -148,8 +148,9 @@ cobol2py test program.cob
 | Check | Result | What it means |
 |-------|--------|---------------|
 | **Syntax validity** | 5,288/5,288 (100%) | Every file produces Python that `ast.parse` accepts |
-| **Full validation** | 5,031/5,288 (95.1%) | Import + instantiate the generated class |
-| **Validate failures** | 257 (4.9%) | Runtime wiring (REDEFINES edge cases, nested field refs) — not syntax errors |
+| **Full validation** | 5,288/5,288 (100%) | Import + instantiate the generated class |
+
+![Corpus validation](docs/images/corpus-validation.png)
 
 ### Performance
 

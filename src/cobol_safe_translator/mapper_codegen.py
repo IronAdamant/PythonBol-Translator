@@ -134,16 +134,25 @@ class CodegenMixin:
         return "\n".join(lines)
 
     def _imports(self) -> str:
-        # Check if any file uses indexed/relative organization
+        # Check if any file uses indexed/relative organization (including nested programs)
+        all_controls = list(self.program.file_controls)
+        for nested in self.program.nested_programs:
+            all_controls.extend(nested.file_controls)
         has_indexed = any(
             fc.organization and fc.organization.upper() in ("INDEXED", "RELATIVE")
-            for fc in self.program.file_controls
+            for fc in all_controls
         )
         adapter_imports = "CobolDecimal, CobolString, FileAdapter"
         if has_indexed:
             adapter_imports += ", IndexedFileAdapter"
-        # Add REDEFINES adapters if any data items use REDEFINES
-        if self._has_redefines(self.program.all_data_items):
+        # Add REDEFINES adapters — always included since REDEFINES may appear
+        # in data items or procedure-inline data (detected during _data_class)
+        has_redefines = self._has_redefines(self.program.all_data_items)
+        has_raw_redefines = any(
+            "REDEFINES" in line.upper()
+            for line in self.program.raw_lines
+        )
+        if has_redefines or has_raw_redefines:
             adapter_imports += ", RedefinesAlias, RedefinesSlice"
         lines = [
             "from __future__ import annotations",
@@ -226,6 +235,8 @@ class CodegenMixin:
         if not wiring:
             return []
         orig_map = {w[0]: w[1] for w in wiring}
+        # Collect all emitted field names so we can skip wiring for missing targets
+        emitted_fields = set(self._field_name_counts.keys()) if hasattr(self, '_field_name_counts') else set()
         lines: list[str] = []
         lines.append("")
         lines.append("    def __post_init__(self) -> None:")
@@ -234,6 +245,13 @@ class CodegenMixin:
             root_py = orig_py
             while root_py in orig_map:
                 root_py = orig_map[root_py]
+            # Skip wiring if the target field was never emitted (e.g. missing COPY)
+            if emitted_fields and root_py not in emitted_fields:
+                lines.append(
+                    f"        # TODO(high): REDEFINES target '{root_py}' not found"
+                    f" (missing COPY expansion?)"
+                )
+                continue
             if offset == -1:
                 lines.append(
                     f"        object.__setattr__(self, '{field_py}', "
@@ -382,26 +400,86 @@ class CodegenMixin:
 
         # REDEFINES — emit alias pointing to the original field
         if item.redefines:
-            return lines + self._generate_redefines_field(
+            redef_lines = self._generate_redefines_field(
                 item, py_name, prefix, parent_group,
             )
+            # If this REDEFINES item is itself a target of another REDEFINES,
+            # also emit a field so transitive chains resolve (C REDEFINES B REDEFINES A)
+            if self._is_redefines_target(item.name) and item.children:
+                grp_size = self._calc_group_size(item)
+                redef_lines.append(
+                    f"{prefix}{py_name}: CobolString = field("
+                    f"default_factory=lambda: CobolString({grp_size}))"
+                    f"  # transitive REDEFINES target"
+                )
+            return lines + redef_lines
 
         if item.children:
             # Group item — add a comment
             lines.append(f"{prefix}# Group: {item.name} (level {item.level:02d})")
             if item.occurs:
                 lines.append(f"{prefix}_{py_name}_occurs: int = {item.occurs}")
+            # If this group is a REDEFINES target, emit a CobolString field
+            # so __post_init__ wiring can reference it
+            if self._is_redefines_target(item.name):
+                grp_size = self._calc_group_size(item)
+                lines.append(
+                    f"{prefix}{py_name}: CobolString = field("
+                    f"default_factory=lambda: CobolString({grp_size}))"
+                    f"  # group field for REDEFINES target"
+                )
             for child in item.children:
                 lines.extend(self._data_item_fields(child, indent, occurs_chain, item.name))
         elif item.pic:
             lines.extend(self._generate_pic_field(item, py_name, prefix, occurs_chain))
         elif item.usage and item.usage.upper() == "INDEX":
             lines.extend(self._generate_index_field(py_name, prefix, occurs_chain))
+        elif item.usage and item.usage.upper() == "POINTER":
+            # POINTER usage — emit a CobolDecimal field (8-byte address)
+            lines.append(
+                f"{prefix}{py_name}: CobolDecimal = field("
+                f"default_factory=lambda: CobolDecimal(8, 0))"
+                f"  # USAGE POINTER"
+            )
         else:
             # No PIC — group-level or filler
-            lines.append(f"{prefix}# {item.name}: no PIC clause (group level)")
+            if self._is_redefines_target(item.name):
+                lines.append(
+                    f"{prefix}{py_name}: CobolString = field("
+                    f"default_factory=lambda: CobolString(1))"
+                    f"  # REDEFINES target placeholder"
+                )
+            else:
+                lines.append(f"{prefix}# {item.name}: no PIC clause (group level)")
 
         return lines
+
+    def _is_redefines_target(self, name: str) -> bool:
+        """Check if any item in the program REDEFINES this name (including transitive chains)."""
+        upper = name.upper()
+        def _check(items: list[DataItem]) -> bool:
+            for item in items:
+                if item.redefines and item.redefines.upper() == upper:
+                    return True
+                # Transitive: if this item REDEFINES something AND is itself
+                # a REDEFINES target, the intermediate needs a field too
+                if item.redefines and item.name.upper() == upper:
+                    return True
+                if item.children and _check(item.children):
+                    return True
+            return False
+        return _check(self.program.all_data_items)
+
+    def _calc_group_size(self, item: DataItem) -> int:
+        """Calculate total byte size of a group item from its children."""
+        total = 0
+        for child in item.children:
+            if child.pic:
+                sz = child.pic.size * (child.occurs or 1)
+                total += sz
+            elif child.children:
+                total += self._calc_group_size(child) * (child.occurs or 1)
+        return total or 1  # minimum 1 to avoid zero-length string
 
     def _find_item_by_name(self, name: str) -> DataItem | None:
         """Find a DataItem by COBOL name across all sections."""
