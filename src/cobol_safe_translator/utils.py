@@ -18,6 +18,15 @@ _qualified_field_map: dict[tuple[str, str], str] = {}
 # Built from _qualified_field_map; allows resolving unqualified colliding names.
 _collision_reverse_map: dict[str, list[str]] = {}
 
+# Valid operators inside COMPUTE / arithmetic expressions
+EXPR_OPERATORS = frozenset({"+", "-", "*", "/", "(", ")", "**"})
+
+# COBOL bitwise operators → Python equivalents
+BITWISE_OPS: dict[str, str] = {
+    "B-AND": "&", "B-OR": "|", "B-XOR": "^", "B-NOT": "~",
+    "B-SHIFT-L": "<<", "B-SHIFT-R": ">>",
+}
+
 
 def coalesce_qualified(ops: list[str]) -> list[str]:
     """Merge OF/IN qualified names into single operands.

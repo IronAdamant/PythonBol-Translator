@@ -43,20 +43,21 @@ def translate_dli_block(block: DliBlock) -> list[str]:
     seg = block.segment_name or "segment"
     py_seg = _cobol_to_python_name(seg)
 
-    if dli_type in ("GU", "GHU"):
-        return _translate_get_unique(block, py_seg)
-    if dli_type in ("GN", "GHN"):
-        return _translate_get_next(block, py_seg)
-    if dli_type in ("GNP", "GHNP"):
-        return _translate_get_next_parent(block, py_seg)
-    if dli_type == "ISRT":
-        return _translate_insert(block, py_seg)
-    if dli_type == "REPL":
-        return _translate_replace(block, py_seg)
-    if dli_type == "DLET":
-        return _translate_delete(block, py_seg)
-
-    return [f"# DLI: (unrecognized type: {dli_type})", f"# {block.raw_dli}"]
+    match dli_type:
+        case "GU" | "GHU":
+            return _translate_get_unique(block, py_seg)
+        case "GN" | "GHN":
+            return _translate_get_next(block, py_seg)
+        case "GNP" | "GHNP":
+            return _translate_get_next_parent(block, py_seg)
+        case "ISRT":
+            return _translate_insert(block, py_seg)
+        case "REPL":
+            return _translate_replace(block, py_seg)
+        case "DLET":
+            return _translate_delete(block, py_seg)
+        case _:
+            return [f"# DLI: (unrecognized type: {dli_type})", f"# {block.raw_dli}"]
 
 
 def _translate_get_unique(block: DliBlock, py_seg: str) -> list[str]:

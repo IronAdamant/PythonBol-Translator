@@ -2,6 +2,7 @@
 
 import ast
 
+from conftest import make_cobol as _make_cobol
 from cobol_safe_translator.analyzer import analyze
 from cobol_safe_translator.mapper import generate_python
 from cobol_safe_translator.parser import parse_cobol, parse_data_division, parse_environment
@@ -14,27 +15,12 @@ from cobol_safe_translator.string_translators import (
 )
 from cobol_safe_translator.utils import _to_python_name
 
-
-def _make_cobol(procedure_lines: list[str], data_lines: list[str] | None = None) -> str:
-    """Build minimal COBOL source with optional custom data division and procedure lines."""
-    lines = [
-        "       IDENTIFICATION DIVISION.",
-        "       PROGRAM-ID. TEST-PROG.",
-        "       DATA DIVISION.",
-        "       WORKING-STORAGE SECTION.",
-    ]
-    if data_lines:
-        for dl in data_lines:
-            lines.append(f"       {dl}")
-    else:
-        lines.append("       01 WS-A PIC X(20).")
-        lines.append("       01 WS-B PIC X(20).")
-        lines.append("       01 WS-C PIC X(20).")
-    lines.append("       PROCEDURE DIVISION.")
-    lines.append("       MAIN-PARA.")
-    for pl in procedure_lines:
-        lines.append(f"           {pl}")
-    return "\n".join(lines) + "\n"
+# Default data lines for string translator tests (PIC X(20) fields)
+_X20_DATA = [
+    "       01 WS-A PIC X(20).",
+    "       01 WS-B PIC X(20).",
+    "       01 WS-C PIC X(20).",
+]
 
 
 def _simple_resolve(tok: str) -> str:
@@ -287,6 +273,7 @@ class TestEndToEndStringTranslation:
     def test_string_generates_valid_python(self):
         src = _make_cobol(
             ['STRING WS-A DELIMITED BY SIZE WS-B DELIMITED BY SIZE INTO WS-C.'],
+            data_lines=_X20_DATA,
         )
         program = parse_cobol(src)
         smap = analyze(program)
@@ -297,6 +284,7 @@ class TestEndToEndStringTranslation:
     def test_unstring_generates_valid_python(self):
         src = _make_cobol(
             ['UNSTRING WS-A DELIMITED BY "," INTO WS-B WS-C.'],
+            data_lines=_X20_DATA,
         )
         program = parse_cobol(src)
         smap = analyze(program)
@@ -307,6 +295,7 @@ class TestEndToEndStringTranslation:
     def test_inspect_tallying_generates_valid_python(self):
         src = _make_cobol(
             ['INSPECT WS-A TALLYING WS-B FOR ALL "X".'],
+            data_lines=_X20_DATA,
         )
         program = parse_cobol(src)
         smap = analyze(program)
@@ -317,6 +306,7 @@ class TestEndToEndStringTranslation:
     def test_inspect_replacing_generates_valid_python(self):
         src = _make_cobol(
             ['INSPECT WS-A REPLACING ALL "X" BY "Y".'],
+            data_lines=_X20_DATA,
         )
         program = parse_cobol(src)
         smap = analyze(program)

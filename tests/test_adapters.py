@@ -1,7 +1,6 @@
 """Tests for the runtime adapter classes."""
 
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 

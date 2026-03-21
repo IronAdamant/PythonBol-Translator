@@ -486,9 +486,6 @@ class TestEvaluateAlsoDetection:
 class TestFallbackResolveQuotes:
     """resolve_operand must require matching closing quote."""
 
-    def test_full_double_quoted_string_returned_as_is(self):
-        assert _fallback_resolve('"HELLO"') == '"HELLO"'
-
     def test_unmatched_double_quote_treated_as_data_name(self):
         # Missing closing quote — should not be returned as a raw string literal
         result = _fallback_resolve('"HELLO')

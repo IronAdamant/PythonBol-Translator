@@ -72,18 +72,6 @@ def _find_colliding_names(items: list[DataItem]) -> set[str]:
 class CodegenMixin:
     """Code generation methods for PythonMapper."""
 
-    def generate(self) -> str:
-        """Generate the complete Python module source."""
-        self._program_id = self.program.program_id or "UNNAMED"
-        self._class_name = _to_python_name(self._program_id).title().replace("_", "")
-        parts: list[str] = []
-        parts.append(self._header())
-        parts.append(self._imports())
-        parts.append(self._data_class())
-        parts.append(self._program_class())
-        parts.append(self._main_block())
-        return "\n".join(parts)
-
     def _header(self) -> str:
         safe_path = str(self.program.source_path).replace('"""', r'\"\"\"')
         lines = [
@@ -231,7 +219,7 @@ class CodegenMixin:
 
     def _emit_post_init_wiring(self) -> list[str]:
         """Generate __post_init__ lines to wire REDEFINES aliases to originals."""
-        wiring = getattr(self, '_redefines_wiring', [])
+        wiring = self._redefines_wiring
         if not wiring:
             return []
         orig_map = {w[0]: w[1] for w in wiring}
@@ -481,20 +469,6 @@ class CodegenMixin:
                 total += self._calc_group_size(child) * (child.occurs or 1)
         return total or 1  # minimum 1 to avoid zero-length string
 
-    def _find_item_by_name(self, name: str) -> DataItem | None:
-        """Find a DataItem by COBOL name across all sections."""
-        upper = name.upper()
-        def _search(items: list[DataItem]) -> DataItem | None:
-            for item in items:
-                if item.name.upper() == upper:
-                    return item
-                if item.children:
-                    found = _search(item.children)
-                    if found:
-                        return found
-            return None
-        return _search(self.program.all_data_items)
-
     def _has_occurs_depending(self, item: DataItem) -> bool:
         """Check if an item or its children use OCCURS DEPENDING ON."""
         if item.occurs_depending:
@@ -509,7 +483,7 @@ class CodegenMixin:
         original_py = _to_python_name(item.redefines)
 
         # Check if the redefined item has OCCURS DEPENDING ON
-        redefined_item = self._find_item_by_name(item.redefines)
+        redefined_item = self._find_data_item(item.redefines)
         if redefined_item and self._has_occurs_depending(redefined_item):
             # Variable-length: emit RedefinesAlias for the whole field,
             # skip static slicing since offsets are runtime-dependent
@@ -522,8 +496,6 @@ class CodegenMixin:
                     f"{prefix}{py_name}: RedefinesAlias = field("
                     f"default_factory=lambda: RedefinesAlias(None, {sz}, {is_num}, {decs}))"
                 )
-                if not hasattr(self, '_redefines_wiring'):
-                    self._redefines_wiring = []
                 self._redefines_wiring.append(
                     (py_name, original_py, -1, sz, is_num, decs)
                 )
@@ -536,8 +508,6 @@ class CodegenMixin:
                         lines.append(f"{prefix}{child_py}: RedefinesAlias = field("
                                      f"default_factory=lambda: RedefinesAlias(None, {child.pic.size}, "
                                      f"{child.pic.category.name in ('NUMERIC', 'EDITED')}, {child.pic.decimals}))")
-                        if not hasattr(self, '_redefines_wiring'):
-                            self._redefines_wiring = []
                         self._redefines_wiring.append(
                             (child_py, original_py, -1, child.pic.size,
                              child.pic.category.name in ("NUMERIC", "EDITED"), child.pic.decimals)
@@ -561,8 +531,6 @@ class CodegenMixin:
                         f"None, {offset}, {sz}, {is_num}, {decs}))"
                     )
                     # Track for __post_init__ wiring
-                    if not hasattr(self, '_redefines_wiring'):
-                        self._redefines_wiring = []
                     self._redefines_wiring.append(
                         (child_py, original_py, offset, sz, is_num, decs)
                     )
@@ -580,8 +548,6 @@ class CodegenMixin:
                                 f"default_factory=lambda: RedefinesSlice("
                                 f"None, {offset}, {gc_sz}, {gc_num}, {gc_decs}))"
                             )
-                            if not hasattr(self, '_redefines_wiring'):
-                                self._redefines_wiring = []
                             self._redefines_wiring.append(
                                 (gc_py, original_py, offset, gc_sz, gc_num, gc_decs)
                             )
@@ -596,8 +562,6 @@ class CodegenMixin:
                 f"default_factory=lambda: RedefinesAlias("
                 f"None, {sz}, {is_num}, {decs}))"
             )
-            if not hasattr(self, '_redefines_wiring'):
-                self._redefines_wiring = []
             self._redefines_wiring.append(
                 (py_name, original_py, -1, sz, is_num, decs)  # -1 = alias, not slice
             )

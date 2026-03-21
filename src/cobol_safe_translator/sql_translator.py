@@ -156,34 +156,31 @@ def translate_sql_block(block: SqlBlock) -> list[str]:
     """
     sql_type = block.sql_type.upper()
 
-    if sql_type == "INCLUDE":
-        return ["# SQL: INCLUDE SQLCA — SQL Communication Area", "self._sqlcode = 0"]
-
-    if sql_type == "WHENEVER":
-        return _translate_whenever(block)
-
-    if sql_type in ("DECLARE", "OPEN", "FETCH", "CLOSE"):
-        lines = _translate_cursor_ops(block)
-        if sql_type in ("OPEN", "FETCH", "CLOSE"):
+    match sql_type:
+        case "INCLUDE":
+            return ["# SQL: INCLUDE SQLCA — SQL Communication Area", "self._sqlcode = 0"]
+        case "WHENEVER":
+            return _translate_whenever(block)
+        case "DECLARE":
+            return _translate_cursor_ops(block)
+        case "OPEN" | "FETCH" | "CLOSE":
+            lines = _translate_cursor_ops(block)
             lines.extend(_emit_whenever_check())
-        return lines
-
-    if sql_type in ("SELECT", "INSERT", "UPDATE", "DELETE"):
-        lines = _translate_sql_query(block)
-        lines.extend(_emit_whenever_check())
-        return lines
-
-    if sql_type == "COMMIT":
-        lines = ["# SQL: COMMIT", "self._sql_connection.commit()", "self._sqlcode = 0"]
-        lines.extend(_emit_whenever_check())
-        return lines
-
-    if sql_type == "ROLLBACK":
-        lines = ["# SQL: ROLLBACK", "self._sql_connection.rollback()", "self._sqlcode = 0"]
-        lines.extend(_emit_whenever_check())
-        return lines
-
-    return [f"# SQL: (unrecognized type: {sql_type})", f"# {block.raw_sql}"]
+            return lines
+        case "SELECT" | "INSERT" | "UPDATE" | "DELETE":
+            lines = _translate_sql_query(block)
+            lines.extend(_emit_whenever_check())
+            return lines
+        case "COMMIT":
+            lines = ["# SQL: COMMIT", "self._sql_connection.commit()", "self._sqlcode = 0"]
+            lines.extend(_emit_whenever_check())
+            return lines
+        case "ROLLBACK":
+            lines = ["# SQL: ROLLBACK", "self._sql_connection.rollback()", "self._sqlcode = 0"]
+            lines.extend(_emit_whenever_check())
+            return lines
+        case _:
+            return [f"# SQL: (unrecognized type: {sql_type})", f"# {block.raw_sql}"]
 
 
 def _translate_whenever(block: SqlBlock) -> list[str]:

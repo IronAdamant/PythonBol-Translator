@@ -94,6 +94,8 @@ class PythonMapper(CodegenMixin, ScreenCodegenMixin, VerbTranslationMixin):
         for sf in self.program.screen_section:
             if sf.name:
                 self._screen_lookup[sf.name.upper()] = sf
+        # Redefines wiring lines emitted by _generate_redefines_field
+        self._redefines_wiring: list[str] = []
         self._verb_handlers = {
             "DISPLAY": lambda s: self._translate_display_or_screen(s),
             "MOVE": lambda s: self._translate_move(s.operands),

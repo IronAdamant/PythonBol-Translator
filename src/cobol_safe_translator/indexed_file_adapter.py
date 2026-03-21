@@ -63,52 +63,37 @@ class IndexedFileAdapter:
         )
         self._db.commit()
 
-    def open_input(self) -> None:
-        """OPEN INPUT -- read-only sequential or random access."""
+    def _open(self, cobol_mode: str, *, clear_table: bool = False,
+              seq_position: bool = False, error_status: str = "30") -> None:
+        """Shared open logic for all OPEN variants."""
         try:
             self._db = sqlite3.connect(self._db_path())
+            if clear_table:
+                self._db.execute("DROP TABLE IF EXISTS records")
             self._ensure_table()
-            self._mode = "INPUT"
+            self._mode = cobol_mode
             self._eof = False
-            self._seq_position = 0
+            if seq_position:
+                self._seq_position = 0
             self._status = "00"
         except Exception:
-            self._status = "35"
+            self._status = error_status
+
+    def open_input(self) -> None:
+        """OPEN INPUT -- read-only sequential or random access."""
+        self._open("INPUT", seq_position=True, error_status="35")
 
     def open_output(self) -> None:
         """OPEN OUTPUT -- create/replace the file."""
-        try:
-            self._db = sqlite3.connect(self._db_path())
-            self._db.execute("DROP TABLE IF EXISTS records")
-            self._ensure_table()
-            self._mode = "OUTPUT"
-            self._eof = False
-            self._status = "00"
-        except Exception:
-            self._status = "30"
+        self._open("OUTPUT", clear_table=True)
 
     def open_io(self) -> None:
         """OPEN I-O -- read and write."""
-        try:
-            self._db = sqlite3.connect(self._db_path())
-            self._ensure_table()
-            self._mode = "I-O"
-            self._eof = False
-            self._seq_position = 0
-            self._status = "00"
-        except Exception:
-            self._status = "30"
+        self._open("I-O", seq_position=True)
 
     def open_extend(self) -> None:
         """OPEN EXTEND -- append mode."""
-        try:
-            self._db = sqlite3.connect(self._db_path())
-            self._ensure_table()
-            self._mode = "EXTEND"
-            self._eof = False
-            self._status = "00"
-        except Exception:
-            self._status = "30"
+        self._open("EXTEND")
 
     def read(self, key: str | None = None) -> str | None:
         """READ -- sequential or random.

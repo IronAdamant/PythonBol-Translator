@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .utils import _is_numeric_literal
+from .utils import BITWISE_OPS as _BITWISE_OPS, EXPR_OPERATORS as _EXPR_OPERATORS, _is_numeric_literal
 
 
 # No-arg intrinsics (FUNCTION CURRENT-DATE, FUNCTION WHEN-COMPILED)
@@ -84,14 +84,7 @@ _FUNCTION_INTRINSICS_VAR: dict[str, str] = {
     "CONCATENATE": "''.join(str(_a) for _a in [{args}])",
 }
 
-_EXPR_OPERATORS = frozenset({'+', '-', '*', '/', '**', '(', ')'})
 _ARITH_EXPR_OPS = frozenset({'+', '-', '*', '/', '**'})
-
-# COBOL bitwise operators → Python equivalents
-_BITWISE_OPS: dict[str, str] = {
-    "B-AND": "&", "B-OR": "|", "B-XOR": "^", "B-NOT": "~",
-    "B-SHIFT-L": "<<", "B-SHIFT-R": ">>",
-}
 
 
 def _split_args_by_comma(raw_args: str) -> list[str] | None:

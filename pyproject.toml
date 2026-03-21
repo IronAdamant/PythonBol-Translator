@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cobol-safe-translator"
-version = "1.1.1"
+version = "1.1.2"
 description = "Translate COBOL to Python. Zero dependencies, 100% valid output on 5,288 files. MCP server for AI coding assistants."
 requires-python = ">=3.11"
 license = "MIT"

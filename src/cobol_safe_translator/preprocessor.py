@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 
 from .exec_block_handler import strip_exec_blocks
-from .models import SqlBlock
+from .models import DliBlock, SqlBlock
 
 # Copybook file extensions to try when searching (in order)
 _COPYBOOK_EXTENSIONS = (
@@ -37,13 +37,6 @@ _COPY_START_RE = re.compile(
 # Also match free-format COPY (no column constraints, for already-preprocessed lines)
 _COPY_FREE_RE = re.compile(
     r"^\s*COPY\s+['\"]?([\w.+-]+)['\"]?\s*",
-    re.IGNORECASE,
-)
-
-# Pseudo-text replacement pair with optional LEADING/TRAILING qualifier:
-#   [LEADING|TRAILING] ==(text)== BY ==(text)==
-_REPLACING_PSEUDO_RE = re.compile(
-    r"(?:LEADING|TRAILING)?\s*==\s*(.*?)\s*==\s+BY\s+==\s*(.*?)\s*==",
     re.IGNORECASE,
 )
 
@@ -336,7 +329,7 @@ def resolve_copies(
     *,
     source_dir: str | Path | None = None,
     copy_paths: list[str | Path] | None = None,
-) -> tuple[str, list[SqlBlock]]:
+) -> tuple[str, list[SqlBlock], list[DliBlock]]:
     """Resolve COPY statements and strip EXEC blocks from raw COBOL source.
 
     Args:
@@ -350,10 +343,11 @@ def resolve_copies(
             searched after *source_dir* and before its subdirectories.
 
     Returns:
-        Tuple of (preprocessed_text, sql_blocks) where preprocessed_text
-        has COPY statements resolved and EXEC blocks replaced with TODO
-        comments, and sql_blocks contains structured metadata for each
-        EXEC SQL block found.
+        Tuple of (preprocessed_text, sql_blocks, dli_blocks) where
+        preprocessed_text has COPY statements resolved and EXEC blocks
+        replaced with TODO comments, sql_blocks contains structured
+        metadata for each EXEC SQL block, and dli_blocks contains
+        metadata for each EXEC DLI block found.
     """
     result = raw_text
 

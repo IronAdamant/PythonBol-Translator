@@ -9,22 +9,13 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from .function_translators import _resolve_expr_ext
-from .utils import _upper_ops, resolve_target as _resolve_target
+from .utils import BITWISE_OPS as _BITWISE_OPS, EXPR_OPERATORS as _COMPUTE_OPERATORS, _upper_ops, resolve_target as _resolve_target
 
 
 # Keywords that should be filtered from arithmetic operand/target lists
 _ARITHMETIC_KEYWORDS = frozenset({
     "ROUNDED", "ON", "SIZE", "ERROR", "NOT",
 })
-
-# Valid operators inside COMPUTE expressions
-_COMPUTE_OPERATORS = frozenset({"+", "-", "*", "/", "(", ")", "**"})
-
-# COBOL bitwise operators → Python equivalents
-_BITWISE_OPS: dict[str, str] = {
-    "B-AND": "&", "B-OR": "|", "B-XOR": "^", "B-NOT": "~",
-    "B-SHIFT-L": "<<", "B-SHIFT-R": ">>",
-}
 
 
 def translate_add(

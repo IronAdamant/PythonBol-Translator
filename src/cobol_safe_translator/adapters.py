@@ -397,57 +397,35 @@ class FileAdapter:
         """COBOL FILE STATUS code: "00"=success, "10"=EOF, "35"=not found, "30"=I/O error."""
         return self._status
 
-    def open_input(self) -> None:
-        """OPEN INPUT equivalent — sequential read."""
+    def _open(self, file_mode: str, cobol_mode: str, *, not_found_status: str = "30") -> None:
+        """Shared open logic for all OPEN variants."""
         if self._file is not None:
             self.close()
         try:
-            self._file = open(self.path, "r", encoding=self.encoding)
+            self._file = open(self.path, file_mode, encoding=self.encoding)
             self._eof = False
-            self._mode = "INPUT"
+            self._mode = cobol_mode
             self._status = "00"
         except FileNotFoundError:
-            self._status = "35"
+            self._status = not_found_status
         except OSError:
             self._status = "30"
+
+    def open_input(self) -> None:
+        """OPEN INPUT equivalent — sequential read."""
+        self._open("r", "INPUT", not_found_status="35")
 
     def open_output(self) -> None:
         """OPEN OUTPUT equivalent — create/truncate for writing."""
-        if self._file is not None:
-            self.close()
-        try:
-            self._file = open(self.path, "w", encoding=self.encoding)
-            self._eof = False
-            self._mode = "OUTPUT"
-            self._status = "00"
-        except OSError:
-            self._status = "30"
+        self._open("w", "OUTPUT")
 
     def open_extend(self) -> None:
         """OPEN EXTEND equivalent — append to existing file."""
-        if self._file is not None:
-            self.close()
-        try:
-            self._file = open(self.path, "a", encoding=self.encoding)
-            self._eof = False
-            self._mode = "EXTEND"
-            self._status = "00"
-        except OSError:
-            self._status = "30"
+        self._open("a", "EXTEND")
 
     def open_io(self) -> None:
         """OPEN I-O equivalent — read and write."""
-        if self._file is not None:
-            self.close()
-        try:
-            self._file = open(self.path, "r+", encoding=self.encoding)
-            self._eof = False
-            self._mode = "I-O"
-            self._status = "00"
-        except FileNotFoundError:
-            self._status = "35"
-        except OSError:
-            self._status = "30"
+        self._open("r+", "I-O", not_found_status="35")
 
     def read(self) -> str | None:
         """READ equivalent. Returns next line or None at EOF."""

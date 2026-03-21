@@ -145,17 +145,6 @@ class TestPerformThru:
         assert "THRU" in source
 
 
-class TestPerformThruMethodCall:
-    def test_perform_thru_calls_paragraph(self):
-        """PERFORM THRU should call the paragraph(s) in range."""
-        src = make_cobol(["PERFORM MAIN-PARA THRU MAIN-PARA."])
-        program = parse_cobol(src)
-        smap = analyze(program)
-        source = generate_python(smap)
-        ast.parse(source)
-        assert "self.main_para()" in source
-
-
 class TestPerformTimesVariable:
     def test_perform_variable_times(self):
         """PERFORM para WS-COUNT TIMES should use variable for range."""

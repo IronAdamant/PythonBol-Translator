@@ -27,60 +27,52 @@ def translate_accept(ops: list[str], raw: str) -> list[str]:
     if "FROM" in upper_ops:
         from_idx = upper_ops.index("FROM")
         source = upper_ops[from_idx + 1] if from_idx + 1 < len(upper_ops) else ""
-        if source == "DATE":
-            # Check for YYYYMMDD modifier (4-digit year variant)
-            next_token = upper_ops[from_idx + 2] if from_idx + 2 < len(upper_ops) else ""
-            if next_token == "YYYYMMDD":
+        next_token = upper_ops[from_idx + 2] if from_idx + 2 < len(upper_ops) else ""
+        match source:
+            case "DATE":
+                fmt = '%Y%m%d' if next_token == "YYYYMMDD" else '%y%m%d'
                 return [
                     "import datetime as _dt",
-                    f"self.data.{target}.set(_dt.datetime.now().strftime('%Y%m%d'))",
+                    f"self.data.{target}.set(_dt.datetime.now().strftime('{fmt}'))",
                 ]
-            return [
-                "import datetime as _dt",
-                f"self.data.{target}.set(_dt.datetime.now().strftime('%y%m%d'))",
-            ]
-        if source == "DAY":
-            next_token = upper_ops[from_idx + 2] if from_idx + 2 < len(upper_ops) else ""
-            if next_token == "YYYYDDD":
+            case "DAY":
+                fmt = '%Y%j' if next_token == "YYYYDDD" else '%y%j'
                 return [
                     "import datetime as _dt",
-                    f"self.data.{target}.set(_dt.datetime.now().strftime('%Y%j'))",
+                    f"self.data.{target}.set(_dt.datetime.now().strftime('{fmt}'))",
                 ]
-            return [
-                "import datetime as _dt",
-                f"self.data.{target}.set(_dt.datetime.now().strftime('%y%j'))",
-            ]
-        if source == "DAY-OF-WEEK":
-            return [
-                "import datetime as _dt",
-                f"self.data.{target}.set(str(_dt.datetime.now().isoweekday()))",
-            ]
-        if source == "TIME":
-            return [
-                "import datetime as _dt",
-                f"self.data.{target}.set(_dt.datetime.now().strftime('%H%M%S%f')[:8])",
-            ]
-        if source in ("ENVIRONMENT-NAME", "ENVIRONMENT-VALUE"):
-            env_name = ops[from_idx + 2] if from_idx + 2 < len(ops) else ""
-            if env_name:
+            case "DAY-OF-WEEK":
+                return [
+                    "import datetime as _dt",
+                    f"self.data.{target}.set(str(_dt.datetime.now().isoweekday()))",
+                ]
+            case "TIME":
+                return [
+                    "import datetime as _dt",
+                    f"self.data.{target}.set(_dt.datetime.now().strftime('%H%M%S%f')[:8])",
+                ]
+            case "ENVIRONMENT-NAME" | "ENVIRONMENT-VALUE":
+                env_name = ops[from_idx + 2] if from_idx + 2 < len(ops) else ""
+                if env_name:
+                    return [
+                        "import os as _os",
+                        f"self.data.{target}.set(_os.environ.get({env_name!r}, ''))",
+                    ]
                 return [
                     "import os as _os",
-                    f"self.data.{target}.set(_os.environ.get({env_name!r}, ''))",
+                    f"self.data.{target}.set(_os.environ.get('', ''))"
+                    f"  # TODO(high): specify environment variable name",
                 ]
-            return [
-                "import os as _os",
-                f"self.data.{target}.set(_os.environ.get('', ''))"
-                f"  # TODO(high): specify environment variable name",
-            ]
-        if source in ("COMMAND-LINE", "ARGUMENT-NUMBER", "ARGUMENT-VALUE"):
-            return [
-                "import sys as _sys",
-                f"self.data.{target}.set(' '.join(_sys.argv[1:]))",
-            ]
-        return [
-            f"# ACCEPT {ops[0]} FROM {source}",
-            f"# TODO(high): ACCEPT FROM {source} — unsupported source",
-        ]
+            case "COMMAND-LINE" | "ARGUMENT-NUMBER" | "ARGUMENT-VALUE":
+                return [
+                    "import sys as _sys",
+                    f"self.data.{target}.set(' '.join(_sys.argv[1:]))",
+                ]
+            case _:
+                return [
+                    f"# ACCEPT {ops[0]} FROM {source}",
+                    f"# TODO(high): ACCEPT FROM {source} — unsupported source",
+                ]
 
     # Plain ACCEPT — user input
     return [f"self.data.{target}.set(input())"]

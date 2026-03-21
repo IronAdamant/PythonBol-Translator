@@ -350,7 +350,7 @@ def _parse_88_condition(line: str) -> ConditionName | None:
 
 def _strip_quotes(s: str) -> str:
     """Remove surrounding quotes from a string value."""
-    if len(s) >= 2 and ((s[0] == '"' and s[-1] == '"') or (s[0] == "'" and s[-1] == "'")):
+    if len(s) >= 2 and s[0] in ('"', "'") and s[-1] == s[0]:
         return s[1:-1]
     return s
 
